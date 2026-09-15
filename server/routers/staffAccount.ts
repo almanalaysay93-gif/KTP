@@ -109,7 +109,14 @@ export const staffAccountRouter = router({
         ...t,
         trainingName: catalogById.get(t.trainingId) ?? "Training",
       })),
-      assignments,
+      assignments: assignments.map((a) => {
+        const area = areaById.get(a.areaId) ?? null;
+        return {
+          ...a,
+          area,
+          areaName: area?.name ?? "Unknown",
+        };
+      }),
       authMode: ctx.authMode,
     };
   }),

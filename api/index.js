@@ -3478,7 +3478,7 @@ var nursesRouter = router({
                  from nursetrack."areaTrainingRequirements"`
         ].join(";\n")
       ).simple();
-      const [nurseRows, areaRows2, credTypes2, catalog2, rawAssignments, rawCreds2, rawTrainings2, areaReqs] = sets;
+      const [nurseRows, areaRows2, credTypes2, catalog2, rawAssignments2, rawCreds2, rawTrainings2, areaReqs] = sets;
       const nurse2 = nurseRows[0];
       if (!nurse2) throw new TRPCError2({ code: "NOT_FOUND", message: "Nurse not found" });
       const areaById2 = new Map(areaRows2.map((a) => [a.id, a]));
@@ -3497,13 +3497,18 @@ var nursesRouter = router({
         ...r,
         trainingName: catById2.get(r.trainingId)?.name ?? "Unknown"
       }));
-      const assignments2 = rawAssignments.map((a) => ({
-        ...a,
-        areaName: areaById2.get(a.areaId)?.name ?? "Unknown"
-      }));
+      const assignments2 = rawAssignments2.map((a) => {
+        const area = areaById2.get(a.areaId) ?? null;
+        return {
+          ...a,
+          area,
+          areaName: area?.name ?? "Unknown"
+        };
+      });
+      const effectiveAreaId2 = nurse2.currentAreaId ?? rawAssignments2.find((a) => a.isCurrent)?.areaId ?? null;
       let compliance2 = null;
-      if (nurse2.currentAreaId) {
-        const requiredIds = areaReqs.filter((r) => r.areaId === nurse2.currentAreaId && r.required).map((r) => r.trainingId);
+      if (effectiveAreaId2) {
+        const requiredIds = areaReqs.filter((r) => r.areaId === effectiveAreaId2 && r.required).map((r) => r.trainingId);
         const comp = trainingCompliance({
           requiredTrainingIds: requiredIds,
           nurseTrainingRecords: rawTrainings2.map((r) => ({
@@ -3522,7 +3527,7 @@ var nursesRouter = router({
       return {
         nurse: {
           ...nurse2,
-          currentArea: nurse2.currentAreaId ? areaById2.get(nurse2.currentAreaId) ?? null : null,
+          currentArea: effectiveAreaId2 ? areaById2.get(effectiveAreaId2) ?? null : null,
           licenseStatus,
           licenseNumber
         },
@@ -3536,7 +3541,7 @@ var nursesRouter = router({
     }
     const nurse = await getNurseById(input.id);
     if (!nurse) throw new TRPCError2({ code: "NOT_FOUND", message: "Nurse not found" });
-    const [areaRows, licenseInfo, assignments, rawCreds, rawTrainings, credTypes, catalog] = await Promise.all([
+    const [areaRows, licenseInfo, rawAssignments, rawCreds, rawTrainings, credTypes, catalog] = await Promise.all([
       listAreas(false),
       getNurseLicenseInfo(nurse.id),
       listAssignmentsForNurse(nurse.id),
@@ -3548,6 +3553,15 @@ var nursesRouter = router({
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     const credTypeById = new Map(credTypes.map((t2) => [t2.id, t2]));
     const catById = new Map(catalog.map((t2) => [t2.id, t2]));
+    const assignments = rawAssignments.map((a) => {
+      const area = areaById.get(a.areaId) ?? null;
+      return {
+        ...a,
+        area,
+        areaName: area?.name ?? "Unknown"
+      };
+    });
+    const effectiveAreaId = nurse.currentAreaId ?? rawAssignments.find((a) => a.isCurrent)?.areaId ?? null;
     const credentials = rawCreds.map((c) => ({
       ...c,
       typeName: credTypeById.get(c.credentialTypeId)?.name ?? "Unknown",
@@ -3559,8 +3573,8 @@ var nursesRouter = router({
       trainingName: catById.get(r.trainingId)?.name ?? "Unknown"
     }));
     let compliance = null;
-    if (nurse.currentAreaId) {
-      const requiredIds = await getAreaTrainingRequirementIds(nurse.currentAreaId);
+    if (effectiveAreaId) {
+      const requiredIds = await getAreaTrainingRequirementIds(effectiveAreaId);
       const comp = trainingCompliance({
         requiredTrainingIds: requiredIds,
         nurseTrainingRecords: rawTrainings.map((r) => ({
@@ -3579,7 +3593,7 @@ var nursesRouter = router({
     return {
       nurse: {
         ...nurse,
-        currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
+        currentArea: effectiveAreaId ? areaById.get(effectiveAreaId) ?? null : null,
         licenseStatus: licenseInfo.status,
         licenseNumber: licenseInfo.licenseNumber
       },
@@ -7435,7 +7449,14 @@ var staffAccountRouter = router({
         ...t2,
         trainingName: catalogById.get(t2.trainingId) ?? "Training"
       })),
-      assignments,
+      assignments: assignments.map((a) => {
+        const area = areaById.get(a.areaId) ?? null;
+        return {
+          ...a,
+          area,
+          areaName: area?.name ?? "Unknown"
+        };
+      }),
       authMode: ctx.authMode
     };
   }),

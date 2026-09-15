@@ -143,15 +143,21 @@ export const nursesRouter = router({
           trainingName: catById.get(r.trainingId)?.name ?? "Unknown",
         }));
 
-        const assignments = rawAssignments.map((a: any) => ({
-          ...a,
-          areaName: areaById.get(a.areaId)?.name ?? "Unknown",
-        }));
+        const assignments = rawAssignments.map((a: any) => {
+          const area = areaById.get(a.areaId) ?? null;
+          return {
+            ...a,
+            area,
+            areaName: area?.name ?? "Unknown",
+          };
+        });
+
+        const effectiveAreaId = nurse.currentAreaId ?? rawAssignments.find((a: any) => a.isCurrent)?.areaId ?? null;
 
         let compliance: { compliancePercent: number; requiredCount: number; completedCount: number } | null = null;
-        if (nurse.currentAreaId) {
+        if (effectiveAreaId) {
           const requiredIds = areaReqs
-            .filter((r: any) => r.areaId === nurse.currentAreaId && r.required)
+            .filter((r: any) => r.areaId === effectiveAreaId && r.required)
             .map((r: any) => r.trainingId);
           const comp = trainingCompliance({
             requiredTrainingIds: requiredIds,
@@ -172,7 +178,7 @@ export const nursesRouter = router({
         return {
           nurse: {
             ...nurse,
-            currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
+            currentArea: effectiveAreaId ? areaById.get(effectiveAreaId) ?? null : null,
             licenseStatus,
             licenseNumber,
           },
@@ -189,7 +195,7 @@ export const nursesRouter = router({
       const nurse = await db.getNurseById(input.id);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Nurse not found" });
 
-      const [areaRows, licenseInfo, assignments, rawCreds, rawTrainings, credTypes, catalog] = await Promise.all([
+      const [areaRows, licenseInfo, rawAssignments, rawCreds, rawTrainings, credTypes, catalog] = await Promise.all([
         db.listAreas(false),
         db.getNurseLicenseInfo(nurse.id),
         db.listAssignmentsForNurse(nurse.id),
@@ -202,6 +208,17 @@ export const nursesRouter = router({
       const areaById = new Map(areaRows.map((a) => [a.id, a]));
       const credTypeById = new Map(credTypes.map((t) => [t.id, t]));
       const catById = new Map(catalog.map((t) => [t.id, t]));
+
+      const assignments = rawAssignments.map((a: any) => {
+        const area = areaById.get(a.areaId) ?? null;
+        return {
+          ...a,
+          area,
+          areaName: area?.name ?? "Unknown",
+        };
+      });
+
+      const effectiveAreaId = nurse.currentAreaId ?? rawAssignments.find((a: any) => a.isCurrent)?.areaId ?? null;
 
       const credentials = rawCreds.map((c) => ({
         ...c,
@@ -216,8 +233,8 @@ export const nursesRouter = router({
       }));
 
       let compliance: { compliancePercent: number; requiredCount: number; completedCount: number } | null = null;
-      if (nurse.currentAreaId) {
-        const requiredIds = await db.getAreaTrainingRequirementIds(nurse.currentAreaId);
+      if (effectiveAreaId) {
+        const requiredIds = await db.getAreaTrainingRequirementIds(effectiveAreaId);
         const comp = trainingCompliance({
           requiredTrainingIds: requiredIds,
           nurseTrainingRecords: rawTrainings.map((r) => ({
@@ -237,7 +254,7 @@ export const nursesRouter = router({
       return {
         nurse: {
           ...nurse,
-          currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
+          currentArea: effectiveAreaId ? areaById.get(effectiveAreaId) ?? null : null,
           licenseStatus: licenseInfo.status,
           licenseNumber: licenseInfo.licenseNumber,
         },

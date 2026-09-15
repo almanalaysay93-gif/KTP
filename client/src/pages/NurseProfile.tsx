@@ -90,6 +90,11 @@ export default function NurseProfile() {
   const compliance = profileData?.compliance;
   const catalog = profileData?.catalog;
 
+  const areaMap = useMemo(
+    () => new Map((profileData?.areas ?? []).map((a) => [a.id, a.name])),
+    [profileData?.areas],
+  );
+
   const stats = useMemo(() => {
     const hire = nurse?.dateHired ? new Date(nurse.dateHired).getTime() : null;
     const experienceYears = hire ? Math.max(0, (Date.now() - hire) / (1000 * 60 * 60 * 24 * 365)).toFixed(1) : "—";
@@ -257,6 +262,7 @@ export default function NurseProfile() {
             <p className="text-sm text-muted-foreground">
               <span className="font-mono">{nurseIdLabel(nurse)}</span>
               {nurse.position ? ` · ${nurse.position}` : ""}
+              {(nurse.currentArea?.name ?? areaMap.get(nurse.currentAreaId ?? 0)) ? ` · ${nurse.currentArea?.name ?? areaMap.get(nurse.currentAreaId ?? 0)}` : ""}
               {nurse.dateHired ? ` · Hired ${formatDate(nurse.dateHired)}` : ""}
             </p>
           </div>
@@ -358,7 +364,7 @@ export default function NurseProfile() {
                       {(assignments ?? []).map((a) => (
                         <tr key={a.id} className={a.isCurrent ? "bg-accent/40" : undefined}>
                           <td className="px-3 py-2.5 font-medium">
-                            {a.area?.name ?? `Area #${a.areaId}`}
+                            {a.area?.name ?? a.areaName ?? areaMap.get(a.areaId) ?? (a.areaId ? `Area (${a.areaId})` : "Unassigned")}
                             {a.isCurrent && <span className="ml-2 text-xs text-primary">Current</span>}
                           </td>
                           <td className="px-3 py-2.5 text-muted-foreground">{a.assignmentType ?? "—"}</td>
@@ -529,7 +535,7 @@ export default function NurseProfile() {
               <CardContent className="pt-5 space-y-2.5 text-sm">
                 <DetailRow
                   label="Current Area"
-                  value={nurse.currentArea ? nurse.currentArea.name : "Unassigned"}
+                  value={nurse.currentArea?.name ?? areaMap.get(nurse.currentAreaId ?? 0) ?? "Unassigned"}
                 />
                 <DetailRow label="Employment Status" value={nurse.employmentStatus ?? "Active"} />
                 <DetailRow label="Archived" value={nurse.archivedAt ? formatDate(nurse.archivedAt) : "No"} />
