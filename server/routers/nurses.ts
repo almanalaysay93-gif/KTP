@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import { ASSIGNMENT_TYPES, EMPLOYMENT_STATUSES, STAFF_TYPES, storageKey, validateMime, nurseFullName, dateKey } from "../../shared/nursetrack";
+import { ASSIGNMENT_TYPES, EMPLOYMENT_STATUSES, STAFF_TYPES, storageKey, validateMime, nurseFullName, dateKey, daysUntilExpiry, deriveLicenseStatus, trainingCompliance } from "../../shared/nursetrack";
 import { sanitizeFilename } from "../../shared/nursetrack";
 import { storagePut } from "../storage";
 
@@ -76,6 +76,72 @@ export const nursesRouter = router({
       const areaById = new Map(areaRows.map((a) => [a.id, a]));
       const { status, licenseNumber } = await db.getNurseLicenseInfo(nurse.id);
       return { ...nurse, currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null, licenseStatus: status, licenseNumber };
+    }),
+
+  profile: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const nurse = await db.getNurseById(input.id);
+      if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Nurse not found" });
+
+      const [areaRows, licenseInfo, assignments, rawCreds, rawTrainings, credTypes, catalog] = await Promise.all([
+        db.listAreas(false),
+        db.getNurseLicenseInfo(nurse.id),
+        db.listAssignmentsForNurse(nurse.id),
+        db.listCredentials({ nurseId: nurse.id }),
+        db.listNurseTrainings({ nurseId: nurse.id }),
+        db.listCredentialTypes(),
+        db.listTrainingCatalog(false),
+      ]);
+
+      const areaById = new Map(areaRows.map((a) => [a.id, a]));
+      const credTypeById = new Map(credTypes.map((t) => [t.id, t]));
+      const catById = new Map(catalog.map((t) => [t.id, t]));
+
+      const credentials = rawCreds.map((c) => ({
+        ...c,
+        typeName: credTypeById.get(c.credentialTypeId)?.name ?? "Unknown",
+        derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
+        daysRemaining: daysUntilExpiry(dateKey(c.expiryDate)),
+      }));
+
+      const trainings = rawTrainings.map((r) => ({
+        ...r,
+        trainingName: catById.get(r.trainingId)?.name ?? "Unknown",
+      }));
+
+      let compliance: { compliancePercent: number; requiredCount: number; completedCount: number } | null = null;
+      if (nurse.currentAreaId) {
+        const requiredIds = await db.getAreaTrainingRequirementIds(nurse.currentAreaId);
+        const comp = trainingCompliance({
+          requiredTrainingIds: requiredIds,
+          nurseTrainingRecords: rawTrainings.map((r) => ({
+            trainingId: r.trainingId,
+            status: r.status,
+            expiryDate: r.expiryDate,
+            completionDate: r.completionDate,
+          })),
+        });
+        const completedValid = requiredIds.filter((tid) => {
+          const recs = rawTrainings.filter((r) => r.trainingId === tid && r.status === "Completed");
+          return recs.some((r) => !r.expiryDate || new Date(r.expiryDate) > new Date());
+        }).length;
+        compliance = { compliancePercent: comp, requiredCount: requiredIds.length, completedCount: completedValid };
+      }
+
+      return {
+        nurse: {
+          ...nurse,
+          currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
+          licenseStatus: licenseInfo.status,
+          licenseNumber: licenseInfo.licenseNumber,
+        },
+        assignments,
+        credentials,
+        trainings,
+        compliance,
+        catalog,
+      };
     }),
 
   create: adminProcedure

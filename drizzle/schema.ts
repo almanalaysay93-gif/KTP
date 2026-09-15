@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   customType,
@@ -108,6 +109,9 @@ export const nurses = pgTable(
     index("idx_nurses_lastname").on(t.lastName),
     index("idx_nurses_area").on(t.currentAreaId),
     uniqueIndex("idx_nurses_linked_user").on(t.linkedUserId),
+    // Case-insensitive: `accountEmail` is the staff sign-in identity, so
+    // "Nurse@x.com" and "nurse@x.com" must not both be claimable.
+    uniqueIndex("idx_nurses_account_email").on(sql`lower(${t.accountEmail})`),
   ],
 );
 export type Nurse = typeof nurses.$inferSelect;

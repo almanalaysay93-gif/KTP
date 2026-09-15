@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Redirect } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { startLogin } from "@/const";
@@ -39,47 +40,95 @@ function StaffShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function LinkAccountForm() {
-  const [prcNumber, setPrcNumber] = useState("");
-  const [fullName, setFullName] = useState("");
+/** First-visit banner (claim session): save Gmail, then it locks to Google (D3, D7). */
+function ClaimEmailCard({ accountEmail }: { accountEmail: string | null }) {
+  const [email, setEmail] = useState("");
   const utils = trpc.useUtils();
-  const linkMutation = trpc.staffAccount.linkByPrc.useMutation({
+  const saveMutation = trpc.staffAccount.saveClaimEmail.useMutation({
     onSuccess: () => {
-      toast.success("Linked! Loading your profile...");
-      utils.staffAccount.myLink.invalidate();
+      toast.success("Saved. Next time, sign in with Google using this Gmail.");
       utils.staffAccount.myProfile.invalidate();
     },
     onError: (err) => toast.error(err.message),
   });
 
+  if (accountEmail) {
+    return (
+      <Card className="glass-card p-4 border-amber-400/60 bg-amber-50/60 dark:bg-amber-950/20 space-y-3">
+        <div>
+          <p className="text-sm font-medium">Next time, sign in with Google using this Gmail.</p>
+          <p className="text-sm text-muted-foreground">{accountEmail}</p>
+        </div>
+        <Button variant="outline" onClick={() => startLogin()}>Continue with Google</Button>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="glass-card p-6 space-y-4">
-      <div>
-        <h1 className="text-xl font-bold">Link your account</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Your account isn't linked to a staff profile yet. Enter your PRC / license number and your full name
-          exactly as your supervisor recorded it to link your Google account.
-        </p>
+    <Card className="glass-card p-4 border-amber-400/60 bg-amber-50/60 dark:bg-amber-950/20 space-y-3">
+      <p className="text-sm font-medium">First visit. Save your Gmail before this session ends.</p>
+      <div className="flex gap-2">
+        <Input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@gmail.com"
+        />
+        <Button
+          disabled={!email.trim() || saveMutation.isPending}
+          onClick={() => saveMutation.mutate({ email: email.trim() })}
+        >
+          {saveMutation.isPending ? "Saving..." : "Save"}
+        </Button>
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="prcNumber">PRC / License Number</Label>
-        <Input id="prcNumber" value={prcNumber} onChange={(e) => setPrcNumber(e.target.value)} placeholder="e.g. 0123456" />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="fullName">Full Name</Label>
-        <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Juan Dela Cruz" />
-      </div>
-      <Button
-        className="w-full"
-        disabled={!prcNumber.trim() || !fullName.trim() || linkMutation.isPending}
-        onClick={() => linkMutation.mutate({ prcNumber: prcNumber.trim(), fullName: fullName.trim() })}
-      >
-        {linkMutation.isPending ? "Linking..." : "Link my account"}
-      </Button>
-      <p className="text-xs text-muted-foreground">
-        Not working? Contact your supervisor to confirm your PRC number and name are on file.
-      </p>
     </Card>
+  );
+}
+
+/** Google session only (D6): change the sign-in Gmail. */
+function ChangeEmailButton({ currentEmail }: { currentEmail: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const utils = trpc.useUtils();
+  const changeMutation = trpc.staffAccount.changeEmail.useMutation({
+    onSuccess: () => {
+      toast.success("Sign-in email changed. Use it next time you sign in with Google.");
+      utils.staffAccount.myProfile.invalidate();
+      setOpen(false);
+      setEmail("");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  return (
+    <>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
+        Change sign-in email
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change sign-in email</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Current: {currentEmail ?? "—"}</p>
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="new-address@gmail.com"
+            />
+            <Button
+              className="w-full"
+              disabled={!email.trim() || changeMutation.isPending}
+              onClick={() => changeMutation.mutate({ email: email.trim() })}
+            >
+              {changeMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -257,6 +306,8 @@ function MyProfileView() {
 
   return (
     <div className="space-y-4">
+      {profile.authMode === "claim" ? <ClaimEmailCard accountEmail={profile.accountEmail} /> : null}
+
       <Card className="glass-card p-6">
         <div className="flex items-center gap-4">
           <div className="relative">
@@ -270,13 +321,14 @@ function MyProfileView() {
             <p className="text-sm text-muted-foreground">{profile.currentArea?.name ?? "Unassigned"}</p>
           </div>
         </div>
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           <FileUploadButton
             kind="photo"
             label="Change photo"
             disabled={photoMutation.isPending}
             onFile={(file) => photoMutation.mutate(file)}
           />
+          {profile.authMode === "google" ? <ChangeEmailButton currentEmail={profile.accountEmail} /> : null}
         </div>
       </Card>
 
@@ -313,7 +365,7 @@ function MyProfileView() {
           <p className="text-sm text-muted-foreground py-2">No credentials recorded.</p>
         ) : (
           <div className="space-y-3">
-            {profile.credentials.map((c) => (
+            {profile.credentials.map((c: any) => (
               <div key={c.id} className="p-3 border rounded-lg bg-card/40 flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-1 min-w-48">
                   <div className="font-medium text-sm">{c.typeName}</div>
@@ -353,7 +405,7 @@ function MyProfileView() {
           <p className="text-sm text-muted-foreground py-2">No training records on file yet.</p>
         ) : (
           <div className="space-y-3">
-            {profile.trainings.map((t) => (
+            {profile.trainings.map((t: any) => (
               <div key={t.id} className="p-3 border rounded-lg bg-card/40 flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-1 min-w-48">
                   <div className="font-medium text-sm">{t.trainingName}</div>
@@ -389,10 +441,12 @@ function MyProfileView() {
 }
 
 export default function MyProfilePage() {
-  const { user, loading } = useAuth();
-  const { data: link, isLoading: linkLoading } = trpc.staffAccount.myLink.useQuery(undefined, { enabled: Boolean(user) });
+  const { loading: authLoading } = useAuth();
+  // staffAccount.myLink accepts either a linked Google session or a valid
+  // claim cookie — it runs regardless of whether useAuth() resolved a user.
+  const linkQuery = trpc.staffAccount.myLink.useQuery(undefined, { retry: false });
 
-  if (loading) {
+  if (authLoading || linkQuery.isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Skeleton className="h-40 w-full max-w-2xl mx-4" />
@@ -400,32 +454,15 @@ export default function MyProfilePage() {
     );
   }
 
-  if (!user) {
-    return (
-      <div className="flex items-center justify-center min-h-screen p-4">
-        <div className="auth-welcome-panel flex flex-col items-center gap-8 p-8 max-w-md w-full">
-          <div className="flex flex-col items-center gap-6">
-            <img src="/branding/spmc-nephro-cluster.jpg" alt="" className="h-20 w-20 object-contain rounded-full bg-white" />
-            <h1 className="text-3xl font-bold tracking-tight text-center">SKTI NurseTrack</h1>
-            <p className="text-base text-muted-foreground text-center max-w-sm">Sign in to view your staff profile.</p>
-          </div>
-          <Button onClick={() => startLogin()} size="lg" className="w-full text-base py-6 shadow-lg hover:shadow-xl transition-all">
-            Sign in with Google
-          </Button>
-        </div>
-      </div>
-    );
+  // Neither a linked Google session nor a claim cookie: the sign-in portal
+  // handles both entry paths (design doc section 5.2).
+  if (linkQuery.error) {
+    return <Redirect to="/staff-signin" />;
   }
 
   return (
     <StaffShell>
-      {linkLoading ? (
-        <Skeleton className="h-40 w-full" />
-      ) : link?.linked ? (
-        <MyProfileView />
-      ) : (
-        <LinkAccountForm />
-      )}
+      <MyProfileView />
     </StaffShell>
   );
 }

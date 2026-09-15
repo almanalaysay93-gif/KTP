@@ -79,12 +79,16 @@ export default function NurseProfile() {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
 
-  const { data: nurse, isLoading } = trpc.nurses.get.useQuery({ id }, { enabled: !Number.isNaN(id) });
-  const { data: assignments } = trpc.nurses.getAssignments.useQuery({ nurseId: id }, { enabled: !Number.isNaN(id) });
-  const { data: credentials } = trpc.credentials.listForNurse.useQuery({ nurseId: id }, { enabled: !Number.isNaN(id) });
-  const { data: trainings } = trpc.trainings.listForNurse.useQuery({ nurseId: id }, { enabled: !Number.isNaN(id) });
-  const { data: compliance } = trpc.trainings.getCompliance.useQuery({ nurseId: id }, { enabled: !Number.isNaN(id) });
-  const { data: catalog } = trpc.trainings.listCatalog.useQuery();
+  const { data: profileData, isLoading, error, refetch } = trpc.nurses.profile.useQuery(
+    { id },
+    { enabled: !Number.isNaN(id) }
+  );
+  const nurse = profileData?.nurse;
+  const assignments = profileData?.assignments;
+  const credentials = profileData?.credentials;
+  const trainings = profileData?.trainings;
+  const compliance = profileData?.compliance;
+  const catalog = profileData?.catalog;
 
   const stats = useMemo(() => {
     const hire = nurse?.dateHired ? new Date(nurse.dateHired).getTime() : null;
@@ -106,6 +110,7 @@ export default function NurseProfile() {
   const changeArea = trpc.nurses.changeArea.useMutation({
     onSuccess: () => {
       toast.success("Area of assignment updated. History preserved.");
+      utils.nurses.profile.invalidate({ id });
       utils.nurses.getAssignments.invalidate();
       utils.nurses.get.invalidate();
       utils.nurses.list.invalidate();
@@ -122,6 +127,7 @@ export default function NurseProfile() {
   const archive = trpc.nurses.archive.useMutation({
     onSuccess: () => {
       toast.success("Nurse archived.");
+      utils.nurses.profile.invalidate({ id });
       utils.nurses.get.invalidate();
       utils.nurses.list.invalidate();
     },
@@ -130,6 +136,7 @@ export default function NurseProfile() {
   const restore = trpc.nurses.restore.useMutation({
     onSuccess: () => {
       toast.success("Nurse restored.");
+      utils.nurses.profile.invalidate({ id });
       utils.nurses.get.invalidate();
       utils.nurses.list.invalidate();
     },
@@ -153,6 +160,7 @@ export default function NurseProfile() {
     onSuccess: async () => {
       toast.success("Training record removed.");
       await Promise.all([
+        utils.nurses.profile.invalidate({ id }),
         utils.trainings.listForNurse.invalidate({ nurseId: id }),
         utils.trainings.getCompliance.invalidate({ nurseId: id }),
         utils.dashboard.invalidate(),
@@ -193,7 +201,33 @@ export default function NurseProfile() {
     return <p className="text-sm text-muted-foreground">Invalid nurse.</p>;
   }
   if (isLoading) {
-    return <Skeleton className="h-72 w-full" />;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-12 w-12 rounded-full" />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-56" />
+            <Skeleton className="h-4 w-36" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 rounded-lg" />
+          ))}
+        </div>
+        <Skeleton className="h-72 w-full rounded-lg" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="p-8 text-center space-y-3">
+        <p className="text-sm text-destructive font-medium">Failed to load nurse profile: {error.message}</p>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
   }
   if (!nurse) {
     return <p className="text-sm text-muted-foreground">Nurse not found.</p>;
@@ -748,6 +782,7 @@ function CredentialDialog({
     onSuccess: () => {
       toast.success("Credential added.");
       utils.credentials.listForNurse.invalidate();
+      utils.nurses.profile.invalidate();
       utils.nurses.get.invalidate();
       onOpenChange(false);
     },
@@ -757,6 +792,7 @@ function CredentialDialog({
     onSuccess: () => {
       toast.success("Credential updated.");
       utils.credentials.listForNurse.invalidate();
+      utils.nurses.profile.invalidate();
       utils.nurses.get.invalidate();
       onOpenChange(false);
     },

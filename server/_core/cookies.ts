@@ -1,4 +1,5 @@
 import type { CookieOptions, Request } from "express";
+import { CLAIM_TTL_MS } from "@shared/const";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -49,4 +50,11 @@ export function getSessionCookieOptions(
     sameSite: secure ? "none" : "lax",
     secure,
   };
+}
+
+/** Same shape as the session cookie, but capped at the 30-minute claim TTL. */
+export function getClaimCookieOptions(
+  req: Request
+): Pick<CookieOptions, "domain" | "httpOnly" | "maxAge" | "path" | "sameSite" | "secure"> {
+  return { ...getSessionCookieOptions(req), maxAge: CLAIM_TTL_MS };
 }

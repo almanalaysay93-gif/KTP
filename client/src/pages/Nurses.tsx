@@ -123,6 +123,21 @@ export default function Nurses() {
     return { all: all.length, rn, na };
   }, [nurses]);
 
+  const otherTabMatches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q || filtered.length > 0) return null;
+    const allActive = (nurses ?? []).filter((n) => !n.archivedAt);
+    const matches = allActive.filter(
+      (n) =>
+        nurseFullName(n).toLowerCase().includes(q) ||
+        n.employeeId.toLowerCase().includes(q) ||
+        (n.licenseNumber ?? "").toLowerCase().includes(q),
+    );
+    if (matches.length === 0) return null;
+    const targetType = matches[0].staffType;
+    return { count: matches.length, targetType, firstMatch: matches[0] };
+  }, [search, filtered.length, nurses]);
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -247,11 +262,46 @@ export default function Nurses() {
 
       {filtered.length === 0 ? (
         <Card className="glass-card">
-          <CardContent className="py-12 text-center">
-            <p className="text-sm text-muted-foreground mb-3">No staff members match your filters.</p>
-            <Button variant="outline" onClick={() => { setSearch(""); setAreaFilter(""); setEmpFilter("all"); setLicFilter("all"); }}>
-              Clear filters
-            </Button>
+          <CardContent className="py-12 text-center space-y-4">
+            <p className="text-sm text-muted-foreground">No staff members match your filters.</p>
+            {otherTabMatches && (
+              <div className="p-4 bg-muted/60 border rounded-lg max-w-md mx-auto text-sm space-y-2.5">
+                <p className="font-medium text-foreground">
+                  Found {otherTabMatches.count} staff match in{" "}
+                  <span className="font-semibold text-primary">
+                    {otherTabMatches.targetType === "Nursing Attendant" ? "Nursing Attendants (NA)" : "Registered Nurses (NOD)"}
+                  </span>
+                  : {nurseFullName(otherTabMatches.firstMatch)}
+                </p>
+                <div className="flex justify-center gap-2">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => {
+                      setStaffTypeFilter(otherTabMatches.targetType);
+                      navigate(`/nurses?type=${encodeURIComponent(otherTabMatches.targetType)}`);
+                    }}
+                  >
+                    Switch to {otherTabMatches.targetType === "Nursing Attendant" ? "NA" : "NOD"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setStaffTypeFilter("all");
+                      navigate("/nurses?type=all");
+                    }}
+                  >
+                    View All Personnel
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div>
+              <Button variant="outline" size="sm" onClick={() => { setSearch(""); setAreaFilter(""); setEmpFilter("all"); setLicFilter("all"); }}>
+                Clear filters
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : view === "cards" ? (

@@ -1,34 +1,16 @@
-import { COOKIE_NAME } from "@shared/const";
+import { CLAIM_COOKIE_NAME } from "@shared/const";
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
+import { parse as parseCookieHeader } from "cookie";
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
-import { ENV } from "./env";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
   res: CreateExpressContextOptions["res"];
   user: User | null;
+  /** nurseId from a valid first-visit claim cookie, if any. Never a `users` row. */
+  claimNurseId: number | null;
 };
-
-function isLoopbackRequest(req: CreateExpressContextOptions["req"]) {
-  const address = req.socket.remoteAddress ?? "";
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
-}
-
-function localAdminUser(): User {
-  const now = new Date();
-  return {
-    id: 1,
-    openId: "local-dev-admin",
-    name: "Local Supervisor",
-    email: null,
-    loginMethod: "local-development",
-    role: "admin",
-    createdAt: now,
-    updatedAt: now,
-    lastSignedIn: now,
-  };
-}
 
 export async function createContext(
   opts: CreateExpressContextOptions
@@ -42,18 +24,19 @@ export async function createContext(
     user = null;
   }
 
-  // In local dev, if no session cookie exists, provide localAdminUser fallback
-  if (!user && !ENV.isProduction) {
-    const cookies = opts.req.headers.cookie ?? "";
-    if (!cookies.includes(COOKIE_NAME)) {
-      user = localAdminUser();
-    }
+  let claimNurseId: number | null = null;
+  try {
+    const cookies = parseCookieHeader(opts.req.headers.cookie ?? "");
+    claimNurseId = await sdk.verifyClaimToken(cookies[CLAIM_COOKIE_NAME]);
+  } catch (error) {
+    claimNurseId = null;
   }
 
   return {
     req: opts.req,
     res: opts.res,
     user,
+    claimNurseId,
   };
 }
 

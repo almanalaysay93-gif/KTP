@@ -49,7 +49,7 @@ function createAdminContext(): TrpcContext {
   const user: AuthenticatedUser = {
     id: 1,
     openId: "integration-test-user",
-    email: "integration@test.com",
+    email: "nncluster@spmcdvo.net",
     name: "Integration Test",
     loginMethod: "google",
     role: "admin",

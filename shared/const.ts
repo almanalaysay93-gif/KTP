@@ -11,6 +11,11 @@ export const NOT_ADMIN_ERR_MSG = 'You do not have required permission (10002)';
 export const OAUTH_STATE_COOKIE = "__Host-oauth_state";
 export const OAUTH_STATE_COOKIE_PLAIN = "oauth_state";
 
+// First-visit staff claim cookie (PRC/employee-ID identified, pre-Google).
+// Short-lived and never a `users` row — see docs/plans/2026-09-15-staff-signin-claim-then-google-design.md.
+export const CLAIM_COOKIE_NAME = "staff_claim_session";
+export const CLAIM_TTL_MS = 1000 * 60 * 30;
+
 // `state` carries the callback redirect URI (used at token exchange) plus the
 // CSRF nonce. Defined here so the client encoder and server decoder never drift.
 export type OAuthState = { redirectUri: string; nonce?: string };

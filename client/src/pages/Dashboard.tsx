@@ -14,6 +14,7 @@ import {
   CalendarDays,
   Clock,
   ListChecks,
+  Loader2,
   MapPin,
   MoveRight,
   Stethoscope,
@@ -37,8 +38,11 @@ export default function Dashboard() {
   const [, navigate] = useLocation();
   const runReminders = trpc.settings.runRemindersNow.useMutation({
     onSuccess: (r) => {
-      if (r.created > 0) toast.success(`Created ${r.created} new reminders${r.expiredCredentials > 0 ? ` and flagged ${r.expiredCredentials} expired license(s)` : ""}.`);
-      else toast.success("No new reminders — everything is up to date.");
+      if (r.created > 0) {
+        toast.success(`Created ${r.created} new reminders${r.expiredCredentials > 0 ? ` and flagged ${r.expiredCredentials} expired license(s)` : ""}.`);
+      } else {
+        toast.success("No new reminders needed. Everything is up to date.");
+      }
     },
     onError: (e) => toast.error(e.message),
   });
@@ -98,8 +102,12 @@ export default function Dashboard() {
           onClick={() => runReminders.mutate(undefined as never)}
           disabled={runReminders.isPending}
         >
-          <Clock className="h-4 w-4 mr-1" />
-          Run Reminders Now
+          {runReminders.isPending ? (
+            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+          ) : (
+            <Clock className="h-4 w-4 mr-1" />
+          )}
+          {runReminders.isPending ? "Running Reminders…" : "Run Reminders Now"}
         </Button>
       </div>
 

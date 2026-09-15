@@ -1,5 +1,5 @@
 import { dateKey, INACTIVE_EMPLOYMENT_STATUSES } from "../shared/nursetrack";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lte, not, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, like, lte, not, or, sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -25,7 +25,7 @@ import {
   trainingEvents,
   users,
 } from "../drizzle/schema";
-import { ENV } from "./_core/env";
+import { FULL_ACCESS_EMAILS, roleForEmail } from "./adminAccess";
 import { getSqliteDb } from "./localDb";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -95,25 +95,10 @@ export function getBatchClient() {
   return _batchPg;
 }
 
-function shouldBeAdmin(user: InsertUser, currentCount = 0): boolean {
-  if (user.role === "admin") return true;
-  if (ENV.ownerOpenId && user.openId === ENV.ownerOpenId) return true;
-  if (user.email) {
-    const norm = user.email.trim().toLowerCase();
-    if (ENV.ownerEmail && norm === ENV.ownerEmail.trim().toLowerCase()) return true;
-    if (ENV.adminEmails && ENV.adminEmails.includes(norm)) return true;
-  }
-  // Bootstrap: if database has 0 users, promote first login to admin
-  if (currentCount === 0) return true;
-  return false;
-}
-
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
   if (db) {
-    const existingUsers = await db.select({ id: users.id }).from(users).limit(1);
-    const isAdmin = shouldBeAdmin(user, existingUsers.length);
     const values: InsertUser = { openId: user.openId };
     const updateSet: Record<string, unknown> = {};
     const textFields = ["name", "email", "loginMethod"] as const;
@@ -123,36 +108,29 @@ export async function upsertUser(user: InsertUser): Promise<void> {
         updateSet[field] = user[field] ?? null;
       }
     }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (isAdmin) {
-      values.role = "admin";
-      updateSet.role = "admin";
-    }
+    values.role = roleForEmail(user.email);
+    updateSet.role = values.role;
     if (!values.lastSignedIn) values.lastSignedIn = new Date();
     if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
     await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
     return;
   }
   const sqlite = getSqliteDb();
-  const countRow = sqlite.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
-  const isAdmin = shouldBeAdmin(user, countRow?.count ?? 0);
-  const assignedRole = user.role ?? (isAdmin ? "admin" : "user");
+  const assignedRole = roleForEmail(user.email);
   sqlite.prepare(`
     INSERT INTO users (openId, name, email, loginMethod, role, lastSignedIn)
     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(openId) DO UPDATE SET
       name = COALESCE(excluded.name, users.name),
-      email = COALESCE(excluded.email, users.email),
-      role = CASE WHEN excluded.role = 'admin' THEN 'admin' ELSE users.role END,
+      email = excluded.email,
+      role = excluded.role,
       lastSignedIn = CURRENT_TIMESTAMP
   `).run(user.openId, user.name ?? null, user.email ?? null, user.loginMethod ?? "local", assignedRole);
 }
 
 /**
  * Session refresh for an already-authenticated request: stamp lastSignedIn and
- * apply owner promotion, returning the post-update row.
+ * enforce the email allowlist, returning the post-update row.
  *
  * This is the hot path — it runs on every authenticated request — so it is a
  * single UPDATE ... RETURNING rather than the read/existence-check/write/re-read
@@ -163,20 +141,17 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 export async function touchUserSession(openId: string) {
   const db = await getDb();
   if (db) {
-    const set: Record<string, unknown> = { lastSignedIn: new Date() };
-    if (shouldBeAdmin({ openId } as InsertUser, 1)) set.role = "admin";
+    const set = {
+      lastSignedIn: new Date(),
+      role: sql<"admin" | "user">`CASE WHEN lower(trim(${users.email})) IN (${FULL_ACCESS_EMAILS[0]}, ${FULL_ACCESS_EMAILS[1]}) THEN 'admin' ELSE 'user' END`,
+    };
     const rows = await db.update(users).set(set).where(eq(users.openId, openId)).returning();
     return rows.length > 0 ? rows[0] : undefined;
   }
   const sqlite = getSqliteDb();
-  const role = shouldBeAdmin({ openId } as InsertUser, 1) ? "admin" : null;
-  sqlite
-    .prepare(
-      role
-        ? "UPDATE users SET lastSignedIn = CURRENT_TIMESTAMP, role = 'admin' WHERE openId = ?"
-        : "UPDATE users SET lastSignedIn = CURRENT_TIMESTAMP WHERE openId = ?",
-    )
-    .run(openId);
+  sqlite.prepare(
+    "UPDATE users SET lastSignedIn = CURRENT_TIMESTAMP, role = CASE WHEN lower(trim(email)) IN (?, ?) THEN 'admin' ELSE 'user' END WHERE openId = ?",
+  ).run(...FULL_ACCESS_EMAILS, openId);
   return sqlite.prepare("SELECT * FROM users WHERE openId = ?").get(openId) as any;
 }
 
@@ -387,35 +362,6 @@ async function findNurseIdsByLicenseNumber(licenseNumber: string): Promise<numbe
 }
 
 /**
- * Self-service link: a signed-in staff member proves who they are with their
- * PRC/license number + full name, and we link their Google account (userId)
- * to the matching, not-yet-linked nurse record.
- */
-export async function linkNurseByPrcAndName(
-  prcNumber: string,
-  fullName: string,
-  userId: number
-): Promise<{ ok: true; nurse: typeof nurses.$inferSelect } | { ok: false; reason: "not_found" | "already_linked" }> {
-  const db = await getDb();
-  if (!db) return { ok: false, reason: "not_found" };
-
-  const normName = normalizeForMatch(fullName);
-  const nurseIds = await findNurseIdsByLicenseNumber(prcNumber);
-  if (nurseIds.length === 0) return { ok: false, reason: "not_found" };
-
-  const candidates = await db.select().from(nurses).where(inArray(nurses.id, nurseIds));
-  const match = candidates.find((n) => {
-    const candidateName = `${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.suffix ?? ""}`;
-    return normalizeForMatch(candidateName) === normName || normalizeForMatch(`${n.firstName} ${n.lastName}`) === normName;
-  });
-  if (!match) return { ok: false, reason: "not_found" };
-  if (match.linkedUserId) return { ok: false, reason: "already_linked" };
-
-  await db.update(nurses).set({ linkedUserId: userId }).where(eq(nurses.id, match.id));
-  return { ok: true, nurse: { ...match, linkedUserId: userId } };
-}
-
-/**
  * Bulk-populate nurses.accountEmail from an HR spreadsheet, matched by
  * license/PRC number. Skips license numbers matching zero or multiple
  * nurses (ambiguous). Does not set linkedUserId — that only happens when the
@@ -440,8 +386,10 @@ export async function bulkSetAccountEmailsByLicense(
 
 /**
  * Called right after a Google login resolves. If this account's email
- * matches a nurse's pre-filled accountEmail and that nurse isn't linked to
- * anyone yet, link them automatically — no PRC/name prompt needed.
+ * matches a nurse's claimed accountEmail (case-insensitive, A5) and that
+ * nurse isn't linked to anyone yet, link them automatically — this is the
+ * return-visit path in docs/plans/2026-09-15-staff-signin-claim-then-google-design.md
+ * section 4.2.
  */
 export async function autoLinkNurseByEmail(userId: number, email: string | null | undefined): Promise<void> {
   if (!email) return;
@@ -449,10 +397,125 @@ export async function autoLinkNurseByEmail(userId: number, email: string | null 
   if (!db) return;
   const existing = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
   if (existing.length > 0) return; // already linked to someone
-  const rows = await db.select().from(nurses).where(eq(nurses.accountEmail, email)).limit(1);
+  const norm = email.trim().toLowerCase();
+  const rows = await db.select().from(nurses).where(sql`lower(${nurses.accountEmail}) = ${norm}`).limit(1);
   const candidate = rows[0];
   if (!candidate || candidate.linkedUserId) return;
   await db.update(nurses).set({ linkedUserId: userId }).where(eq(nurses.id, candidate.id));
+}
+
+/** True if this nurse can still run the first-visit claim (design doc section 6, E1). */
+export function isNurseClaimable(
+  nurse: { archivedAt: Date | null; employmentStatus: string; accountEmail: string | null } | undefined | null,
+): boolean {
+  if (!nurse) return false;
+  if (nurse.archivedAt) return false;
+  if ((INACTIVE_EMPLOYMENT_STATUSES as readonly string[]).includes(nurse.employmentStatus)) return false;
+  if (nurse.accountEmail) return false;
+  return true;
+}
+
+/** Any PRC/license number on file for this nurse (E3: an attendant with one must use PRC, not employee ID). */
+async function nurseHasLicenseNumber(nurseId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db
+    .select({ licenseNumber: nurseCredentials.licenseNumber })
+    .from(nurseCredentials)
+    .where(and(eq(nurseCredentials.nurseId, nurseId), isNotNull(nurseCredentials.licenseNumber)));
+  return rows.some((r) => (r.licenseNumber ?? "").trim().length > 0);
+}
+
+/**
+ * First-visit identification: PRC/license number for a registered nurse, or
+ * employee ID for an attendant with no PRC on file (D2, D5, D10). Every
+ * failure shape — wrong number, archived, already-claimed, ambiguous PRC
+ * (E2), a registered nurse trying employee ID (D2), or an attendant with a
+ * PRC on file trying employee ID (E3) — comes back as the same `{ ok: false
+ * }`, so the caller can show one generic message without leaking which case
+ * happened (E1).
+ */
+export async function claimNurseByIdentifier(
+  identifier: string,
+): Promise<{ ok: true; nurseId: number } | { ok: false }> {
+  const norm = identifier.trim();
+  if (!norm) return { ok: false };
+
+  const dbConn = await getDb();
+  if (!dbConn) return { ok: false };
+
+  const nurseIds = await findNurseIdsByLicenseNumber(norm);
+  if (nurseIds.length > 1) return { ok: false }; // E2: duplicate PRC on file
+  if (nurseIds.length === 1) {
+    const nurse = await getNurseById(nurseIds[0]);
+    return nurse && isNurseClaimable(nurse) ? { ok: true, nurseId: nurse.id } : { ok: false };
+  }
+
+  const byEmployeeId = await getNurseByEmployeeId(norm);
+  if (!byEmployeeId) return { ok: false };
+  if (byEmployeeId.staffType !== "Nursing Attendant") return { ok: false }; // D2: RNs use PRC only
+  if (await nurseHasLicenseNumber(byEmployeeId.id)) return { ok: false }; // E3
+  return isNurseClaimable(byEmployeeId) ? { ok: true, nurseId: byEmployeeId.id } : { ok: false };
+}
+
+function isBlockedStaffEmail(email: string): boolean {
+  const norm = email.trim().toLowerCase();
+  return (FULL_ACCESS_EMAILS as readonly string[]).some((e) => e.toLowerCase() === norm);
+}
+
+/**
+ * End of first-visit claim (D3, section 4.3): writes accountEmail once,
+ * guarded by `accountEmail IS NULL` so two concurrent saves for the same
+ * nurse can't both win (E12 — first save wins, second fails), and by the
+ * case-insensitive unique index so two different nurses can't land on the
+ * same address (D9, E9).
+ */
+export async function saveClaimEmail(
+  nurseId: number,
+  email: string,
+): Promise<{ ok: true } | { ok: false; reason: "in_use" | "already_claimed" }> {
+  const norm = email.trim().toLowerCase();
+  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
+
+  const dbConn = await getDb();
+  if (!dbConn) return { ok: false, reason: "already_claimed" };
+
+  try {
+    const rows = await dbConn
+      .update(nurses)
+      .set({ accountEmail: norm })
+      .where(and(eq(nurses.id, nurseId), isNull(nurses.accountEmail)))
+      .returning({ id: nurses.id });
+    if (rows.length === 0) return { ok: false, reason: "already_claimed" };
+    return { ok: true };
+  } catch (error: any) {
+    if (error?.code === "23505") return { ok: false, reason: "in_use" };
+    throw error;
+  }
+}
+
+/**
+ * Change accountEmail from an already-linked Google session (D6, section
+ * 5.5). Not guarded by `accountEmail IS NULL` since this session already
+ * owns the row — still subject to the same uniqueness rule.
+ */
+export async function changeNurseAccountEmail(
+  nurseId: number,
+  email: string,
+): Promise<{ ok: true } | { ok: false; reason: "in_use" }> {
+  const norm = email.trim().toLowerCase();
+  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
+
+  const dbConn = await getDb();
+  if (!dbConn) return { ok: false, reason: "in_use" };
+
+  try {
+    await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
+    return { ok: true };
+  } catch (error: any) {
+    if (error?.code === "23505") return { ok: false, reason: "in_use" };
+    throw error;
+  }
 }
 
 function deriveLicenseStatusFromCred(cred: { renewalStatus: string; expiryDate: string | Date }): string {
@@ -541,24 +604,39 @@ export async function getNurseById(id: number) {
 }
 
 export async function searchNurses(query: string) {
+  const q = query.trim();
+  if (!q) return [];
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return [];
+
   const db = await getDb();
   if (db) {
-    const term = `%${query.trim()}%`;
+    const tokenConditions = tokens.map((token) => {
+      const term = `%${token}%`;
+      return or(
+        ilike(nurses.firstName, term),
+        ilike(nurses.middleName, term),
+        ilike(nurses.lastName, term),
+        ilike(nurses.employeeId, term),
+      );
+    });
     return await db
       .select()
       .from(nurses)
-      .where(and(isNull(nurses.archivedAt), or(like(nurses.firstName, term), like(nurses.middleName, term), like(nurses.lastName, term), like(nurses.employeeId, term))))
+      .where(and(isNull(nurses.archivedAt), ...tokenConditions))
       .orderBy(asc(nurses.lastName), asc(nurses.firstName))
       .limit(10);
   }
+
   const sqlite = getSqliteDb();
-  const term = `%${query.trim()}%`;
+  const tokenClauses = tokens.map(() => "(firstName LIKE ? OR middleName LIKE ? OR lastName LIKE ? OR employeeId LIKE ?)");
+  const params = tokens.flatMap((t) => [`%${t}%`, `%${t}%`, `%${t}%`, `%${t}%`]);
   return sqlite.prepare(`
     SELECT * FROM nurses 
-    WHERE archivedAt IS NULL AND (firstName LIKE ? OR middleName LIKE ? OR lastName LIKE ? OR employeeId LIKE ?)
+    WHERE archivedAt IS NULL AND ${tokenClauses.join(" AND ")}
     ORDER BY lastName ASC, firstName ASC
     LIMIT 10
-  `).all(term, term, term, term) as any[];
+  `).all(...params) as any[];
 }
 
 /* ---------------- Area assignments ---------------- */
@@ -1330,7 +1408,7 @@ export async function createNotificationsBatch(data: Array<{ type: string; sever
   if (data.length === 0) return;
   const db = await getDb();
   if (db) {
-    const rows = data.map((d) => ({
+    const rawRows = data.map((d) => ({
       type: d.type,
       severity: d.severity,
       title: d.title,
@@ -1340,11 +1418,21 @@ export async function createNotificationsBatch(data: Array<{ type: string; sever
       relatedEntityId: d.relatedEntityId ?? null,
       dayKey: d.dayKey != null ? new Date(d.dayKey + "T00:00:00") : new Date(todayDate().slice(0, 10) + "T00:00:00"),
     }));
-    await db.insert(notifications).values(rows).onConflictDoNothing();
+    // Deduplicate in-memory to prevent Postgres "cannot affect row a second time" batch conflict error
+    const seen = new Set<string>();
+    const rows = rawRows.filter((r) => {
+      const k = `${r.type}:${r.nurseId}:${r.relatedEntityType}:${r.relatedEntityId}:${dateKey(r.dayKey)}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    if (rows.length > 0) {
+      await db.insert(notifications).values(rows).onConflictDoNothing();
+    }
     return;
   }
   const sqlite = getSqliteDb();
-  const insert = sqlite.prepare("INSERT INTO notifications (type, severity, title, message, nurseId, relatedEntityType, relatedEntityId, dayKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+  const insert = sqlite.prepare("INSERT OR IGNORE INTO notifications (type, severity, title, message, nurseId, relatedEntityType, relatedEntityId, dayKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
   const insertAll = sqlite.transaction((rows: typeof data) => {
     for (const d of rows) {
       insert.run(d.type, d.severity, d.title, d.message ?? null, d.nurseId ?? null, d.relatedEntityType ?? null, d.relatedEntityId ?? null, d.dayKey ?? todayDate());

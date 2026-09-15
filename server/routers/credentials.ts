@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import { deriveLicenseStatus, LICENSE_STATUS_META, nurseFullName, renewalCycleKey, sanitizeFilename, storageKey, validateMime, dateKey } from "../../shared/nursetrack";
+import { daysUntilExpiry, deriveLicenseStatus, LICENSE_STATUS_META, nurseFullName, renewalCycleKey, sanitizeFilename, storageKey, validateMime, dateKey } from "../../shared/nursetrack";
 import { storagePut } from "../storage";
 
 const nullableDateInput = z.union([z.date(), z.string().datetime(), z.null()]).transform((d) => (d === null ? null : d instanceof Date ? d : new Date(d))).optional();
@@ -44,7 +44,7 @@ export const credentialsRouter = router({
         nurse: nurseById.get(c.nurseId),
         typeName: typeById.get(c.credentialTypeId)?.name ?? "Unknown",
         derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
-        daysRemaining: Math.floor((parseForDays(c.expiryDate) - parseForDays(dateKey(new Date()))) / 86400000),
+        daysRemaining: daysUntilExpiry(dateKey(c.expiryDate)),
       })),
       nurses: activeNurses,
       types,
@@ -65,7 +65,7 @@ export const credentialsRouter = router({
         nurse,
         typeName,
         derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
-        daysRemaining: Math.floor((parseForDays(c.expiryDate) - Date.now()) / 86400000),
+        daysRemaining: daysUntilExpiry(dateKey(c.expiryDate)),
       };
     });
   }),
@@ -80,7 +80,7 @@ export const credentialsRouter = router({
         ...c,
         typeName: typeById.get(c.credentialTypeId)?.name ?? "Unknown",
         derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
-        daysRemaining: Math.floor((parseForDays(c.expiryDate) - Date.now()) / 86400000),
+        daysRemaining: daysUntilExpiry(dateKey(c.expiryDate)),
       }));
     }),
 
@@ -237,13 +237,5 @@ export const credentialsRouter = router({
       return { id: newId } as const;
     }),
 });
-
-function parseForDays(expiry: Date | string): number {
-  if (typeof expiry === "string") {
-    const [y, m, d] = expiry.split("-").map(Number);
-    return new Date(y, m - 1, d).getTime();
-  }
-  return expiry.getTime();
-}
 
 export { LICENSE_STATUS_META };

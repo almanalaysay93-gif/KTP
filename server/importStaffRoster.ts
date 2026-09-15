@@ -1,3 +1,4 @@
+import { hasFullAccess } from "./adminAccess";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { sdk } from "./_core/sdk";
@@ -37,7 +38,7 @@ export async function importStaffRosterHandler(req: Request, res: Response) {
     } catch {
       return res.status(403).json({ error: "not-authenticated" });
     }
-    if (user.role !== "admin") {
+    if (!hasFullAccess(user.email)) {
       return res.status(403).json({ error: "admin-only" });
     }
     const parsed = bodySchema.safeParse(req.body);

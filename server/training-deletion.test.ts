@@ -20,7 +20,7 @@ function adminContext() {
     user: {
       id: 9,
       openId: "delete-test-admin",
-      email: "admin@example.com",
+      email: "nncluster@spmcdvo.net",
       name: "Delete Test Admin",
       loginMethod: "google",
       role: "admin" as const,

@@ -16,6 +16,7 @@ import NurseProfile from "./pages/NurseProfile";
 import { NurseEditPage } from "./pages/NurseEditPage";
 import Nurses from "./pages/Nurses";
 import MyProfilePage from "./pages/MyProfilePage";
+import StaffSignInPage from "./pages/StaffSignIn";
 import Reports from "./pages/Reports";
 import SettingsPage from "./pages/Settings";
 import Trainings from "./pages/Trainings";
@@ -49,6 +50,9 @@ function Router() {
       </Route>
       <Route path="/me">
         <MyProfilePage />
+      </Route>
+      <Route path="/staff-signin">
+        <StaffSignInPage />
       </Route>
       <Route path="/dashboard">
         <Protected>

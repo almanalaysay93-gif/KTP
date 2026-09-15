@@ -96,6 +96,12 @@ export async function runDailyReminders(today: string, thresholds: readonly numb
   const areaRows = await listAreas(false);
   const areaById = new Map(areaRows.map((a) => [a.id, a.name]));
 
+  // Load existing reminders to enforce true idempotency and prevent duplicate notifications.
+  const existingReminders = await listReminders();
+  const existingSet = new Set(
+    existingReminders.map((r) => `${r.credentialId}:${r.thresholdDays}:${r.renewalCycleKey}`)
+  );
+
   // Phase 1 — classify credentials in memory: expired vs. due renewal reminders.
   const duePairs: Array<{ cred: CredentialRow; threshold: number; days: number; areaName: string }> = [];
   const expiredIds: number[] = [];
@@ -108,7 +114,7 @@ export async function runDailyReminders(today: string, thresholds: readonly numb
     const days = daysUntilExpiry(dateKey(cred.expiryDate), today);
     const status = deriveLicenseStatus(dateKey(cred.expiryDate), today);
 
-    // Expired license — mark any active reminders for it expired and notify once per day handled by reminder status.
+    // Expired license — mark any active reminders for it expired.
     if (status === "Expired") {
       expiredIds.push(cred.id);
       expiredNotes.push({ cred });
@@ -117,12 +123,17 @@ export async function runDailyReminders(today: string, thresholds: readonly numb
 
     for (const threshold of thresholds) {
       if (days > threshold) continue; // not yet due
+      const cycleKey = `${cred.id}:${threshold}:${cred.renewalCycleKey}`;
+      if (existingSet.has(cycleKey)) {
+        results.skippedExisting++;
+        continue;
+      }
       const areaName = cred.nurse.currentAreaId ? areaById.get(cred.nurse.currentAreaId) ?? "Unknown area" : "Unassigned";
       duePairs.push({ cred, threshold, days, areaName });
     }
   }
-  // Phase 2 — bulk-insert due reminders. INSERT IGNORE on uniq_reminder_cycle
-  // makes this idempotent: already-seen (credential, threshold, cycle) pairs are skipped.
+
+  // Phase 2 — bulk-insert only newly due reminders.
   if (duePairs.length > 0) {
     const rows = duePairs.map(({ cred, threshold }) => ({
       credentialId: cred.id,
@@ -131,12 +142,10 @@ export async function runDailyReminders(today: string, thresholds: readonly numb
       triggerDate: new Date(new Date(`${today}T00:00:00`).getTime() + threshold * 86400000),
     }));
     await db.insert(licenseReminders).values(rows).onConflictDoNothing();
-    results.created += duePairs.length;
+    results.created = duePairs.length;
   }
 
-  // Phase 3 — expired credentials: bulk-mark active reminders expired in one
-  // query and send one expired notification each via a single batch insert
-  // (INSERT IGNORE keeps the per-day idempotence).
+  // Phase 3 — expired credentials: bulk-mark active reminders expired and notify.
   if (expiredIds.length > 0) {
     const db2 = await getDb();
     if (db2) {
@@ -157,13 +166,20 @@ export async function runDailyReminders(today: string, thresholds: readonly numb
   }
   results.expiredCredentials = expiredIds.length;
 
-  // Phase 4 — one bulk notification insert for all due renewal reminders.
-  // INSERT IGNORE on uniq_notif_day guarantees no duplicate notifications
-  // across repeated runs on the same day.
-  const notifPayloads = duePairs.map(({ cred, threshold, days }) => ({
+  // Phase 4 — bulk notification insert for newly due renewal reminders only.
+  // Group by credential so each nurse receives at most one reminder notification per cycle pass.
+  const notifsByCred = new Map<number, { cred: CredentialRow; threshold: number; days: number }>();
+  for (const pair of duePairs) {
+    const prev = notifsByCred.get(pair.cred.id);
+    if (!prev || pair.threshold < prev.threshold) {
+      notifsByCred.set(pair.cred.id, pair);
+    }
+  }
+
+  const notifPayloads = Array.from(notifsByCred.values()).map(({ cred, threshold, days }) => ({
     type: "license.renewalReminder",
     severity: threshold >= 365 ? "attention" : "upcoming_renewal",
-    title: `${threshold === 365 ? "1-year" : "6-month"} renewal reminder — ${cred.nurse.firstName} ${cred.nurse.lastName}`,
+    title: `${threshold === 365 ? "1-year" : `${threshold}-day`} renewal reminder — ${cred.nurse.firstName} ${cred.nurse.lastName}`,
     message: `${cred.nurse.firstName} ${cred.nurse.lastName} has a license expiring in ${days <= 0 ? "about " + (Math.abs(days) + 1) + " day(s) (due " + dateKey(cred.expiryDate) + ")" : days + " days"}. Review the license and begin renewal.`,
     nurseId: cred.nurseId,
     relatedEntityType: "credential",

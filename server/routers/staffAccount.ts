@@ -1,39 +1,85 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../_core/trpc";
+import { CLAIM_COOKIE_NAME } from "@shared/const";
+import { publicProcedure, router, staffProcedure } from "../_core/trpc";
+import { getClaimCookieOptions } from "../_core/cookies";
+import { checkRateLimit } from "../_core/rateLimit";
+import { sdk } from "../_core/sdk";
 import * as db from "../db";
 import { nurseFullName, sanitizeFilename, storageKey, validateMime } from "../../shared/nursetrack";
 import { storagePut } from "../storage";
 
+const GENERIC_CLAIM_ERROR =
+  "No matching staff record, or this profile already has a sign-in email.";
+
+const CLAIM_RATE_LIMIT = { max: 10, windowMs: 15 * 60 * 1000 };
+
 /**
- * Self-service for non-admin (staff) accounts: link a Google login to a
- * nurse record, then view/edit that record only. Every procedure here is
- * scoped to the caller's own linked nurse — never any other nurseId.
+ * Self-service for non-admin (staff) accounts: first-visit claim by
+ * PRC/employee ID, then view/edit that one nurse record on return Google
+ * visits. Every procedure here is scoped to the caller's own claimed or
+ * linked nurse — never any other nurseId. See
+ * docs/plans/2026-09-15-staff-signin-claim-then-google-design.md.
  */
 export const staffAccountRouter = router({
-  myLink: protectedProcedure.query(async ({ ctx }) => {
-    const nurse = await db.getNurseByLinkedUserId(ctx.user.id);
-    return { linked: Boolean(nurse), nurseId: nurse?.id ?? null };
+  myLink: staffProcedure.query(async ({ ctx }) => {
+    return { linked: true, nurseId: ctx.nurseId, authMode: ctx.authMode };
   }),
 
-  linkByPrc: protectedProcedure
-    .input(z.object({ prcNumber: z.string().min(1).max(64), fullName: z.string().min(1).max(256) }))
+  /** First visit: identify by PRC/license number (RN) or employee ID (attendant, no PRC on file). */
+  startClaim: publicProcedure
+    .input(z.object({ identifier: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
-      const existing = await db.getNurseByLinkedUserId(ctx.user.id);
-      if (existing) throw new TRPCError({ code: "CONFLICT", message: "Your account is already linked to a staff profile." });
-
-      const result = await db.linkNurseByPrcAndName(input.prcNumber, input.fullName, ctx.user.id);
-      if (!result.ok) {
-        if (result.reason === "already_linked") {
-          throw new TRPCError({ code: "CONFLICT", message: "That staff profile is already linked to a different account." });
-        }
-        throw new TRPCError({ code: "NOT_FOUND", message: "No staff profile matches that PRC/license number and name. Check for typos or contact your supervisor." });
+      const ip = ctx.req.ip || ctx.req.socket?.remoteAddress || "unknown";
+      if (!checkRateLimit(`staff-claim:${ip}`, CLAIM_RATE_LIMIT)) {
+        // E8: rate-limited attempts return the exact same generic message as a
+        // failed lookup, so an attacker can't tell throttling from a wrong guess.
+        throw new TRPCError({ code: "NOT_FOUND", message: GENERIC_CLAIM_ERROR });
       }
-      return { nurseId: result.nurse.id };
+
+      const result = await db.claimNurseByIdentifier(input.identifier);
+      if (!result.ok) {
+        throw new TRPCError({ code: "NOT_FOUND", message: GENERIC_CLAIM_ERROR });
+      }
+
+      const token = await sdk.createClaimToken(result.nurseId);
+      ctx.res.cookie(CLAIM_COOKIE_NAME, token, getClaimCookieOptions(ctx.req));
+      return { ok: true } as const;
     }),
 
-  myProfile: protectedProcedure.query(async ({ ctx }) => {
-    const nurse = await db.getNurseByLinkedUserId(ctx.user.id);
+  /** End of first visit (D3): staff types their Gmail and it's saved at once. */
+  saveClaimEmail: staffProcedure
+    .input(z.object({ email: z.string().email().max(320) }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.authMode !== "claim") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Already signed in with Google — use change email instead." });
+      }
+      const result = await db.saveClaimEmail(ctx.nurseId, input.email);
+      if (!result.ok) {
+        if (result.reason === "already_claimed") {
+          throw new TRPCError({ code: "CONFLICT", message: GENERIC_CLAIM_ERROR });
+        }
+        throw new TRPCError({ code: "CONFLICT", message: "That email is already in use." });
+      }
+      return { ok: true } as const;
+    }),
+
+  /** D6: change the sign-in Gmail from an established Google session only. */
+  changeEmail: staffProcedure
+    .input(z.object({ email: z.string().email().max(320) }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.authMode !== "google") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Sign in with Google to change your sign-in email." });
+      }
+      const result = await db.changeNurseAccountEmail(ctx.nurseId, input.email);
+      if (!result.ok) {
+        throw new TRPCError({ code: "CONFLICT", message: "That email is already in use." });
+      }
+      return { ok: true } as const;
+    }),
+
+  myProfile: staffProcedure.query(async ({ ctx }) => {
+    const nurse = await db.getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
 
     const [areaRows, types, catalog] = await Promise.all([
@@ -64,22 +110,23 @@ export const staffAccountRouter = router({
         trainingName: catalogById.get(t.trainingId) ?? "Training",
       })),
       assignments,
+      authMode: ctx.authMode,
     };
   }),
 
-  updateMyBasicInfo: protectedProcedure
+  updateMyBasicInfo: staffProcedure
     .input(z.object({ contactNumber: z.string().max(32).optional() }))
     .mutation(async ({ ctx, input }) => {
-      const nurse = await db.getNurseByLinkedUserId(ctx.user.id);
+      const nurse = await db.getNurseById(ctx.nurseId);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
       await db.updateNurse(nurse.id, { contactNumber: input.contactNumber ?? null });
       return { ok: true };
     }),
 
-  uploadMyPhoto: protectedProcedure
+  uploadMyPhoto: staffProcedure
     .input(z.object({ fileBase64: z.string(), fileName: z.string().max(200), mimeType: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const nurse = await db.getNurseByLinkedUserId(ctx.user.id);
+      const nurse = await db.getNurseById(ctx.nurseId);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
 
       const mimeCheck = validateMime(input.mimeType, "photo");
@@ -91,7 +138,7 @@ export const staffAccountRouter = router({
       const { url } = await storagePut(key, buffer, input.mimeType);
       await db.updateNurse(nurse.id, { profilePhotoKey: key });
       await db.logActivity({
-        supervisorId: ctx.user.id,
+        supervisorId: ctx.user?.id ?? null,
         nurseId: nurse.id,
         actionType: "nurse.photo.updated",
         entityType: "nurse",
@@ -101,11 +148,11 @@ export const staffAccountRouter = router({
       return { url };
     }),
 
-  listCatalog: protectedProcedure.query(async () => {
+  listCatalog: staffProcedure.query(async () => {
     return db.listTrainingCatalog(false);
   }),
 
-  uploadCredentialDocument: protectedProcedure
+  uploadCredentialDocument: staffProcedure
     .input(
       z.object({
         credentialId: z.number(),
@@ -115,7 +162,7 @@ export const staffAccountRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const nurse = await db.getNurseByLinkedUserId(ctx.user.id);
+      const nurse = await db.getNurseById(ctx.nurseId);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
 
       const allCreds = await db.listCredentials({ nurseId: nurse.id });
@@ -131,7 +178,7 @@ export const staffAccountRouter = router({
       const { url } = await storagePut(key, buffer, input.mimeType);
       await db.updateCredential(input.credentialId, { documentKey: key });
       await db.logActivity({
-        supervisorId: ctx.user.id,
+        supervisorId: ctx.user?.id ?? null,
         nurseId: nurse.id,
         actionType: "license.document.uploaded",
         entityType: "credential",
@@ -141,7 +188,7 @@ export const staffAccountRouter = router({
       return { url };
     }),
 
-  addTrainingRecord: protectedProcedure
+  addTrainingRecord: staffProcedure
     .input(
       z.object({
         trainingId: z.number(),
@@ -154,7 +201,7 @@ export const staffAccountRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const nurse = await db.getNurseByLinkedUserId(ctx.user.id);
+      const nurse = await db.getNurseById(ctx.nurseId);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
 
       const id = await db.createNurseTraining({
@@ -170,7 +217,7 @@ export const staffAccountRouter = router({
       });
 
       await db.logActivity({
-        supervisorId: ctx.user.id,
+        supervisorId: ctx.user?.id ?? null,
         nurseId: nurse.id,
         actionType: "training.created",
         entityType: "nurseTraining",
@@ -181,7 +228,7 @@ export const staffAccountRouter = router({
       return { id };
     }),
 
-  uploadTrainingCertificate: protectedProcedure
+  uploadTrainingCertificate: staffProcedure
     .input(
       z.object({
         recordId: z.number(),
@@ -191,7 +238,7 @@ export const staffAccountRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const nurse = await db.getNurseByLinkedUserId(ctx.user.id);
+      const nurse = await db.getNurseById(ctx.nurseId);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
 
       const trainings = await db.listNurseTrainings({ nurseId: nurse.id });
@@ -207,7 +254,7 @@ export const staffAccountRouter = router({
       const { url } = await storagePut(key, buffer, input.mimeType);
       await db.updateNurseTraining(input.recordId, { certificateKey: key });
       await db.logActivity({
-        supervisorId: ctx.user.id,
+        supervisorId: ctx.user?.id ?? null,
         nurseId: nurse.id,
         actionType: "training.certificate.uploaded",
         entityType: "nurseTraining",

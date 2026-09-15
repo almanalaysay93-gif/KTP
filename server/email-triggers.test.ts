@@ -5,7 +5,7 @@ import * as db from "./db";
 describe("Email Triggers & tRPC Endpoints", () => {
   it("queries emailStatus correctly", async () => {
     const caller = appRouter.createCaller({
-      user: { id: 1, openId: "admin-test", name: "Admin", email: "admin@example.com", role: "admin" },
+      user: { id: 1, openId: "admin-test", name: "Admin", email: "nncluster@spmcdvo.net", role: "admin" },
     } as any);
 
     const status = await caller.settings.emailStatus();
@@ -17,7 +17,7 @@ describe("Email Triggers & tRPC Endpoints", () => {
 
   it("sends test email via settings.sendTestEmail", async () => {
     const caller = appRouter.createCaller({
-      user: { id: 1, openId: "admin-test", name: "Admin", email: "admin@example.com", role: "admin" },
+      user: { id: 1, openId: "admin-test", name: "Admin", email: "nncluster@spmcdvo.net", role: "admin" },
     } as any);
 
     const result = await caller.settings.sendTestEmail({ targetEmail: "admin.tester@example.com" });
@@ -31,7 +31,7 @@ describe("Email Triggers & tRPC Endpoints", () => {
 
   it("triggers manual digest via settings.triggerEmailPassNow", async () => {
     const caller = appRouter.createCaller({
-      user: { id: 1, openId: "admin-test", name: "Admin", email: "admin@example.com", role: "admin" },
+      user: { id: 1, openId: "admin-test", name: "Admin", email: "nncluster@spmcdvo.net", role: "admin" },
     } as any);
 
     const res = await caller.settings.triggerEmailPassNow();
@@ -42,7 +42,7 @@ describe("Email Triggers & tRPC Endpoints", () => {
 
   it("deletes a staff nurse permanently and cleans up dependencies", async () => {
     const caller = appRouter.createCaller({
-      user: { id: 1, openId: "admin-test", name: "Admin", email: "admin@example.com", role: "admin" },
+      user: { id: 1, openId: "admin-test", name: "Admin", email: "nncluster@spmcdvo.net", role: "admin" },
     } as any);
 
     // Create a temporary nurse to delete

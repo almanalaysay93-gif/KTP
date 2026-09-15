@@ -143,11 +143,27 @@ async function callOpenRouter(messages: Array<{ role: string; content: string }>
     },
     body: JSON.stringify({ model: ENV.openRouterModel, messages, temperature: 0.3 }),
   });
+
+  const rawText = await response.text().catch(() => "");
   if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    throw new Error(`AI request failed (${response.status}): ${errText || response.statusText}`);
+    let errorDetail = rawText;
+    try {
+      const errJson = JSON.parse(rawText);
+      errorDetail = errJson?.error?.message ?? errJson?.message ?? rawText;
+    } catch {
+      errorDetail = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 200);
+    }
+    throw new Error(`AI request failed (${response.status}): ${errorDetail || response.statusText}`);
   }
-  const json = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+
+  let json: { choices?: Array<{ message?: { content?: string } }> };
+  try {
+    json = JSON.parse(rawText);
+  } catch {
+    const preview = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 150);
+    throw new Error(`AI service returned unexpected non-JSON response: ${preview || "Unknown error"}`);
+  }
+
   const content = json.choices?.[0]?.message?.content;
   if (!content) throw new Error("AI request returned an empty response.");
   return content;
@@ -156,9 +172,9 @@ async function callOpenRouter(messages: Array<{ role: string; content: string }>
 export async function generateInsightsReport(): Promise<string> {
   const digest = await buildDataDigest();
   const prompt = `You are a nurse-staffing analyst for a hospital nephrology department. Below is today's roster/license/training data snapshot. Write a concise report (use short headed sections, plain text, no markdown tables) covering:
-1. Urgent license expirations (expired or expiring within 30 days) — name each person.
-2. Licenses expiring within 6 months — summarize, group by area if there are many.
-3. Upcoming trainings/seminars in the next 60 days — list them.
+1. Urgent license expirations (expired or expiring within 30 days): name each person.
+2. Licenses expiring within 6 months: summarize, group by area if there are many.
+3. Upcoming trainings/seminars in the next 60 days: list them.
 4. Any notable staffing pattern you can see from the area counts (e.g. heavy imbalance between areas), stated as an observation, not a recommendation you're not qualified to make.
 Be factual and specific using only the data given below. If a section has nothing to report, say so briefly.
 

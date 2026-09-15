@@ -32,13 +32,12 @@ export function todayDate(): string {
 
 export function parseLocalDate(value: string | Date | null | undefined): Date {
   if (!value) return new Date(NaN);
-  if (value instanceof Date) return isNaN(value.getTime()) ? new Date(NaN) : value;
-  if (typeof value === "string") {
-    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) {
-      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    }
+  const key = dateKey(value);
+  if (key) {
+    const [y, m, d] = key.split("-").map(Number);
+    return new Date(y, m - 1, d);
   }
+  if (value instanceof Date) return isNaN(value.getTime()) ? new Date(NaN) : value;
   return new Date(value);
 }
 

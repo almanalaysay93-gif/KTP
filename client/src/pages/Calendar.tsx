@@ -95,6 +95,7 @@ export default function Calendar() {
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<"month" | "agenda">("month");
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
+  const [showPastMonths, setShowPastMonths] = useState(false);
 
   const { data: events, isLoading } = trpc.calendar.listEvents.useQuery({
     from: new Date("2026-01-01T00:00:00"),
@@ -120,6 +121,14 @@ export default function Calendar() {
     groups[key].push(e);
   }
   const sortedKeys = Object.keys(groups).sort();
+  const currentMonthKey = safeDateKey(new Date()).slice(0, 7);
+  const pastKeys = sortedKeys.filter((k) => k < currentMonthKey);
+  const currentAndFutureKeys = sortedKeys.filter((k) => k >= currentMonthKey);
+  const displayKeys = showPastMonths
+    ? sortedKeys
+    : currentAndFutureKeys.length > 0
+    ? currentAndFutureKeys
+    : sortedKeys;
 
   return (
     <div className="space-y-4">
@@ -182,7 +191,18 @@ export default function Calendar() {
             </p>
           ) : (
             <div className="space-y-6">
-              {sortedKeys.map((key) => (
+              {pastKeys.length > 0 && (
+                <div className="flex justify-end pb-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowPastMonths((v) => !v)}
+                  >
+                    {showPastMonths ? "Hide earlier events" : `Show earlier events (${pastKeys.length} past month${pastKeys.length === 1 ? "" : "s"})`}
+                  </Button>
+                </div>
+              )}
+              {displayKeys.map((key) => (
                 <div key={key}>
                   <h3 className="text-sm font-semibold text-muted-foreground mb-2">
                     {new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" })}

@@ -50,7 +50,7 @@ import { ChatAssistantWidget } from "./ChatAssistantWidget";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
 import { ScrollArea } from "./ui/scroll-area";
 
 type NavItem = {
@@ -278,7 +278,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
         />
       </div>
 
-      <SidebarInset className="nurse-track-inset">
+      <SidebarInset className="nurse-track-inset min-w-0 overflow-x-hidden">
         <div className="flex border-b h-20 items-center justify-between glass-panel px-3 md:px-6 sticky top-0 z-40">
           <div className="flex items-center gap-3 min-w-0">
             <SidebarTrigger
@@ -307,7 +307,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
           </div>
         </div>
         {isMobile && <MobileBottomNav />}
-        <main className="flex-1 p-3 md:p-5 pb-20 md:pb-5">{children}</main>
+        <main className="flex-1 min-w-0 p-3 md:p-5 pb-20 md:pb-5 overflow-x-auto">{children}</main>
       </SidebarInset>
 
       <NurseSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
@@ -345,15 +345,23 @@ function NotificationsBell() {
         )}
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="w-full sm:max-w-md">
-          <SheetHeader>
+        <SheetContent className="w-full sm:max-w-md flex flex-col">
+          <SheetHeader className="flex flex-row items-center justify-between space-y-0 pr-8">
             <SheetTitle>Notifications</SheetTitle>
+            <SheetClose asChild>
+              <Button variant="ghost" size="sm" aria-label="Close notifications">
+                Close
+              </Button>
+            </SheetClose>
           </SheetHeader>
-          <div className="flex justify-end px-4">
+          <div className="flex items-center justify-between px-4">
+            <span className="text-xs text-muted-foreground">
+              {unreadCount ? `${unreadCount} unread` : "All caught up"}
+            </span>
             <Button
               variant="ghost"
               size="sm"
-              disabled={markAllRead.isPending}
+              disabled={markAllRead.isPending || !unreadCount}
               onClick={() => {
                 markAllRead.mutate(undefined as never);
               }}
@@ -361,7 +369,7 @@ function NotificationsBell() {
               Mark all read
             </Button>
           </div>
-          <ScrollArea className="h-[calc(100vh-8rem)] px-4">
+          <ScrollArea className="flex-1 px-4">
             {notifications?.length === 0 && (
               <p className="text-sm text-muted-foreground py-8 text-center">No notifications yet.</p>
             )}
@@ -371,6 +379,13 @@ function NotificationsBell() {
               ))}
             </div>
           </ScrollArea>
+          <div className="p-4 border-t mt-auto flex justify-end">
+            <SheetClose asChild>
+              <Button variant="outline" size="sm" className="w-full sm:w-auto">
+                Close
+              </Button>
+            </SheetClose>
+          </div>
         </SheetContent>
       </Sheet>
     </>
@@ -445,7 +460,7 @@ function NurseSearchDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [, setLocation] = useLocation();
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
+    <CommandDialog open={open} onOpenChange={onOpenChange} shouldFilter={false}>
       <CommandInput placeholder="Search nurses by name or employee ID..." value={query} onValueChange={setQuery} />
       <CommandList>
         <CommandEmpty>{query.trim() ? "No nurses found." : "Type to search nurses."}</CommandEmpty>
@@ -453,6 +468,7 @@ function NurseSearchDialog({ open, onOpenChange }: { open: boolean; onOpenChange
           {results?.map((n) => (
             <CommandItem
               key={n.id}
+              value={`${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.employeeId} ${n.staffType ?? ""}`.trim()}
               onSelect={() => {
                 onOpenChange(false);
                 setLocation(`/nurses/${n.id}`);
@@ -461,6 +477,11 @@ function NurseSearchDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               <Users className="h-4 w-4 mr-2 text-muted-foreground" />
               <span>{n.firstName} {n.lastName}</span>
               <span className="text-xs text-muted-foreground ml-2">{nurseIdLabel(n)}</span>
+              {n.staffType && (
+                <span className="text-[10px] text-muted-foreground ml-auto bg-muted px-1.5 py-0.5 rounded">
+                  {n.staffType === "Registered Nurse" ? "NOD" : "NA"}
+                </span>
+              )}
             </CommandItem>
           ))}
         </CommandGroup>
