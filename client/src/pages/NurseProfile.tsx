@@ -101,16 +101,11 @@ export default function NurseProfile() {
     const areasServed = new Set((assignments ?? []).map((a) => a.areaId)).size;
     const completedTrainings = (trainings ?? []).filter((t) => t.status === "Completed").length;
     let compliancePct = "—";
-    if (compliance && catalog) {
-      const total = Object.keys(compliance).length;
-      const done = Object.values(compliance).filter((v) => {
-        const c = v as unknown as { completed: boolean } | boolean;
-        return typeof c === "object" && c !== null ? c.completed : Boolean(c);
-      }).length;
-      compliancePct = total > 0 ? Math.round((done / total) * 100).toString() : "—";
+    if (compliance && typeof compliance.compliancePercent === "number") {
+      compliancePct = String(compliance.compliancePercent);
     }
     return { experienceYears, areasServed, completedTrainings, compliancePct };
-  }, [nurse, assignments, trainings, compliance, catalog]);
+  }, [nurse, assignments, trainings, compliance]);
 
   const changeArea = trpc.nurses.changeArea.useMutation({
     onSuccess: () => {
@@ -492,24 +487,14 @@ export default function NurseProfile() {
               )}
               {compliance && (
                 <div className="mt-4 border-t pt-4">
-                  <h3 className="text-sm font-medium mb-2">Compliance (Required Trainings)</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(compliance).map(([name, item]) => {
-                      const i = item as unknown as { completed: boolean } | boolean;
-                      const completed = typeof i === "object" && i !== null ? i.completed : Boolean(i);
-                      return (
-                        <span
-                          key={name}
-                          className={
-                            completed
-                              ? "text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full"
-                              : "text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full"
-                          }
-                        >
-                          {name}: {completed ? "Complete" : "Missing"}
-                        </span>
-                      );
-                    })}
+                  <h3 className="text-sm font-medium mb-2">Area Training Compliance</h3>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="font-semibold text-foreground">
+                      {compliance.compliancePercent}%
+                    </span>
+                    <span className="text-muted-foreground">
+                      ({compliance.completedCount} of {compliance.requiredCount} required trainings completed)
+                    </span>
                   </div>
                 </div>
               )}

@@ -358,8 +358,19 @@ function EmailAutomationTab() {
 
   const triggerPass = trpc.settings.triggerEmailPassNow.useMutation({
     onSuccess: (res) => {
+      const parts: string[] = [];
+      const totalSent = (res.expiry.sent ?? 0) + (res.seminars.sent ?? 0);
+      const totalMock = (res.expiry.mockSent ?? 0) + (res.seminars.mockSent ?? 0);
+      const totalFailed = (res.expiry.failed ?? 0) + (res.seminars.failed ?? 0);
+      const totalSkipped = (res.expiry.skipped ?? 0) + (res.seminars.skipped ?? 0);
+
+      if (totalSent > 0) parts.push(`${totalSent} sent`);
+      if (totalMock > 0) parts.push(`${totalMock} mock sent`);
+      if (totalFailed > 0) parts.push(`${totalFailed} failed`);
+      if (totalSkipped > 0) parts.push(`${totalSkipped} skipped`);
+
       toast.success(
-        `Email pass complete: ${res.expiry.sent} expiry alert(s) sent (${res.expiry.skipped} skipped), ${res.seminars.sent} seminar reminder(s) sent.`
+        `Email pass complete: ${parts.join(", ") || "no recipients eligible"}.`
       );
       utils.settings.listEmailLogs.invalidate();
     },

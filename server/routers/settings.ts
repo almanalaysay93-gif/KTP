@@ -263,11 +263,22 @@ export const settingsRouter = router({
     }),
 
   triggerEmailPassNow: adminProcedure.mutation(async () => {
-    const { runLicenseExpiryEmailPass, runUpcomingSeminarEmailPass } = await import("../email/dispatcher");
-    const today = todayDate();
-    const expiry = await runLicenseExpiryEmailPass(today);
-    const seminars = await runUpcomingSeminarEmailPass();
-    return { expiry, seminars };
+    const { acquireReminderLock, releaseReminderLock } = await import("../db");
+    const acquired = await acquireReminderLock();
+    if (!acquired) {
+      throw new TRPCError({ code: "CONFLICT", message: "Another email or reminder pass is currently in progress." });
+    }
+
+    try {
+      const { runLicenseExpiryEmailPass, runUpcomingSeminarEmailPass } = await import("../email/dispatcher");
+      const { getManilaDateKey } = await import("../scheduled");
+      const today = getManilaDateKey();
+      const expiry = await runLicenseExpiryEmailPass(today);
+      const seminars = await runUpcomingSeminarEmailPass();
+      return { expiry, seminars };
+    } finally {
+      await releaseReminderLock();
+    }
   }),
 
   listEmailLogs: adminProcedure

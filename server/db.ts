@@ -342,9 +342,12 @@ export async function getNurseByEmployeeId(employeeId: string) {
 /** The nurse record a given Google account (users.id) is linked to, if any. */
 export async function getNurseByLinkedUserId(userId: number) {
   const db = await getDb();
-  if (!db) return undefined;
-  const rows = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
-  return rows[0];
+  if (db) {
+    const rows = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
+    return rows[0];
+  }
+  const sqlite = getSqliteDb();
+  return sqlite.prepare("SELECT * FROM nurses WHERE linkedUserId = ?").get(userId) as any;
 }
 
 const normalizeForMatch = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -393,15 +396,52 @@ export async function bulkSetAccountEmailsByLicense(
  */
 export async function autoLinkNurseByEmail(userId: number, email: string | null | undefined): Promise<void> {
   if (!email) return;
-  const db = await getDb();
-  if (!db) return;
-  const existing = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
-  if (existing.length > 0) return; // already linked to someone
   const norm = email.trim().toLowerCase();
-  const rows = await db.select().from(nurses).where(sql`lower(${nurses.accountEmail}) = ${norm}`).limit(1);
+  if (!norm || isBlockedStaffEmail(norm)) return;
+
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    // One Google account can only link to one nurse record
+    const existing = sqlite.prepare("SELECT id FROM nurses WHERE linkedUserId = ?").get(userId) as any;
+    if (existing) return;
+    const candidate = sqlite.prepare("SELECT id, linkedUserId, employmentStatus, archivedAt FROM nurses WHERE lower(accountEmail) = ?").get(norm) as any;
+    if (!candidate || candidate.archivedAt) return;
+    if ((INACTIVE_EMPLOYMENT_STATUSES as readonly string[]).includes(candidate.employmentStatus)) return;
+    sqlite.prepare("UPDATE nurses SET linkedUserId = ? WHERE id = ? AND lower(accountEmail) = ?").run(userId, candidate.id, norm);
+    return;
+  }
+
+  // Prevent one Google account from acquiring multiple nurse records
+  const existing = await db.select({ id: nurses.id }).from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
+  if (existing.length > 0) return;
+
+  // Find candidate by normalized accountEmail
+  const rows = await db
+    .select({
+      id: nurses.id,
+      linkedUserId: nurses.linkedUserId,
+      employmentStatus: nurses.employmentStatus,
+      archivedAt: nurses.archivedAt,
+    })
+    .from(nurses)
+    .where(sql`lower(${nurses.accountEmail}) = ${norm}`)
+    .limit(1);
+
   const candidate = rows[0];
-  if (!candidate || candidate.linkedUserId) return;
-  await db.update(nurses).set({ linkedUserId: userId }).where(eq(nurses.id, candidate.id));
+  if (!candidate || candidate.archivedAt) return;
+  if ((INACTIVE_EMPLOYMENT_STATUSES as readonly string[]).includes(candidate.employmentStatus)) return;
+
+  // Conditional update: ensures accountEmail is still norm and binds this user
+  await db
+    .update(nurses)
+    .set({ linkedUserId: userId })
+    .where(
+      and(
+        eq(nurses.id, candidate.id),
+        sql`lower(${nurses.accountEmail}) = ${norm}`,
+      ),
+    );
 }
 
 /** True if this nurse can still run the first-visit claim (design doc section 6, E1). */
@@ -505,7 +545,19 @@ export async function adminSetNurseAccountEmail(
   email: string | null,
 ): Promise<{ ok: true } | { ok: false; reason: "in_use" }> {
   const dbConn = await getDb();
-  if (!dbConn) return { ok: false, reason: "in_use" };
+  if (!dbConn) {
+    const sqlite = getSqliteDb();
+    if (email === null) {
+      sqlite.prepare("UPDATE nurses SET accountEmail = NULL, linkedUserId = NULL WHERE id = ?").run(nurseId);
+      return { ok: true };
+    }
+    const norm = email.trim().toLowerCase();
+    if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
+    const existing = sqlite.prepare("SELECT id FROM nurses WHERE lower(accountEmail) = ? AND id != ?").get(norm, nurseId);
+    if (existing) return { ok: false, reason: "in_use" };
+    sqlite.prepare("UPDATE nurses SET accountEmail = ? WHERE id = ?").run(norm, nurseId);
+    return { ok: true };
+  }
 
   if (email === null) {
     await dbConn.update(nurses).set({ accountEmail: null, linkedUserId: null }).where(eq(nurses.id, nurseId));
@@ -516,6 +568,13 @@ export async function adminSetNurseAccountEmail(
   if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
 
   try {
+    const conflict = await dbConn
+      .select({ id: nurses.id })
+      .from(nurses)
+      .where(and(sql`lower(${nurses.accountEmail}) = ${norm}`, sql`${nurses.id} != ${nurseId}`))
+      .limit(1);
+    if (conflict.length > 0) return { ok: false, reason: "in_use" };
+
     await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
     return { ok: true };
   } catch (error: any) {
@@ -537,9 +596,22 @@ export async function changeNurseAccountEmail(
   if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
 
   const dbConn = await getDb();
-  if (!dbConn) return { ok: false, reason: "in_use" };
+  if (!dbConn) {
+    const sqlite = getSqliteDb();
+    const existing = sqlite.prepare("SELECT id FROM nurses WHERE lower(accountEmail) = ? AND id != ?").get(norm, nurseId);
+    if (existing) return { ok: false, reason: "in_use" };
+    sqlite.prepare("UPDATE nurses SET accountEmail = ? WHERE id = ?").run(norm, nurseId);
+    return { ok: true };
+  }
 
   try {
+    const conflict = await dbConn
+      .select({ id: nurses.id })
+      .from(nurses)
+      .where(and(sql`lower(${nurses.accountEmail}) = ${norm}`, sql`${nurses.id} != ${nurseId}`))
+      .limit(1);
+    if (conflict.length > 0) return { ok: false, reason: "in_use" };
+
     await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
     return { ok: true };
   } catch (error: any) {
@@ -1583,13 +1655,17 @@ export async function isEmailDuplicate(params: {
   emailType: string;
   referenceId?: number | null;
   thresholdKey?: string | null;
+  includeMock?: boolean;
 }): Promise<boolean> {
+  const countMock = params.includeMock ?? !process.env.RESEND_API_KEY;
+  const statuses = countMock ? ["sent", "mock_sent"] : ["sent"];
+
   const db = await getDb();
   if (db) {
     const conditions = [
       eq(emailLogs.nurseId, params.nurseId),
       eq(emailLogs.emailType, params.emailType),
-      inArray(emailLogs.status, ["sent", "mock_sent"]),
+      inArray(emailLogs.status, statuses),
     ];
     if (params.referenceId !== undefined) {
       conditions.push(params.referenceId === null ? isNull(emailLogs.referenceId) : eq(emailLogs.referenceId, params.referenceId));
@@ -1601,7 +1677,8 @@ export async function isEmailDuplicate(params: {
     return rows.length > 0;
   }
   const sqlite = getSqliteDb();
-  let query = `SELECT id FROM emailLogs WHERE nurseId = ? AND emailType = ? AND status IN ('sent', 'mock_sent')`;
+  const statusList = statuses.map((s) => `'${s}'`).join(", ");
+  let query = `SELECT id FROM emailLogs WHERE nurseId = ? AND emailType = ? AND status IN (${statusList})`;
   const binds: any[] = [params.nurseId, params.emailType];
   if (params.referenceId !== undefined) {
     if (params.referenceId === null) {
@@ -1631,4 +1708,56 @@ export async function listRecentEmailLogs(limit = 50) {
   }
   const sqlite = getSqliteDb();
   return sqlite.prepare(`SELECT * FROM emailLogs ORDER BY sentAt DESC LIMIT ?`).all(limit) as EmailLog[];
+}
+
+/* ---------------- Reminder Lock / Lease ---------------- */
+export async function acquireReminderLock(leaseDurationMs = 5 * 60 * 1000): Promise<boolean> {
+  const now = Date.now();
+  const expiresAt = now + leaseDurationMs;
+  const dbConn = await getDb();
+  if (dbConn) {
+    const current = await dbConn.select().from(appSettings).where(eq(appSettings.key, "reminder_lock")).limit(1);
+    if (current.length > 0 && current[0].value) {
+      try {
+        const parsed = JSON.parse(current[0].value);
+        if (parsed.leaseExpiresAt && parsed.leaseExpiresAt > now) {
+          return false;
+        }
+      } catch {
+        // Corrupt lock value, proceed to override
+      }
+    }
+    const val = JSON.stringify({ lockedAt: now, leaseExpiresAt: expiresAt });
+    await dbConn
+      .insert(appSettings)
+      .values({ key: "reminder_lock", value: val })
+      .onConflictDoUpdate({ target: appSettings.key, set: { value: val } });
+    return true;
+  }
+
+  const sqlite = getSqliteDb();
+  const row = sqlite.prepare("SELECT value FROM appSettings WHERE key = ?").get("reminder_lock") as any;
+  if (row?.value) {
+    try {
+      const parsed = JSON.parse(row.value);
+      if (parsed.leaseExpiresAt && parsed.leaseExpiresAt > now) {
+        return false;
+      }
+    } catch {
+      // Corrupt lock value
+    }
+  }
+  const val = JSON.stringify({ lockedAt: now, leaseExpiresAt: expiresAt });
+  sqlite.prepare("INSERT INTO appSettings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run("reminder_lock", val);
+  return true;
+}
+
+export async function releaseReminderLock(): Promise<void> {
+  const dbConn = await getDb();
+  if (dbConn) {
+    await dbConn.delete(appSettings).where(eq(appSettings.key, "reminder_lock"));
+    return;
+  }
+  const sqlite = getSqliteDb();
+  sqlite.prepare("DELETE FROM appSettings WHERE key = ?").run("reminder_lock");
 }

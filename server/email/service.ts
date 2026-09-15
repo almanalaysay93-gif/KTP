@@ -24,9 +24,26 @@ const DEFAULT_FROM = process.env.EMAIL_FROM || "SKTI NurseTrack <onboarding@rese
  * Automatically records an entry in emailLogs for audit and deduplication.
  */
 export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult> {
+  const isProd = process.env.NODE_ENV === "production";
   const apiKey = process.env.NODE_ENV === "test" && !process.env.TEST_RESEND_LIVE ? undefined : process.env.RESEND_API_KEY;
 
   if (!apiKey) {
+    if (isProd) {
+      const errText = "Email service unconfigured: RESEND_API_KEY missing in production";
+      console.error(`[Email:ConfigError] ${errText}`);
+      await recordEmailLog({
+        nurseId: opts.nurseId,
+        recipientEmail: opts.to,
+        emailType: opts.emailType,
+        referenceId: opts.referenceId ?? null,
+        thresholdKey: opts.thresholdKey ?? null,
+        subject: opts.subject,
+        status: "failed",
+        errorMessage: errText,
+      });
+      return { success: false, status: "failed", error: errText };
+    }
+
     // Mock mode: log dispatch and record in ledger
     console.log(`[Email:Mock] To: ${opts.to} | Subject: "${opts.subject}" | Type: ${opts.emailType}`);
     await recordEmailLog({
@@ -45,6 +62,7 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
+      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import crypto from "crypto";
 import express, { type Request, type Response } from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./_core/oauth";
@@ -32,6 +33,37 @@ async function getApp(): Promise<express.Express> {
 
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+
+  app.get("/api/cron/daily-reminders", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const authHeader = req.headers["authorization"];
+    const cronSecret = process.env.CRON_SECRET;
+
+    if (!cronSecret || cronSecret.length < 16) {
+      return res.status(500).json({ error: "CRON_SECRET is unconfigured or insecure on server" });
+    }
+
+    const expected = `Bearer ${cronSecret}`;
+    if (
+      typeof authHeader !== "string" ||
+      authHeader.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected))
+    ) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    try {
+      const { runDailyReminderJob } = await import("./scheduled");
+      const result = await runDailyReminderJob();
+      if (result.locked) {
+        return res.status(409).json({ error: result.message });
+      }
+      return res.status(200).json({ ok: true, result });
+    } catch (err: any) {
+      console.error("[Cron:DailyReminders] Execution failed:", err);
+      return res.status(500).json({ error: "Daily reminder job execution failed" });
+    }
+  });
 
   app.post("/api/admin/import-staff-emails", importStaffEmailsHandler);
   app.post("/api/admin/import-staff-roster", importStaffRosterHandler);

@@ -43,13 +43,22 @@ export const staffProcedure = t.procedure.use(
     if (ctx.user) {
       const nurse = await db.getNurseByLinkedUserId(ctx.user.id);
       if (nurse) {
-        return next({ ctx: { ...ctx, nurseId: nurse.id, authMode: "google" as StaffAuthMode } });
+        const userEmail = (ctx.user.email ?? "").trim().toLowerCase();
+        const nurseEmail = (nurse.accountEmail ?? "").trim().toLowerCase();
+        if (userEmail && nurseEmail && userEmail === nurseEmail && !nurse.archivedAt) {
+          return next({ ctx: { ...ctx, nurseId: nurse.id, authMode: "google" as StaffAuthMode } });
+        }
+        // If email was changed or nurse was archived, old session loses access immediately.
+        // Never fall through to claim cookie when Google user identity is present.
+        throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
       }
     }
 
     if (ctx.claimNurseId) {
       return next({ ctx: { ...ctx, nurseId: ctx.claimNurseId, authMode: "claim" as StaffAuthMode } });
     }
+
+    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
 
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }),

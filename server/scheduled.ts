@@ -1,8 +1,59 @@
 import { runDailyReminders } from "./reminders";
-import { todayDate } from "../shared/nursetrack";
-import { runLicenseExpiryEmailPass, runUpcomingSeminarEmailPass } from "./email/dispatcher";
+import { runLicenseExpiryEmailPass, runUpcomingSeminarEmailPass, type EmailPassResult } from "./email/dispatcher";
+import { acquireReminderLock, releaseReminderLock } from "./db";
 
-const DAILY_RUN_HOUR = 8; // 08:00 server local time, matching the original cron intent
+/** Computes current date string in Asia/Manila timezone (YYYY-MM-DD). */
+export function getManilaDateKey(): string {
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" });
+  return formatter.format(new Date());
+}
+
+export interface DailyReminderJobResult {
+  ok: boolean;
+  dateKey: string;
+  notifications: { created: number; skippedExisting: number; expiredCredentials: number; archivedSkipped: number };
+  expiryEmails: EmailPassResult;
+  seminarEmails: EmailPassResult;
+  locked?: boolean;
+  message?: string;
+}
+
+/**
+ * Shared awaited runner for daily reminders.
+ * Acquires DB-backed concurrency lock to prevent overlapping runs.
+ * Evaluates in-app notifications, license expiry emails, and seminar reminders.
+ */
+export async function runDailyReminderJob(dateKey = getManilaDateKey()): Promise<DailyReminderJobResult> {
+  const acquired = await acquireReminderLock();
+  if (!acquired) {
+    return {
+      ok: false,
+      dateKey,
+      locked: true,
+      message: "Reminder job is already running or locked",
+      notifications: { created: 0, skippedExisting: 0, expiredCredentials: 0, archivedSkipped: 0 },
+      expiryEmails: { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 },
+      seminarEmails: { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 },
+    };
+  }
+
+  try {
+    const notifications = await runDailyReminders(dateKey);
+    const expiryEmails = await runLicenseExpiryEmailPass(dateKey);
+    const seminarEmails = await runUpcomingSeminarEmailPass();
+    return {
+      ok: true,
+      dateKey,
+      notifications,
+      expiryEmails,
+      seminarEmails,
+    };
+  } finally {
+    await releaseReminderLock();
+  }
+}
+
+const DAILY_RUN_HOUR = 8; // 08:00 server local time
 
 function msUntilNextRun(): number {
   const now = new Date();
@@ -13,39 +64,13 @@ function msUntilNextRun(): number {
   return next.getTime() - now.getTime();
 }
 
-async function runOnce() {
-  const today = todayDate();
-  try {
-    const results = await runDailyReminders(today);
-    console.log(`[DailyReminders] ran for ${today}:`, results);
-  } catch (error) {
-    console.error("[DailyReminders] failed:", error);
-  }
-
-  try {
-    const expiryEmails = await runLicenseExpiryEmailPass(today);
-    console.log(`[EmailDispatcher:Expiry] ran for ${today}:`, expiryEmails);
-  } catch (error) {
-    console.error("[EmailDispatcher:Expiry] failed:", error);
-  }
-
-  try {
-    const seminarEmails = await runUpcomingSeminarEmailPass();
-    console.log(`[EmailDispatcher:Seminars] ran for ${today}:`, seminarEmails);
-  } catch (error) {
-    console.error("[EmailDispatcher:Seminars] failed:", error);
-  }
-}
-
 /**
- * Runs the license-reminder pass once a day at DAILY_RUN_HOUR. Idempotent —
- * duplicate runs (restarts, missed days caught up) are safe by DB constraint.
- * Replaces the Manus Heartbeat cron that isn't available off Manus hosting.
+ * Standalone scheduler for non-serverless hosting.
  */
 export function startDailyReminderScheduler() {
   const scheduleNext = () => {
     setTimeout(async () => {
-      await runOnce();
+      await runDailyReminderJob();
       scheduleNext();
     }, msUntilNextRun());
   };

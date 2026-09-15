@@ -93,15 +93,30 @@ export async function fetchLinkedNursesWithExpiringCredentials(): Promise<Active
   }));
 }
 
+export interface EmailPassResult {
+  /** Eligible recipients evaluated for this pass. */
+  processed: number;
+  /** Successfully accepted by delivery provider. */
+  sent: number;
+  /** Dispatched in local mock mode without real provider. */
+  mockSent: number;
+  /** Provider rejections, timeouts, or configuration errors. */
+  failed: number;
+  /** Skipped due to previous delivery, deduplication, or missing email address. */
+  skipped: number;
+}
+
 /**
  * License expiration daily pass.
  * Evaluates credentials for linked nurses against 90d, 60d, 30d, 7d, and expired milestones.
  * Skips unlinked nurses or already-notified thresholds.
  */
-export async function runLicenseExpiryEmailPass(today = todayDate()): Promise<{ processed: number; sent: number; skipped: number }> {
+export async function runLicenseExpiryEmailPass(today = todayDate()): Promise<EmailPassResult> {
   const records = await fetchLinkedNursesWithExpiringCredentials();
   let processed = 0;
   let sent = 0;
+  let mockSent = 0;
+  let failed = 0;
   let skipped = 0;
 
   for (const record of records) {
@@ -149,7 +164,7 @@ export async function runLicenseExpiryEmailPass(today = todayDate()): Promise<{ 
         ? `[Action Required] ${record.typeName} expires in ${daysLeft} days`
         : `Renewal Notice: ${record.typeName} expires in ${daysLeft} days`;
 
-      await sendEmail({
+      const res = await sendEmail({
         to: record.accountEmail,
         subject,
         html,
@@ -159,12 +174,18 @@ export async function runLicenseExpiryEmailPass(today = todayDate()): Promise<{ 
         thresholdKey: `${thresh.key}-${record.renewalCycleKey}`,
       });
 
-      sent++;
+      if (res.status === "sent") {
+        sent++;
+      } else if (res.status === "mock_sent") {
+        mockSent++;
+      } else {
+        failed++;
+      }
       break; // Send highest matching threshold for this credential today
     }
   }
 
-  return { processed, sent, skipped };
+  return { processed, sent, mockSent, failed, skipped };
 }
 
 /**
@@ -172,7 +193,7 @@ export async function runLicenseExpiryEmailPass(today = todayDate()): Promise<{ 
  * Finds training events scheduled within 48 to 72 hours, retrieves registered attendees who are linked,
  * and sends reminder emails if not already sent.
  */
-export async function runUpcomingSeminarEmailPass(): Promise<{ processed: number; sent: number }> {
+export async function runUpcomingSeminarEmailPass(): Promise<EmailPassResult> {
   const db = await getDb();
   let upcomingEvents: { id: number; startDate: string; startTime: string | null; venue: string | null; trainingName: string }[] = [];
 
@@ -210,6 +231,9 @@ export async function runUpcomingSeminarEmailPass(): Promise<{ processed: number
 
   let processed = 0;
   let sent = 0;
+  let mockSent = 0;
+  let failed = 0;
+  let skipped = 0;
 
   for (const ev of upcomingEvents) {
     let attendees: { nurseId: number; firstName: string; middleName: string | null; lastName: string; suffix: string | null; accountEmail: string }[] = [];
@@ -253,7 +277,10 @@ export async function runUpcomingSeminarEmailPass(): Promise<{ processed: number
         thresholdKey: "48h",
       });
 
-      if (isDup) continue;
+      if (isDup) {
+        skipped++;
+        continue;
+      }
 
       const html = renderSeminarReminderEmail({
         nurseName: nurseFullName(att),
@@ -263,7 +290,7 @@ export async function runUpcomingSeminarEmailPass(): Promise<{ processed: number
         actionUrl: `${APP_URL}/me`,
       });
 
-      await sendEmail({
+      const res = await sendEmail({
         to: att.accountEmail,
         subject: `Reminder: ${ev.trainingName} in 48 Hours`,
         html,
@@ -273,9 +300,15 @@ export async function runUpcomingSeminarEmailPass(): Promise<{ processed: number
         thresholdKey: "48h",
       });
 
-      sent++;
+      if (res.status === "sent") {
+        sent++;
+      } else if (res.status === "mock_sent") {
+        mockSent++;
+      } else {
+        failed++;
+      }
     }
   }
 
-  return { processed, sent };
+  return { processed, sent, mockSent, failed, skipped };
 }

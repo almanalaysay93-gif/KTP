@@ -872,6 +872,7 @@ var db_exports = {};
 __export(db_exports, {
   INACTIVE_STATUS_SQL_LIST: () => INACTIVE_STATUS_SQL_LIST,
   acknowledgeReminder: () => acknowledgeReminder,
+  acquireReminderLock: () => acquireReminderLock,
   activeNurseCondition: () => activeNurseCondition,
   adminSetNurseAccountEmail: () => adminSetNurseAccountEmail,
   autoLinkNurseByEmail: () => autoLinkNurseByEmail,
@@ -934,6 +935,7 @@ __export(db_exports, {
   markNotificationRead: () => markNotificationRead,
   markReminderExpiredByCredential: () => markReminderExpiredByCredential,
   recordEmailLog: () => recordEmailLog,
+  releaseReminderLock: () => releaseReminderLock,
   saveClaimEmail: () => saveClaimEmail,
   searchNurses: () => searchNurses,
   setAreaTrainingRequirement: () => setAreaTrainingRequirement,
@@ -1239,9 +1241,12 @@ async function getNurseByEmployeeId(employeeId) {
 }
 async function getNurseByLinkedUserId(userId) {
   const db = await getDb();
-  if (!db) return void 0;
-  const rows = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
-  return rows[0];
+  if (db) {
+    const rows = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
+    return rows[0];
+  }
+  const sqlite = getSqliteDb();
+  return sqlite.prepare("SELECT * FROM nurses WHERE linkedUserId = ?").get(userId);
 }
 async function findNurseIdsByLicenseNumber(licenseNumber) {
   const db = await getDb();
@@ -1272,15 +1277,36 @@ async function bulkSetAccountEmailsByLicense(rows) {
 }
 async function autoLinkNurseByEmail(userId, email) {
   if (!email) return;
-  const db = await getDb();
-  if (!db) return;
-  const existing = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
-  if (existing.length > 0) return;
   const norm = email.trim().toLowerCase();
-  const rows = await db.select().from(nurses).where(sql2`lower(${nurses.accountEmail}) = ${norm}`).limit(1);
+  if (!norm || isBlockedStaffEmail(norm)) return;
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const existing2 = sqlite.prepare("SELECT id FROM nurses WHERE linkedUserId = ?").get(userId);
+    if (existing2) return;
+    const candidate2 = sqlite.prepare("SELECT id, linkedUserId, employmentStatus, archivedAt FROM nurses WHERE lower(accountEmail) = ?").get(norm);
+    if (!candidate2 || candidate2.archivedAt) return;
+    if (INACTIVE_EMPLOYMENT_STATUSES.includes(candidate2.employmentStatus)) return;
+    sqlite.prepare("UPDATE nurses SET linkedUserId = ? WHERE id = ? AND lower(accountEmail) = ?").run(userId, candidate2.id, norm);
+    return;
+  }
+  const existing = await db.select({ id: nurses.id }).from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
+  if (existing.length > 0) return;
+  const rows = await db.select({
+    id: nurses.id,
+    linkedUserId: nurses.linkedUserId,
+    employmentStatus: nurses.employmentStatus,
+    archivedAt: nurses.archivedAt
+  }).from(nurses).where(sql2`lower(${nurses.accountEmail}) = ${norm}`).limit(1);
   const candidate = rows[0];
-  if (!candidate || candidate.linkedUserId) return;
-  await db.update(nurses).set({ linkedUserId: userId }).where(eq(nurses.id, candidate.id));
+  if (!candidate || candidate.archivedAt) return;
+  if (INACTIVE_EMPLOYMENT_STATUSES.includes(candidate.employmentStatus)) return;
+  await db.update(nurses).set({ linkedUserId: userId }).where(
+    and(
+      eq(nurses.id, candidate.id),
+      sql2`lower(${nurses.accountEmail}) = ${norm}`
+    )
+  );
 }
 function isNurseClaimable(nurse) {
   if (!nurse) return false;
@@ -1332,7 +1358,19 @@ async function saveClaimEmail(nurseId, email) {
 }
 async function adminSetNurseAccountEmail(nurseId, email) {
   const dbConn = await getDb();
-  if (!dbConn) return { ok: false, reason: "in_use" };
+  if (!dbConn) {
+    const sqlite = getSqliteDb();
+    if (email === null) {
+      sqlite.prepare("UPDATE nurses SET accountEmail = NULL, linkedUserId = NULL WHERE id = ?").run(nurseId);
+      return { ok: true };
+    }
+    const norm2 = email.trim().toLowerCase();
+    if (isBlockedStaffEmail(norm2)) return { ok: false, reason: "in_use" };
+    const existing = sqlite.prepare("SELECT id FROM nurses WHERE lower(accountEmail) = ? AND id != ?").get(norm2, nurseId);
+    if (existing) return { ok: false, reason: "in_use" };
+    sqlite.prepare("UPDATE nurses SET accountEmail = ? WHERE id = ?").run(norm2, nurseId);
+    return { ok: true };
+  }
   if (email === null) {
     await dbConn.update(nurses).set({ accountEmail: null, linkedUserId: null }).where(eq(nurses.id, nurseId));
     return { ok: true };
@@ -1340,6 +1378,8 @@ async function adminSetNurseAccountEmail(nurseId, email) {
   const norm = email.trim().toLowerCase();
   if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
   try {
+    const conflict = await dbConn.select({ id: nurses.id }).from(nurses).where(and(sql2`lower(${nurses.accountEmail}) = ${norm}`, sql2`${nurses.id} != ${nurseId}`)).limit(1);
+    if (conflict.length > 0) return { ok: false, reason: "in_use" };
     await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
     return { ok: true };
   } catch (error) {
@@ -1351,8 +1391,16 @@ async function changeNurseAccountEmail(nurseId, email) {
   const norm = email.trim().toLowerCase();
   if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
   const dbConn = await getDb();
-  if (!dbConn) return { ok: false, reason: "in_use" };
+  if (!dbConn) {
+    const sqlite = getSqliteDb();
+    const existing = sqlite.prepare("SELECT id FROM nurses WHERE lower(accountEmail) = ? AND id != ?").get(norm, nurseId);
+    if (existing) return { ok: false, reason: "in_use" };
+    sqlite.prepare("UPDATE nurses SET accountEmail = ? WHERE id = ?").run(norm, nurseId);
+    return { ok: true };
+  }
   try {
+    const conflict = await dbConn.select({ id: nurses.id }).from(nurses).where(and(sql2`lower(${nurses.accountEmail}) = ${norm}`, sql2`${nurses.id} != ${nurseId}`)).limit(1);
+    if (conflict.length > 0) return { ok: false, reason: "in_use" };
     await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
     return { ok: true };
   } catch (error) {
@@ -2334,12 +2382,14 @@ async function recordEmailLog(data) {
   return Number(info.lastInsertRowid);
 }
 async function isEmailDuplicate(params) {
+  const countMock = params.includeMock ?? !process.env.RESEND_API_KEY;
+  const statuses = countMock ? ["sent", "mock_sent"] : ["sent"];
   const db = await getDb();
   if (db) {
     const conditions = [
       eq(emailLogs.nurseId, params.nurseId),
       eq(emailLogs.emailType, params.emailType),
-      inArray(emailLogs.status, ["sent", "mock_sent"])
+      inArray(emailLogs.status, statuses)
     ];
     if (params.referenceId !== void 0) {
       conditions.push(params.referenceId === null ? isNull(emailLogs.referenceId) : eq(emailLogs.referenceId, params.referenceId));
@@ -2351,7 +2401,8 @@ async function isEmailDuplicate(params) {
     return rows.length > 0;
   }
   const sqlite = getSqliteDb();
-  let query = `SELECT id FROM emailLogs WHERE nurseId = ? AND emailType = ? AND status IN ('sent', 'mock_sent')`;
+  const statusList = statuses.map((s) => `'${s}'`).join(", ");
+  let query = `SELECT id FROM emailLogs WHERE nurseId = ? AND emailType = ? AND status IN (${statusList})`;
   const binds = [params.nurseId, params.emailType];
   if (params.referenceId !== void 0) {
     if (params.referenceId === null) {
@@ -2381,6 +2432,49 @@ async function listRecentEmailLogs(limit = 50) {
   const sqlite = getSqliteDb();
   return sqlite.prepare(`SELECT * FROM emailLogs ORDER BY sentAt DESC LIMIT ?`).all(limit);
 }
+async function acquireReminderLock(leaseDurationMs = 5 * 60 * 1e3) {
+  const now = Date.now();
+  const expiresAt = now + leaseDurationMs;
+  const dbConn = await getDb();
+  if (dbConn) {
+    const current = await dbConn.select().from(appSettings).where(eq(appSettings.key, "reminder_lock")).limit(1);
+    if (current.length > 0 && current[0].value) {
+      try {
+        const parsed = JSON.parse(current[0].value);
+        if (parsed.leaseExpiresAt && parsed.leaseExpiresAt > now) {
+          return false;
+        }
+      } catch {
+      }
+    }
+    const val2 = JSON.stringify({ lockedAt: now, leaseExpiresAt: expiresAt });
+    await dbConn.insert(appSettings).values({ key: "reminder_lock", value: val2 }).onConflictDoUpdate({ target: appSettings.key, set: { value: val2 } });
+    return true;
+  }
+  const sqlite = getSqliteDb();
+  const row = sqlite.prepare("SELECT value FROM appSettings WHERE key = ?").get("reminder_lock");
+  if (row?.value) {
+    try {
+      const parsed = JSON.parse(row.value);
+      if (parsed.leaseExpiresAt && parsed.leaseExpiresAt > now) {
+        return false;
+      }
+    } catch {
+    }
+  }
+  const val = JSON.stringify({ lockedAt: now, leaseExpiresAt: expiresAt });
+  sqlite.prepare("INSERT INTO appSettings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run("reminder_lock", val);
+  return true;
+}
+async function releaseReminderLock() {
+  const dbConn = await getDb();
+  if (dbConn) {
+    await dbConn.delete(appSettings).where(eq(appSettings.key, "reminder_lock"));
+    return;
+  }
+  const sqlite = getSqliteDb();
+  sqlite.prepare("DELETE FROM appSettings WHERE key = ?").run("reminder_lock");
+}
 var _db, _batchPg, INACTIVE_STATUS_SQL_LIST, normalizeForMatch;
 var init_db = __esm({
   "server/db.ts"() {
@@ -2402,8 +2496,24 @@ __export(service_exports, {
   sendEmail: () => sendEmail
 });
 async function sendEmail(opts) {
+  const isProd = process.env.NODE_ENV === "production";
   const apiKey = process.env.NODE_ENV === "test" && !process.env.TEST_RESEND_LIVE ? void 0 : process.env.RESEND_API_KEY;
   if (!apiKey) {
+    if (isProd) {
+      const errText = "Email service unconfigured: RESEND_API_KEY missing in production";
+      console.error(`[Email:ConfigError] ${errText}`);
+      await recordEmailLog({
+        nurseId: opts.nurseId,
+        recipientEmail: opts.to,
+        emailType: opts.emailType,
+        referenceId: opts.referenceId ?? null,
+        thresholdKey: opts.thresholdKey ?? null,
+        subject: opts.subject,
+        status: "failed",
+        errorMessage: errText
+      });
+      return { success: false, status: "failed", error: errText };
+    }
     console.log(`[Email:Mock] To: ${opts.to} | Subject: "${opts.subject}" | Type: ${opts.emailType}`);
     await recordEmailLog({
       nurseId: opts.nurseId,
@@ -2420,6 +2530,7 @@ async function sendEmail(opts) {
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
+      signal: AbortSignal.timeout(8e3),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
@@ -2703,6 +2814,141 @@ var init_templates = __esm({
   }
 });
 
+// server/reminders.ts
+import { eq as eq5, isNull as isNull5, sql as sql6 } from "drizzle-orm";
+async function fetchActiveCredentials() {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({
+    id: nurseCredentials.id,
+    nurseId: nurseCredentials.nurseId,
+    credentialTypeId: nurseCredentials.credentialTypeId,
+    expiryDate: nurseCredentials.expiryDate,
+    renewalCycleKey: nurseCredentials.renewalCycleKey,
+    employeeId: nurses.employeeId,
+    firstName: nurses.firstName,
+    middleName: nurses.middleName,
+    lastName: nurses.lastName,
+    suffix: nurses.suffix,
+    archivedAt: nurses.archivedAt,
+    currentAreaId: nurses.currentAreaId
+  }).from(nurseCredentials).innerJoin(nurses, eq5(nurses.id, nurseCredentials.nurseId)).where(isNull5(nurses.archivedAt));
+  return rows.map((r) => ({
+    id: Number(r.id),
+    nurseId: Number(r.nurseId),
+    credentialTypeId: Number(r.credentialTypeId),
+    expiryDate: r.expiryDate,
+    renewalCycleKey: String(r.renewalCycleKey),
+    nurse: {
+      id: Number(r.nurseId),
+      employeeId: String(r.employeeId),
+      firstName: String(r.firstName),
+      middleName: r.middleName ?? null,
+      lastName: String(r.lastName),
+      suffix: r.suffix ?? null,
+      archivedAt: r.archivedAt ?? null,
+      currentAreaId: r.currentAreaId != null ? Number(r.currentAreaId) : null
+    }
+  }));
+}
+async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
+  const db = await getDb();
+  const results = { created: 0, skippedExisting: 0, expiredCredentials: 0, archivedSkipped: 0 };
+  const credentials = await fetchActiveCredentials();
+  if (!db) return results;
+  const areaRows = await listAreas(false);
+  const areaById = new Map(areaRows.map((a) => [a.id, a.name]));
+  const existingReminders = await listReminders();
+  const existingSet = new Set(
+    existingReminders.map((r) => `${r.credentialId}:${r.thresholdDays}:${r.renewalCycleKey}`)
+  );
+  const duePairs = [];
+  const expiredIds = [];
+  const expiredNotes = [];
+  for (const cred of credentials) {
+    if (cred.nurse.archivedAt) {
+      results.archivedSkipped++;
+      continue;
+    }
+    const days = daysUntilExpiry(dateKey(cred.expiryDate), today);
+    const status = deriveLicenseStatus(dateKey(cred.expiryDate), today);
+    if (status === "Expired") {
+      expiredIds.push(cred.id);
+      expiredNotes.push({ cred });
+      continue;
+    }
+    for (const threshold of thresholds) {
+      if (days > threshold) continue;
+      const cycleKey = `${cred.id}:${threshold}:${cred.renewalCycleKey}`;
+      if (existingSet.has(cycleKey)) {
+        results.skippedExisting++;
+        continue;
+      }
+      const areaName = cred.nurse.currentAreaId ? areaById.get(cred.nurse.currentAreaId) ?? "Unknown area" : "Unassigned";
+      duePairs.push({ cred, threshold, days, areaName });
+    }
+  }
+  if (duePairs.length > 0) {
+    const rows = duePairs.map(({ cred, threshold }) => ({
+      credentialId: cred.id,
+      thresholdDays: threshold,
+      renewalCycleKey: cred.renewalCycleKey,
+      triggerDate: new Date((/* @__PURE__ */ new Date(`${today}T00:00:00`)).getTime() + threshold * 864e5)
+    }));
+    await db.insert(licenseReminders).values(rows).onConflictDoNothing();
+    results.created = duePairs.length;
+  }
+  if (expiredIds.length > 0) {
+    const db2 = await getDb();
+    if (db2) {
+      await db2.update(licenseReminders).set({ status: "expired" }).where(sql6`${licenseReminders.credentialId} IN (${sql6.join(expiredIds.map((i) => sql6`${i}`), sql6`, `)})`);
+    }
+  }
+  const expiredNotifs = expiredNotes.map(({ cred }) => ({
+    type: "license.expired",
+    severity: "urgent_or_expired",
+    title: `License expired \u2014 ${cred.nurse.firstName} ${cred.nurse.lastName}`,
+    message: `The license (${cred.renewalCycleKey}) for ${cred.nurse.firstName} ${cred.nurse.lastName} expired. Mark renewal as complete to start a new cycle.`,
+    nurseId: cred.nurseId,
+    relatedEntityType: "credential",
+    relatedEntityId: cred.id
+  }));
+  if (expiredNotifs.length > 0) {
+    await createNotificationsBatch(expiredNotifs);
+  }
+  results.expiredCredentials = expiredIds.length;
+  const notifsByCred = /* @__PURE__ */ new Map();
+  for (const pair of duePairs) {
+    const prev = notifsByCred.get(pair.cred.id);
+    if (!prev || pair.threshold < prev.threshold) {
+      notifsByCred.set(pair.cred.id, pair);
+    }
+  }
+  const notifPayloads = Array.from(notifsByCred.values()).map(({ cred, threshold, days }) => ({
+    type: "license.renewalReminder",
+    severity: threshold >= 365 ? "attention" : "upcoming_renewal",
+    title: `${threshold === 365 ? "1-year" : `${threshold}-day`} renewal reminder \u2014 ${cred.nurse.firstName} ${cred.nurse.lastName}`,
+    message: `${cred.nurse.firstName} ${cred.nurse.lastName} has a license expiring in ${days <= 0 ? "about " + (Math.abs(days) + 1) + " day(s) (due " + dateKey(cred.expiryDate) + ")" : days + " days"}. Review the license and begin renewal.`,
+    nurseId: cred.nurseId,
+    relatedEntityType: "credential",
+    relatedEntityId: cred.id
+  }));
+  if (notifPayloads.length > 0) {
+    await createNotificationsBatch(notifPayloads);
+  }
+  return results;
+}
+var DEFAULT_THRESHOLDS;
+var init_reminders = __esm({
+  "server/reminders.ts"() {
+    "use strict";
+    init_schema();
+    init_db();
+    init_nursetrack();
+    DEFAULT_THRESHOLDS = [365, 180];
+  }
+});
+
 // server/email/dispatcher.ts
 var dispatcher_exports = {};
 __export(dispatcher_exports, {
@@ -2771,6 +3017,8 @@ async function runLicenseExpiryEmailPass(today = todayDate()) {
   const records = await fetchLinkedNursesWithExpiringCredentials();
   let processed = 0;
   let sent = 0;
+  let mockSent = 0;
+  let failed = 0;
   let skipped = 0;
   for (const record of records) {
     if (!record.accountEmail || !record.expiryDate) {
@@ -2802,7 +3050,7 @@ async function runLicenseExpiryEmailPass(today = todayDate()) {
         actionUrl: `${APP_URL}/me`
       });
       const subject = daysLeft <= 0 ? `[URGENT] License Expired: ${record.typeName} (${record.licenseNumber})` : daysLeft <= 30 ? `[Action Required] ${record.typeName} expires in ${daysLeft} days` : `Renewal Notice: ${record.typeName} expires in ${daysLeft} days`;
-      await sendEmail({
+      const res = await sendEmail({
         to: record.accountEmail,
         subject,
         html,
@@ -2811,11 +3059,17 @@ async function runLicenseExpiryEmailPass(today = todayDate()) {
         referenceId: record.credentialId,
         thresholdKey: `${thresh.key}-${record.renewalCycleKey}`
       });
-      sent++;
+      if (res.status === "sent") {
+        sent++;
+      } else if (res.status === "mock_sent") {
+        mockSent++;
+      } else {
+        failed++;
+      }
       break;
     }
   }
-  return { processed, sent, skipped };
+  return { processed, sent, mockSent, failed, skipped };
 }
 async function runUpcomingSeminarEmailPass() {
   const db = await getDb();
@@ -2848,6 +3102,9 @@ async function runUpcomingSeminarEmailPass() {
   }
   let processed = 0;
   let sent = 0;
+  let mockSent = 0;
+  let failed = 0;
+  let skipped = 0;
   for (const ev of upcomingEvents) {
     let attendees = [];
     if (db) {
@@ -2884,7 +3141,10 @@ async function runUpcomingSeminarEmailPass() {
         referenceId: ev.id,
         thresholdKey: "48h"
       });
-      if (isDup) continue;
+      if (isDup) {
+        skipped++;
+        continue;
+      }
       const html = renderSeminarReminderEmail({
         nurseName: nurseFullName(att),
         seminarTitle: ev.trainingName,
@@ -2892,7 +3152,7 @@ async function runUpcomingSeminarEmailPass() {
         venue: ev.venue,
         actionUrl: `${APP_URL}/me`
       });
-      await sendEmail({
+      const res = await sendEmail({
         to: att.accountEmail,
         subject: `Reminder: ${ev.trainingName} in 48 Hours`,
         html,
@@ -2901,10 +3161,16 @@ async function runUpcomingSeminarEmailPass() {
         referenceId: ev.id,
         thresholdKey: "48h"
       });
-      sent++;
+      if (res.status === "sent") {
+        sent++;
+      } else if (res.status === "mock_sent") {
+        mockSent++;
+      } else {
+        failed++;
+      }
     }
   }
-  return { processed, sent };
+  return { processed, sent, mockSent, failed, skipped };
 }
 var EXPIRY_THRESHOLDS, APP_URL;
 var init_dispatcher = __esm({
@@ -2927,8 +3193,76 @@ var init_dispatcher = __esm({
   }
 });
 
+// server/scheduled.ts
+var scheduled_exports = {};
+__export(scheduled_exports, {
+  getManilaDateKey: () => getManilaDateKey,
+  runDailyReminderJob: () => runDailyReminderJob,
+  startDailyReminderScheduler: () => startDailyReminderScheduler
+});
+function getManilaDateKey() {
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" });
+  return formatter.format(/* @__PURE__ */ new Date());
+}
+async function runDailyReminderJob(dateKey2 = getManilaDateKey()) {
+  const acquired = await acquireReminderLock();
+  if (!acquired) {
+    return {
+      ok: false,
+      dateKey: dateKey2,
+      locked: true,
+      message: "Reminder job is already running or locked",
+      notifications: { created: 0, skippedExisting: 0, expiredCredentials: 0, archivedSkipped: 0 },
+      expiryEmails: { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 },
+      seminarEmails: { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 }
+    };
+  }
+  try {
+    const notifications2 = await runDailyReminders(dateKey2);
+    const expiryEmails = await runLicenseExpiryEmailPass(dateKey2);
+    const seminarEmails = await runUpcomingSeminarEmailPass();
+    return {
+      ok: true,
+      dateKey: dateKey2,
+      notifications: notifications2,
+      expiryEmails,
+      seminarEmails
+    };
+  } finally {
+    await releaseReminderLock();
+  }
+}
+function msUntilNextRun() {
+  const now = /* @__PURE__ */ new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), DAILY_RUN_HOUR, 0, 0, 0);
+  if (next.getTime() <= now.getTime()) {
+    next.setDate(next.getDate() + 1);
+  }
+  return next.getTime() - now.getTime();
+}
+function startDailyReminderScheduler() {
+  const scheduleNext = () => {
+    setTimeout(async () => {
+      await runDailyReminderJob();
+      scheduleNext();
+    }, msUntilNextRun());
+  };
+  scheduleNext();
+}
+var DAILY_RUN_HOUR;
+var init_scheduled = __esm({
+  "server/scheduled.ts"() {
+    "use strict";
+    init_reminders();
+    init_dispatcher();
+    init_db();
+    DAILY_RUN_HOUR = 8;
+  }
+});
+
 // server/vercel.ts
 import "dotenv/config";
+import crypto2 from "crypto";
 import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 
@@ -3350,12 +3684,18 @@ var staffProcedure = t.procedure.use(
     if (ctx.user) {
       const nurse = await getNurseByLinkedUserId(ctx.user.id);
       if (nurse) {
-        return next({ ctx: { ...ctx, nurseId: nurse.id, authMode: "google" } });
+        const userEmail = (ctx.user.email ?? "").trim().toLowerCase();
+        const nurseEmail = (nurse.accountEmail ?? "").trim().toLowerCase();
+        if (userEmail && nurseEmail && userEmail === nurseEmail && !nurse.archivedAt) {
+          return next({ ctx: { ...ctx, nurseId: nurse.id, authMode: "google" } });
+        }
+        throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
       }
     }
     if (ctx.claimNurseId) {
       return next({ ctx: { ...ctx, nurseId: ctx.claimNurseId, authMode: "claim" } });
     }
+    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   })
 );
@@ -3470,7 +3810,7 @@ var nursesRouter = router({
                  from nursetrack."nurseCredentials"
                  where "nurseId" = ${nurseId}
                  order by "expiryDate" desc`,
-          `select id, "nurseId", "trainingId", "completionDate"::text as "completionDate", "expiryDate"::text as "expiryDate", "scheduledDate"::text as "scheduledDate", status, "trainingHours", "cpdUnits", provider, venue, "certificateKey", remarks, "eventId"
+          `select id, "nurseId", "trainingId", "eventId", "participationRole", "completionDate"::text as "completionDate", "expiryDate"::text as "expiryDate", "scheduledDate"::text as "scheduledDate", status, "trainingHours", "cpdUnits", provider, "certificateNumber", "certificateKey", remarks
                  from nursetrack."nurseTrainings"
                  where "nurseId" = ${nurseId}
                  order by "completionDate" desc nulls last, id desc`,
@@ -5925,137 +6265,7 @@ import { eq as eq9 } from "drizzle-orm";
 init_db();
 init_schema();
 init_nursetrack();
-
-// server/reminders.ts
-init_schema();
-init_db();
-init_nursetrack();
-import { eq as eq5, isNull as isNull5, sql as sql6 } from "drizzle-orm";
-var DEFAULT_THRESHOLDS = [365, 180];
-async function fetchActiveCredentials() {
-  const db = await getDb();
-  if (!db) return [];
-  const rows = await db.select({
-    id: nurseCredentials.id,
-    nurseId: nurseCredentials.nurseId,
-    credentialTypeId: nurseCredentials.credentialTypeId,
-    expiryDate: nurseCredentials.expiryDate,
-    renewalCycleKey: nurseCredentials.renewalCycleKey,
-    employeeId: nurses.employeeId,
-    firstName: nurses.firstName,
-    middleName: nurses.middleName,
-    lastName: nurses.lastName,
-    suffix: nurses.suffix,
-    archivedAt: nurses.archivedAt,
-    currentAreaId: nurses.currentAreaId
-  }).from(nurseCredentials).innerJoin(nurses, eq5(nurses.id, nurseCredentials.nurseId)).where(isNull5(nurses.archivedAt));
-  return rows.map((r) => ({
-    id: Number(r.id),
-    nurseId: Number(r.nurseId),
-    credentialTypeId: Number(r.credentialTypeId),
-    expiryDate: r.expiryDate,
-    renewalCycleKey: String(r.renewalCycleKey),
-    nurse: {
-      id: Number(r.nurseId),
-      employeeId: String(r.employeeId),
-      firstName: String(r.firstName),
-      middleName: r.middleName ?? null,
-      lastName: String(r.lastName),
-      suffix: r.suffix ?? null,
-      archivedAt: r.archivedAt ?? null,
-      currentAreaId: r.currentAreaId != null ? Number(r.currentAreaId) : null
-    }
-  }));
-}
-async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
-  const db = await getDb();
-  const results = { created: 0, skippedExisting: 0, expiredCredentials: 0, archivedSkipped: 0 };
-  const credentials = await fetchActiveCredentials();
-  if (!db) return results;
-  const areaRows = await listAreas(false);
-  const areaById = new Map(areaRows.map((a) => [a.id, a.name]));
-  const existingReminders = await listReminders();
-  const existingSet = new Set(
-    existingReminders.map((r) => `${r.credentialId}:${r.thresholdDays}:${r.renewalCycleKey}`)
-  );
-  const duePairs = [];
-  const expiredIds = [];
-  const expiredNotes = [];
-  for (const cred of credentials) {
-    if (cred.nurse.archivedAt) {
-      results.archivedSkipped++;
-      continue;
-    }
-    const days = daysUntilExpiry(dateKey(cred.expiryDate), today);
-    const status = deriveLicenseStatus(dateKey(cred.expiryDate), today);
-    if (status === "Expired") {
-      expiredIds.push(cred.id);
-      expiredNotes.push({ cred });
-      continue;
-    }
-    for (const threshold of thresholds) {
-      if (days > threshold) continue;
-      const cycleKey = `${cred.id}:${threshold}:${cred.renewalCycleKey}`;
-      if (existingSet.has(cycleKey)) {
-        results.skippedExisting++;
-        continue;
-      }
-      const areaName = cred.nurse.currentAreaId ? areaById.get(cred.nurse.currentAreaId) ?? "Unknown area" : "Unassigned";
-      duePairs.push({ cred, threshold, days, areaName });
-    }
-  }
-  if (duePairs.length > 0) {
-    const rows = duePairs.map(({ cred, threshold }) => ({
-      credentialId: cred.id,
-      thresholdDays: threshold,
-      renewalCycleKey: cred.renewalCycleKey,
-      triggerDate: new Date((/* @__PURE__ */ new Date(`${today}T00:00:00`)).getTime() + threshold * 864e5)
-    }));
-    await db.insert(licenseReminders).values(rows).onConflictDoNothing();
-    results.created = duePairs.length;
-  }
-  if (expiredIds.length > 0) {
-    const db2 = await getDb();
-    if (db2) {
-      await db2.update(licenseReminders).set({ status: "expired" }).where(sql6`${licenseReminders.credentialId} IN (${sql6.join(expiredIds.map((i) => sql6`${i}`), sql6`, `)})`);
-    }
-  }
-  const expiredNotifs = expiredNotes.map(({ cred }) => ({
-    type: "license.expired",
-    severity: "urgent_or_expired",
-    title: `License expired \u2014 ${cred.nurse.firstName} ${cred.nurse.lastName}`,
-    message: `The license (${cred.renewalCycleKey}) for ${cred.nurse.firstName} ${cred.nurse.lastName} expired. Mark renewal as complete to start a new cycle.`,
-    nurseId: cred.nurseId,
-    relatedEntityType: "credential",
-    relatedEntityId: cred.id
-  }));
-  if (expiredNotifs.length > 0) {
-    await createNotificationsBatch(expiredNotifs);
-  }
-  results.expiredCredentials = expiredIds.length;
-  const notifsByCred = /* @__PURE__ */ new Map();
-  for (const pair of duePairs) {
-    const prev = notifsByCred.get(pair.cred.id);
-    if (!prev || pair.threshold < prev.threshold) {
-      notifsByCred.set(pair.cred.id, pair);
-    }
-  }
-  const notifPayloads = Array.from(notifsByCred.values()).map(({ cred, threshold, days }) => ({
-    type: "license.renewalReminder",
-    severity: threshold >= 365 ? "attention" : "upcoming_renewal",
-    title: `${threshold === 365 ? "1-year" : `${threshold}-day`} renewal reminder \u2014 ${cred.nurse.firstName} ${cred.nurse.lastName}`,
-    message: `${cred.nurse.firstName} ${cred.nurse.lastName} has a license expiring in ${days <= 0 ? "about " + (Math.abs(days) + 1) + " day(s) (due " + dateKey(cred.expiryDate) + ")" : days + " days"}. Review the license and begin renewal.`,
-    nurseId: cred.nurseId,
-    relatedEntityType: "credential",
-    relatedEntityId: cred.id
-  }));
-  if (notifPayloads.length > 0) {
-    await createNotificationsBatch(notifPayloads);
-  }
-  return results;
-}
-
-// server/routers/settings.ts
+init_reminders();
 init_nursetrack();
 
 // server/seedExcel.ts
@@ -7004,11 +7214,21 @@ var settingsRouter = router({
     return res;
   }),
   triggerEmailPassNow: adminProcedure.mutation(async () => {
-    const { runLicenseExpiryEmailPass: runLicenseExpiryEmailPass2, runUpcomingSeminarEmailPass: runUpcomingSeminarEmailPass2 } = await Promise.resolve().then(() => (init_dispatcher(), dispatcher_exports));
-    const today = todayDate();
-    const expiry = await runLicenseExpiryEmailPass2(today);
-    const seminars = await runUpcomingSeminarEmailPass2();
-    return { expiry, seminars };
+    const { acquireReminderLock: acquireReminderLock2, releaseReminderLock: releaseReminderLock2 } = await Promise.resolve().then(() => (init_db(), db_exports));
+    const acquired = await acquireReminderLock2();
+    if (!acquired) {
+      throw new TRPCError6({ code: "CONFLICT", message: "Another email or reminder pass is currently in progress." });
+    }
+    try {
+      const { runLicenseExpiryEmailPass: runLicenseExpiryEmailPass2, runUpcomingSeminarEmailPass: runUpcomingSeminarEmailPass2 } = await Promise.resolve().then(() => (init_dispatcher(), dispatcher_exports));
+      const { getManilaDateKey: getManilaDateKey2 } = await Promise.resolve().then(() => (init_scheduled(), scheduled_exports));
+      const today = getManilaDateKey2();
+      const expiry = await runLicenseExpiryEmailPass2(today);
+      const seminars = await runUpcomingSeminarEmailPass2();
+      return { expiry, seminars };
+    } finally {
+      await releaseReminderLock2();
+    }
   }),
   listEmailLogs: adminProcedure.input(z10.object({ limit: z10.number().int().min(1).max(100).default(50) }).optional()).query(async ({ input }) => {
     const { listRecentEmailLogs: listRecentEmailLogs2 } = await Promise.resolve().then(() => (init_db(), db_exports));
@@ -8786,6 +9006,29 @@ async function getApp() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  app.get("/api/cron/daily-reminders", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const authHeader = req.headers["authorization"];
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret || cronSecret.length < 16) {
+      return res.status(500).json({ error: "CRON_SECRET is unconfigured or insecure on server" });
+    }
+    const expected = `Bearer ${cronSecret}`;
+    if (typeof authHeader !== "string" || authHeader.length !== expected.length || !crypto2.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    try {
+      const { runDailyReminderJob: runDailyReminderJob2 } = await Promise.resolve().then(() => (init_scheduled(), scheduled_exports));
+      const result = await runDailyReminderJob2();
+      if (result.locked) {
+        return res.status(409).json({ error: result.message });
+      }
+      return res.status(200).json({ ok: true, result });
+    } catch (err) {
+      console.error("[Cron:DailyReminders] Execution failed:", err);
+      return res.status(500).json({ error: "Daily reminder job execution failed" });
+    }
+  });
   app.post("/api/admin/import-staff-emails", importStaffEmailsHandler);
   app.post("/api/admin/import-staff-roster", importStaffRosterHandler);
   app.post("/api/admin/import-staff-areas", importStaffAreasHandler);

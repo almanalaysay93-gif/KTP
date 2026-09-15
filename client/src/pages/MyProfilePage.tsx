@@ -104,13 +104,18 @@ function ClaimEmailCard({ accountEmail }: { accountEmail: string | null }) {
 function ChangeEmailButton({ currentEmail }: { currentEmail: string | null }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
+  const { logout } = useAuth();
+  const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const changeMutation = trpc.staffAccount.changeEmail.useMutation({
-    onSuccess: () => {
-      toast.success("Sign-in email changed. Use it next time you sign in with Google.");
-      utils.staffAccount.myProfile.invalidate();
+    onSuccess: async () => {
+      toast.success("Sign-in email changed. Your old Google session is closed. Please sign in with your new Gmail.");
+      utils.staffAccount.myProfile.setData(undefined, undefined);
+      utils.staffAccount.myLink.setData(undefined, undefined);
       setOpen(false);
       setEmail("");
+      await logout();
+      navigate("/staff-signin");
     },
     onError: (err) => toast.error(err.message),
   });

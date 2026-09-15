@@ -203,13 +203,13 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
           className="border-r-0 glass-sidebar"
           disableTransition={isResizing}
         >
-          <SidebarHeader className={cn("justify-center", !isCollapsed ? "py-6" : "h-24")}>
+          <SidebarHeader className={cn("justify-center", !isCollapsed ? "py-4" : "h-24")}>
             <div className="flex items-center justify-center px-2 transition-all w-full">
               {!isCollapsed ? (
                 <img
                   src="/branding/spmc-nephro-cluster.jpg"
                   alt="SPMC Department of Nephrology Nursing"
-                  className="h-40 w-40 object-contain rounded-full bg-white shrink-0 shadow-sm mx-auto"
+                  className="h-28 w-28 object-contain rounded-full bg-white shrink-0 shadow-sm mx-auto"
                 />
               ) : (
                 <img
@@ -221,7 +221,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
             </div>
           </SidebarHeader>
 
-          <SidebarContent className="gap-0">
+          <SidebarContent className="gap-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <SidebarMenu className="px-2 py-1 gap-1">
               {NAV_ITEMS.map((item) => {
                 const isActive = isItemActive(item.path);

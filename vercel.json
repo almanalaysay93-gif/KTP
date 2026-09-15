@@ -8,6 +8,12 @@
       "maxDuration": 15
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/daily-reminders",
+      "schedule": "0 0 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
