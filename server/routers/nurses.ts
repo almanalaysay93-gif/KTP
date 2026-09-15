@@ -81,6 +81,111 @@ export const nursesRouter = router({
   profile: adminProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
+      const nurseId = Math.floor(input.id);
+      const pg = db.getBatchClient();
+
+      if (pg) {
+        const sets = (await pg
+          .unsafe(
+            [
+              `select * from nursetrack.nurses where id = ${nurseId} limit 1`,
+              `select * from nursetrack.areas order by "sortOrder"`,
+              `select * from nursetrack."credentialTypes"`,
+              `select * from nursetrack."trainingCatalog" order by name`,
+              `select id, "nurseId", "areaId", "startDate"::text as "startDate", "endDate"::text as "endDate", "assignmentType", remarks, "isCurrent"
+                 from nursetrack."areaAssignments"
+                 where "nurseId" = ${nurseId}
+                 order by "startDate" desc`,
+              `select id, "nurseId", "credentialTypeId", "licenseNumber", "issuingOrganization", "issueDate"::text as "issueDate", "expiryDate"::text as "expiryDate", "renewalStatus", "verificationStatus", "documentKey", "renewalCycleKey", remarks
+                 from nursetrack."nurseCredentials"
+                 where "nurseId" = ${nurseId}
+                 order by "expiryDate" desc`,
+              `select id, "nurseId", "trainingId", "completionDate"::text as "completionDate", "expiryDate"::text as "expiryDate", "scheduledDate"::text as "scheduledDate", status, "trainingHours", "cpdUnits", provider, venue, "certificateKey", remarks, "eventId"
+                 from nursetrack."nurseTrainings"
+                 where "nurseId" = ${nurseId}
+                 order by "completionDate" desc nulls last, id desc`,
+              `select "areaId", "trainingId", required
+                 from nursetrack."areaTrainingRequirements"`,
+            ].join(";\n"),
+          )
+          .simple()) as unknown as [
+            any[], // nurseRows
+            any[], // areaRows
+            any[], // credTypes
+            any[], // catalog
+            any[], // rawAssignments
+            any[], // rawCreds
+            any[], // rawTrainings
+            any[], // areaReqs
+          ];
+
+        const [nurseRows, areaRows, credTypes, catalog, rawAssignments, rawCreds, rawTrainings, areaReqs] = sets;
+        const nurse = nurseRows[0];
+        if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Nurse not found" });
+
+        const areaById = new Map(areaRows.map((a: any) => [a.id, a]));
+        const credTypeById = new Map(credTypes.map((t: any) => [t.id, t]));
+        const catById = new Map(catalog.map((t: any) => [t.id, t]));
+
+        const credentials = rawCreds.map((c: any) => ({
+          ...c,
+          typeName: credTypeById.get(c.credentialTypeId)?.name ?? "Unknown",
+          derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
+          daysRemaining: daysUntilExpiry(dateKey(c.expiryDate)),
+        }));
+
+        const latestCred = rawCreds[0];
+        const licenseStatus = latestCred ? deriveLicenseStatus(dateKey(latestCred.expiryDate)) : null;
+        const licenseNumber = latestCred?.licenseNumber ?? null;
+
+        const trainings = rawTrainings.map((r: any) => ({
+          ...r,
+          trainingName: catById.get(r.trainingId)?.name ?? "Unknown",
+        }));
+
+        const assignments = rawAssignments.map((a: any) => ({
+          ...a,
+          areaName: areaById.get(a.areaId)?.name ?? "Unknown",
+        }));
+
+        let compliance: { compliancePercent: number; requiredCount: number; completedCount: number } | null = null;
+        if (nurse.currentAreaId) {
+          const requiredIds = areaReqs
+            .filter((r: any) => r.areaId === nurse.currentAreaId && r.required)
+            .map((r: any) => r.trainingId);
+          const comp = trainingCompliance({
+            requiredTrainingIds: requiredIds,
+            nurseTrainingRecords: rawTrainings.map((r: any) => ({
+              trainingId: r.trainingId,
+              status: r.status,
+              expiryDate: r.expiryDate,
+              completionDate: r.completionDate,
+            })),
+          });
+          const completedValid = requiredIds.filter((tid: number) => {
+            const recs = rawTrainings.filter((r: any) => r.trainingId === tid && r.status === "Completed");
+            return recs.some((r: any) => !r.expiryDate || new Date(r.expiryDate) > new Date());
+          }).length;
+          compliance = { compliancePercent: comp, requiredCount: requiredIds.length, completedCount: completedValid };
+        }
+
+        return {
+          nurse: {
+            ...nurse,
+            currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
+            licenseStatus,
+            licenseNumber,
+          },
+          assignments,
+          credentials,
+          trainings,
+          compliance,
+          catalog,
+          areas: areaRows,
+        };
+      }
+
+      // SQLite fallback (tests / local dev)
       const nurse = await db.getNurseById(input.id);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Nurse not found" });
 
@@ -141,6 +246,7 @@ export const nursesRouter = router({
         trainings,
         compliance,
         catalog,
+        areas: areaRows,
       };
     }),
 

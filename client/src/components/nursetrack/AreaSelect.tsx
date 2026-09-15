@@ -9,19 +9,25 @@ import {
 
 /** Area selector populated from the seeded areas table. activeOnly excludes inactive areas. */
 export function AreaSelect({
+  areas: propAreas,
   value,
   onValueChange,
   activeOnly = false,
   placeholder = "Select area",
   className,
 }: {
+  areas?: { id: number; name: string; active?: boolean }[];
   value: string;
   onValueChange: (v: string) => void;
   activeOnly?: boolean;
   placeholder?: string;
   className?: string;
 }) {
-  const { data: areas } = trpc.areas.list.useQuery();
+  const { data: fetchedAreas } = trpc.areas.list.useQuery(undefined, {
+    enabled: !propAreas,
+    staleTime: 5 * 60 * 1000,
+  });
+  const areas = propAreas ?? fetchedAreas;
   const options = (areas ?? []).filter((a) => !activeOnly || a.active);
   return (
     <Select value={value} onValueChange={onValueChange}>

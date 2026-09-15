@@ -549,116 +549,120 @@ export default function NurseProfile() {
         />
       )}
 
-      <Dialog open={areaOpen} onOpenChange={setAreaOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Change Area of Assignment</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div>
-              <Label className="mb-1 block">Current Area</Label>
-              <p className="text-sm text-muted-foreground">{nurse.currentArea ? nurse.currentArea.name : "Unassigned"}</p>
+      {areaOpen && (
+        <Dialog open={areaOpen} onOpenChange={setAreaOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Change Area of Assignment</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4">
+              <div>
+                <Label className="mb-1 block">Current Area</Label>
+                <p className="text-sm text-muted-foreground">{nurse.currentArea ? nurse.currentArea.name : "Unassigned"}</p>
+              </div>
+              <AreaSelect areas={profileData?.areas} value={newAreaId} onValueChange={setNewAreaId} />
+              <div>
+                <Label className="mb-1 block">Effective Date *</Label>
+                <Input
+                  type="date"
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={areaDate}
+                  onChange={(e) => setAreaDate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground mt-1">Backdated changes create a historical assignment and update the current area.</p>
+              </div>
+              <div>
+                <Label className="mb-1 block">Assignment Type *</Label>
+                <Select value={areaType} onValueChange={setAreaType}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select type…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ASSIGNMENT_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="mb-1 block">Remarks</Label>
+                <Textarea value={areaRemarks} onChange={(e) => setAreaRemarks(e.target.value)} placeholder="Reason for the change…" />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setAreaOpen(false)}>Cancel</Button>
+                <Button
+                  disabled={changeArea.isPending || !newAreaId || !areaDate}
+                  onClick={() => {
+                    changeArea.mutate({
+                      nurseId: id,
+                      newAreaId: Number(newAreaId),
+                      effectiveDate: new Date(`${areaDate}T00:00:00`),
+                      assignmentType: areaType as "Permanent Transfer",
+                      remarks: areaRemarks.trim() || undefined,
+                    });
+                    setAreaOpen(false);
+                    setNewAreaId("");
+                    setAreaRemarks("");
+                    setAreaType("Permanent Transfer");
+                    setAreaDate(new Date().toISOString().slice(0, 10));
+                  }}
+                >
+                  Confirm Change
+                </Button>
+              </div>
             </div>
-            <AreaSelect value={newAreaId} onValueChange={setNewAreaId} />
-            <div>
-              <Label className="mb-1 block">Effective Date *</Label>
-              <Input
-                type="date"
-                max={new Date().toISOString().slice(0, 10)}
-                value={areaDate}
-                onChange={(e) => setAreaDate(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground mt-1">Backdated changes create a historical assignment and update the current area.</p>
-            </div>
-            <div>
-              <Label className="mb-1 block">Assignment Type *</Label>
-              <Select value={areaType} onValueChange={setAreaType}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select type…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ASSIGNMENT_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{t}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="mb-1 block">Remarks</Label>
-              <Textarea value={areaRemarks} onChange={(e) => setAreaRemarks(e.target.value)} placeholder="Reason for the change…" />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setAreaOpen(false)}>Cancel</Button>
-              <Button
-                disabled={changeArea.isPending || !newAreaId || !areaDate}
-                onClick={() => {
-                  changeArea.mutate({
-                    nurseId: id,
-                    newAreaId: Number(newAreaId),
-                    effectiveDate: new Date(`${areaDate}T00:00:00`),
-                    assignmentType: areaType as "Permanent Transfer",
-                    remarks: areaRemarks.trim() || undefined,
-                  });
-                  setAreaOpen(false);
-                  setNewAreaId("");
-                  setAreaRemarks("");
-                  setAreaType("Permanent Transfer");
-                  setAreaDate(new Date().toISOString().slice(0, 10));
-                }}
-              >
-                Confirm Change
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Direct Email Notice Dialog */}
-      <Dialog open={emailNoticeOpen} onOpenChange={setEmailNoticeOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Send Email Notice to Staff</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label className="mb-1 block text-xs">Recipient</Label>
-              <div className="text-sm font-medium">{nurse.firstName} {nurse.lastName} &lt;{nurse.accountEmail}&gt;</div>
+      {emailNoticeOpen && (
+        <Dialog open={emailNoticeOpen} onOpenChange={setEmailNoticeOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Send Email Notice to Staff</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label className="mb-1 block text-xs">Recipient</Label>
+                <div className="text-sm font-medium">{nurse.firstName} {nurse.lastName} &lt;{nurse.accountEmail}&gt;</div>
+              </div>
+              <div>
+                <Label className="mb-1 block">Subject *</Label>
+                <Input
+                  placeholder="e.g. Action Required: Submit PRC Renewal Proof"
+                  value={emailSubject}
+                  onChange={(e) => setEmailSubject(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="mb-1 block">Message *</Label>
+                <Textarea
+                  placeholder="Type your notice or reminder to the staff nurse..."
+                  rows={4}
+                  value={emailMessage}
+                  onChange={(e) => setEmailMessage(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setEmailNoticeOpen(false)}>Cancel</Button>
+                <Button
+                  disabled={!emailSubject.trim() || !emailMessage.trim() || sendNoticeMutation.isPending}
+                  onClick={() => {
+                    sendNoticeMutation.mutate({
+                      nurseId: id,
+                      subject: emailSubject.trim(),
+                      message: emailMessage.trim(),
+                    });
+                  }}
+                >
+                  {sendNoticeMutation.isPending ? "Sending…" : "Send Email"}
+                </Button>
+              </div>
             </div>
-            <div>
-              <Label className="mb-1 block">Subject *</Label>
-              <Input
-                placeholder="e.g. Action Required: Submit PRC Renewal Proof"
-                value={emailSubject}
-                onChange={(e) => setEmailSubject(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label className="mb-1 block">Message *</Label>
-              <Textarea
-                placeholder="Type your notice or reminder to the staff nurse..."
-                rows={4}
-                value={emailMessage}
-                onChange={(e) => setEmailMessage(e.target.value)}
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setEmailNoticeOpen(false)}>Cancel</Button>
-              <Button
-                disabled={!emailSubject.trim() || !emailMessage.trim() || sendNoticeMutation.isPending}
-                onClick={() => {
-                  sendNoticeMutation.mutate({
-                    nurseId: id,
-                    subject: emailSubject.trim(),
-                    message: emailMessage.trim(),
-                  });
-                }}
-              >
-                {sendNoticeMutation.isPending ? "Sending…" : "Send Email"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Delete Confirmation Alert Dialog */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
@@ -740,7 +744,7 @@ function CredentialDialog({
   utils: ReturnType<typeof trpc.useUtils>;
 }) {
   const { data: existing } = trpc.credentials.listForNurse.useQuery({ nurseId }, { enabled: open && !!credentialId });
-  const { data: types } = trpc.credentials.listTypes.useQuery();
+  const { data: types } = trpc.credentials.listTypes.useQuery(undefined, { enabled: open, staleTime: 5 * 60 * 1000 });
   const current = existing?.find((c) => c.id === credentialId);
 
   const [typeId, setTypeId] = useState("");
