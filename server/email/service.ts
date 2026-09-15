@@ -16,7 +16,7 @@ export interface SendEmailResult {
   error?: string;
 }
 
-const DEFAULT_FROM = process.env.EMAIL_FROM || "SKTI NurseTrack <notifications@sktinursetrack.com>";
+const DEFAULT_FROM = process.env.EMAIL_FROM || "SKTI NurseTrack <onboarding@resend.dev>";
 
 /**
  * Dispatches an email via Resend if RESEND_API_KEY is configured,
@@ -24,7 +24,7 @@ const DEFAULT_FROM = process.env.EMAIL_FROM || "SKTI NurseTrack <notifications@s
  * Automatically records an entry in emailLogs for audit and deduplication.
  */
 export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult> {
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = process.env.NODE_ENV === "test" && !process.env.TEST_RESEND_LIVE ? undefined : process.env.RESEND_API_KEY;
 
   if (!apiKey) {
     // Mock mode: log dispatch and record in ledger

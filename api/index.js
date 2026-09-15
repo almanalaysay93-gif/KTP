@@ -29,13 +29,12 @@ function todayDate() {
 }
 function parseLocalDate(value) {
   if (!value) return /* @__PURE__ */ new Date(NaN);
-  if (value instanceof Date) return isNaN(value.getTime()) ? /* @__PURE__ */ new Date(NaN) : value;
-  if (typeof value === "string") {
-    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) {
-      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    }
+  const key = dateKey(value);
+  if (key) {
+    const [y, m, d] = key.split("-").map(Number);
+    return new Date(y, m - 1, d);
   }
+  if (value instanceof Date) return isNaN(value.getTime()) ? /* @__PURE__ */ new Date(NaN) : value;
   return new Date(value);
 }
 function deriveLicenseStatus(expiryDate, today = todayDate()) {
@@ -161,6 +160,7 @@ var init_nursetrack = __esm({
 });
 
 // drizzle/schema.ts
+import { sql } from "drizzle-orm";
 import {
   boolean,
   customType,
@@ -247,7 +247,10 @@ var init_schema = __esm({
         uniqueIndex("idx_nurses_employee").on(t2.employeeId),
         index("idx_nurses_lastname").on(t2.lastName),
         index("idx_nurses_area").on(t2.currentAreaId),
-        uniqueIndex("idx_nurses_linked_user").on(t2.linkedUserId)
+        uniqueIndex("idx_nurses_linked_user").on(t2.linkedUserId),
+        // Case-insensitive: `accountEmail` is the staff sign-in identity, so
+        // "Nurse@x.com" and "nurse@x.com" must not both be claimable.
+        uniqueIndex("idx_nurses_account_email").on(sql`lower(${t2.accountEmail})`)
       ]
     );
     areaAssignments = pgTable(
@@ -463,26 +466,21 @@ var init_schema = __esm({
   }
 });
 
-// server/_core/env.ts
-var ENV;
-var init_env = __esm({
-  "server/_core/env.ts"() {
+// server/adminAccess.ts
+function hasFullAccess(email) {
+  return FULL_ACCESS_EMAILS.some((allowed) => allowed === email?.trim().toLowerCase());
+}
+function roleForEmail(email) {
+  return hasFullAccess(email) ? "admin" : "user";
+}
+var FULL_ACCESS_EMAILS;
+var init_adminAccess = __esm({
+  "server/adminAccess.ts"() {
     "use strict";
-    ENV = {
-      googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-      cookieSecret: process.env.JWT_SECRET ?? "",
-      databaseUrl: process.env.DATABASE_URL ?? "",
-      ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
-      ownerEmail: process.env.OWNER_EMAIL ?? process.env.ADMIN_EMAIL ?? "",
-      adminEmails: (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean),
-      localDevAuth: process.env.LOCAL_DEV_AUTH === "1",
-      isProduction: process.env.NODE_ENV === "production",
-      s3BucketName: process.env.S3_BUCKET_NAME ?? "",
-      s3Region: process.env.AWS_REGION ?? process.env.S3_REGION ?? "",
-      openRouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
-      openRouterModel: process.env.OPENROUTER_MODEL ?? "nvidia/nemotron-3-super-120b-a12b:free"
-    };
+    FULL_ACCESS_EMAILS = [
+      "nncluster@spmcdvo.net",
+      "almanalaysay93@gmail.com"
+    ];
   }
 });
 
@@ -877,6 +875,8 @@ __export(db_exports, {
   activeNurseCondition: () => activeNurseCondition,
   autoLinkNurseByEmail: () => autoLinkNurseByEmail,
   bulkSetAccountEmailsByLicense: () => bulkSetAccountEmailsByLicense,
+  changeNurseAccountEmail: () => changeNurseAccountEmail,
+  claimNurseByIdentifier: () => claimNurseByIdentifier,
   clearCurrentAssignmentsForNurse: () => clearCurrentAssignmentsForNurse,
   closeAssignment: () => closeAssignment,
   countActiveNurses: () => countActiveNurses,
@@ -915,7 +915,7 @@ __export(db_exports, {
   getSetting: () => getSetting,
   getUserByOpenId: () => getUserByOpenId,
   isEmailDuplicate: () => isEmailDuplicate,
-  linkNurseByPrcAndName: () => linkNurseByPrcAndName,
+  isNurseClaimable: () => isNurseClaimable,
   listActivityForNurse: () => listActivityForNurse,
   listAreas: () => listAreas,
   listAssignmentsForNurse: () => listAssignmentsForNurse,
@@ -933,6 +933,7 @@ __export(db_exports, {
   markNotificationRead: () => markNotificationRead,
   markReminderExpiredByCredential: () => markReminderExpiredByCredential,
   recordEmailLog: () => recordEmailLog,
+  saveClaimEmail: () => saveClaimEmail,
   searchNurses: () => searchNurses,
   setAreaTrainingRequirement: () => setAreaTrainingRequirement,
   setSetting: () => setSetting,
@@ -946,7 +947,7 @@ __export(db_exports, {
   updateTrainingType: () => updateTrainingType,
   upsertUser: () => upsertUser
 });
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lte, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, not, or, sql as sql2 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 function activeNurseCondition() {
@@ -986,23 +987,10 @@ function getBatchClient() {
   }
   return _batchPg;
 }
-function shouldBeAdmin(user, currentCount = 0) {
-  if (user.role === "admin") return true;
-  if (ENV.ownerOpenId && user.openId === ENV.ownerOpenId) return true;
-  if (user.email) {
-    const norm = user.email.trim().toLowerCase();
-    if (ENV.ownerEmail && norm === ENV.ownerEmail.trim().toLowerCase()) return true;
-    if (ENV.adminEmails && ENV.adminEmails.includes(norm)) return true;
-  }
-  if (currentCount === 0) return true;
-  return false;
-}
 async function upsertUser(user) {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
   if (db) {
-    const existingUsers = await db.select({ id: users.id }).from(users).limit(1);
-    const isAdmin2 = shouldBeAdmin(user, existingUsers.length);
     const values = { openId: user.openId };
     const updateSet = {};
     const textFields = ["name", "email", "loginMethod"];
@@ -1012,45 +1000,39 @@ async function upsertUser(user) {
         updateSet[field] = user[field] ?? null;
       }
     }
-    if (user.role !== void 0) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (isAdmin2) {
-      values.role = "admin";
-      updateSet.role = "admin";
-    }
+    values.role = roleForEmail(user.email);
+    updateSet.role = values.role;
     if (!values.lastSignedIn) values.lastSignedIn = /* @__PURE__ */ new Date();
     if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = /* @__PURE__ */ new Date();
     await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
     return;
   }
   const sqlite = getSqliteDb();
-  const countRow = sqlite.prepare("SELECT COUNT(*) as count FROM users").get();
-  const isAdmin = shouldBeAdmin(user, countRow?.count ?? 0);
-  const assignedRole = user.role ?? (isAdmin ? "admin" : "user");
+  const assignedRole = roleForEmail(user.email);
   sqlite.prepare(`
     INSERT INTO users (openId, name, email, loginMethod, role, lastSignedIn)
     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(openId) DO UPDATE SET
       name = COALESCE(excluded.name, users.name),
-      email = COALESCE(excluded.email, users.email),
-      role = CASE WHEN excluded.role = 'admin' THEN 'admin' ELSE users.role END,
+      email = excluded.email,
+      role = excluded.role,
       lastSignedIn = CURRENT_TIMESTAMP
   `).run(user.openId, user.name ?? null, user.email ?? null, user.loginMethod ?? "local", assignedRole);
 }
 async function touchUserSession(openId) {
   const db = await getDb();
   if (db) {
-    const set = { lastSignedIn: /* @__PURE__ */ new Date() };
-    if (shouldBeAdmin({ openId }, 1)) set.role = "admin";
+    const set = {
+      lastSignedIn: /* @__PURE__ */ new Date(),
+      role: sql2`CASE WHEN lower(trim(${users.email})) IN (${FULL_ACCESS_EMAILS[0]}, ${FULL_ACCESS_EMAILS[1]}) THEN 'admin' ELSE 'user' END`
+    };
     const rows = await db.update(users).set(set).where(eq(users.openId, openId)).returning();
     return rows.length > 0 ? rows[0] : void 0;
   }
   const sqlite = getSqliteDb();
-  const role = shouldBeAdmin({ openId }, 1) ? "admin" : null;
   sqlite.prepare(
-    role ? "UPDATE users SET lastSignedIn = CURRENT_TIMESTAMP, role = 'admin' WHERE openId = ?" : "UPDATE users SET lastSignedIn = CURRENT_TIMESTAMP WHERE openId = ?"
-  ).run(openId);
+    "UPDATE users SET lastSignedIn = CURRENT_TIMESTAMP, role = CASE WHEN lower(trim(email)) IN (?, ?) THEN 'admin' ELSE 'user' END WHERE openId = ?"
+  ).run(...FULL_ACCESS_EMAILS, openId);
   return sqlite.prepare("SELECT * FROM users WHERE openId = ?").get(openId);
 }
 async function getUserByOpenId(openId) {
@@ -1267,22 +1249,6 @@ async function findNurseIdsByLicenseNumber(licenseNumber) {
   const credRows = await db.select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber }).from(nurseCredentials).where(isNotNull(nurseCredentials.licenseNumber));
   return credRows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
 }
-async function linkNurseByPrcAndName(prcNumber, fullName, userId) {
-  const db = await getDb();
-  if (!db) return { ok: false, reason: "not_found" };
-  const normName = normalizeForMatch(fullName);
-  const nurseIds = await findNurseIdsByLicenseNumber(prcNumber);
-  if (nurseIds.length === 0) return { ok: false, reason: "not_found" };
-  const candidates = await db.select().from(nurses).where(inArray(nurses.id, nurseIds));
-  const match = candidates.find((n) => {
-    const candidateName = `${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.suffix ?? ""}`;
-    return normalizeForMatch(candidateName) === normName || normalizeForMatch(`${n.firstName} ${n.lastName}`) === normName;
-  });
-  if (!match) return { ok: false, reason: "not_found" };
-  if (match.linkedUserId) return { ok: false, reason: "already_linked" };
-  await db.update(nurses).set({ linkedUserId: userId }).where(eq(nurses.id, match.id));
-  return { ok: true, nurse: { ...match, linkedUserId: userId } };
-}
 async function bulkSetAccountEmailsByLicense(rows) {
   const db = await getDb();
   if (!db) return { matched: 0, ambiguous: 0, notFound: 0 };
@@ -1309,10 +1275,72 @@ async function autoLinkNurseByEmail(userId, email) {
   if (!db) return;
   const existing = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
   if (existing.length > 0) return;
-  const rows = await db.select().from(nurses).where(eq(nurses.accountEmail, email)).limit(1);
+  const norm = email.trim().toLowerCase();
+  const rows = await db.select().from(nurses).where(sql2`lower(${nurses.accountEmail}) = ${norm}`).limit(1);
   const candidate = rows[0];
   if (!candidate || candidate.linkedUserId) return;
   await db.update(nurses).set({ linkedUserId: userId }).where(eq(nurses.id, candidate.id));
+}
+function isNurseClaimable(nurse) {
+  if (!nurse) return false;
+  if (nurse.archivedAt) return false;
+  if (INACTIVE_EMPLOYMENT_STATUSES.includes(nurse.employmentStatus)) return false;
+  if (nurse.accountEmail) return false;
+  return true;
+}
+async function nurseHasLicenseNumber(nurseId) {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db.select({ licenseNumber: nurseCredentials.licenseNumber }).from(nurseCredentials).where(and(eq(nurseCredentials.nurseId, nurseId), isNotNull(nurseCredentials.licenseNumber)));
+  return rows.some((r) => (r.licenseNumber ?? "").trim().length > 0);
+}
+async function claimNurseByIdentifier(identifier) {
+  const norm = identifier.trim();
+  if (!norm) return { ok: false };
+  const dbConn = await getDb();
+  if (!dbConn) return { ok: false };
+  const nurseIds = await findNurseIdsByLicenseNumber(norm);
+  if (nurseIds.length > 1) return { ok: false };
+  if (nurseIds.length === 1) {
+    const nurse = await getNurseById(nurseIds[0]);
+    return nurse && isNurseClaimable(nurse) ? { ok: true, nurseId: nurse.id } : { ok: false };
+  }
+  const byEmployeeId = await getNurseByEmployeeId(norm);
+  if (!byEmployeeId) return { ok: false };
+  if (byEmployeeId.staffType !== "Nursing Attendant") return { ok: false };
+  if (await nurseHasLicenseNumber(byEmployeeId.id)) return { ok: false };
+  return isNurseClaimable(byEmployeeId) ? { ok: true, nurseId: byEmployeeId.id } : { ok: false };
+}
+function isBlockedStaffEmail(email) {
+  const norm = email.trim().toLowerCase();
+  return FULL_ACCESS_EMAILS.some((e) => e.toLowerCase() === norm);
+}
+async function saveClaimEmail(nurseId, email) {
+  const norm = email.trim().toLowerCase();
+  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
+  const dbConn = await getDb();
+  if (!dbConn) return { ok: false, reason: "already_claimed" };
+  try {
+    const rows = await dbConn.update(nurses).set({ accountEmail: norm }).where(and(eq(nurses.id, nurseId), isNull(nurses.accountEmail))).returning({ id: nurses.id });
+    if (rows.length === 0) return { ok: false, reason: "already_claimed" };
+    return { ok: true };
+  } catch (error) {
+    if (error?.code === "23505") return { ok: false, reason: "in_use" };
+    throw error;
+  }
+}
+async function changeNurseAccountEmail(nurseId, email) {
+  const norm = email.trim().toLowerCase();
+  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
+  const dbConn = await getDb();
+  if (!dbConn) return { ok: false, reason: "in_use" };
+  try {
+    await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
+    return { ok: true };
+  } catch (error) {
+    if (error?.code === "23505") return { ok: false, reason: "in_use" };
+    throw error;
+  }
 }
 function deriveLicenseStatusFromCred(cred) {
   if (cred.renewalStatus === "Renewed") return "Valid";
@@ -1384,19 +1412,32 @@ async function getNurseById(id) {
   return sqlite.prepare("SELECT * FROM nurses WHERE id = ?").get(id);
 }
 async function searchNurses(query) {
+  const q = query.trim();
+  if (!q) return [];
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return [];
   const db = await getDb();
   if (db) {
-    const term2 = `%${query.trim()}%`;
-    return await db.select().from(nurses).where(and(isNull(nurses.archivedAt), or(like(nurses.firstName, term2), like(nurses.middleName, term2), like(nurses.lastName, term2), like(nurses.employeeId, term2)))).orderBy(asc(nurses.lastName), asc(nurses.firstName)).limit(10);
+    const tokenConditions = tokens.map((token) => {
+      const term = `%${token}%`;
+      return or(
+        ilike(nurses.firstName, term),
+        ilike(nurses.middleName, term),
+        ilike(nurses.lastName, term),
+        ilike(nurses.employeeId, term)
+      );
+    });
+    return await db.select().from(nurses).where(and(isNull(nurses.archivedAt), ...tokenConditions)).orderBy(asc(nurses.lastName), asc(nurses.firstName)).limit(10);
   }
   const sqlite = getSqliteDb();
-  const term = `%${query.trim()}%`;
+  const tokenClauses = tokens.map(() => "(firstName LIKE ? OR middleName LIKE ? OR lastName LIKE ? OR employeeId LIKE ?)");
+  const params = tokens.flatMap((t2) => [`%${t2}%`, `%${t2}%`, `%${t2}%`, `%${t2}%`]);
   return sqlite.prepare(`
     SELECT * FROM nurses 
-    WHERE archivedAt IS NULL AND (firstName LIKE ? OR middleName LIKE ? OR lastName LIKE ? OR employeeId LIKE ?)
+    WHERE archivedAt IS NULL AND ${tokenClauses.join(" AND ")}
     ORDER BY lastName ASC, firstName ASC
     LIMIT 10
-  `).all(term, term, term, term);
+  `).all(...params);
 }
 async function listAssignmentsForNurse(nurseId) {
   const db = await getDb();
@@ -2104,7 +2145,7 @@ async function listNotifications(limit = 100) {
 async function countUnreadNotifications() {
   const db = await getDb();
   if (db) {
-    const rows = await db.select({ count: sql`count(*)` }).from(notifications).where(isNull(notifications.readAt));
+    const rows = await db.select({ count: sql2`count(*)` }).from(notifications).where(isNull(notifications.readAt));
     return Number(rows[0]?.count ?? 0);
   }
   const sqlite = getSqliteDb();
@@ -2145,7 +2186,7 @@ async function createNotificationsBatch(data) {
   if (data.length === 0) return;
   const db = await getDb();
   if (db) {
-    const rows = data.map((d) => ({
+    const rawRows = data.map((d) => ({
       type: d.type,
       severity: d.severity,
       title: d.title,
@@ -2155,11 +2196,20 @@ async function createNotificationsBatch(data) {
       relatedEntityId: d.relatedEntityId ?? null,
       dayKey: d.dayKey != null ? /* @__PURE__ */ new Date(d.dayKey + "T00:00:00") : /* @__PURE__ */ new Date(todayDate2().slice(0, 10) + "T00:00:00")
     }));
-    await db.insert(notifications).values(rows).onConflictDoNothing();
+    const seen = /* @__PURE__ */ new Set();
+    const rows = rawRows.filter((r) => {
+      const k = `${r.type}:${r.nurseId}:${r.relatedEntityType}:${r.relatedEntityId}:${dateKey(r.dayKey)}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    if (rows.length > 0) {
+      await db.insert(notifications).values(rows).onConflictDoNothing();
+    }
     return;
   }
   const sqlite = getSqliteDb();
-  const insert = sqlite.prepare("INSERT INTO notifications (type, severity, title, message, nurseId, relatedEntityType, relatedEntityId, dayKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+  const insert = sqlite.prepare("INSERT OR IGNORE INTO notifications (type, severity, title, message, nurseId, relatedEntityType, relatedEntityId, dayKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
   const insertAll = sqlite.transaction((rows) => {
     for (const d of rows) {
       insert.run(d.type, d.severity, d.title, d.message ?? null, d.nurseId ?? null, d.relatedEntityType ?? null, d.relatedEntityId ?? null, d.dayKey ?? todayDate2());
@@ -2236,7 +2286,7 @@ async function getAllSettings() {
 async function countActiveNurses(today) {
   const db = await getDb();
   if (db) {
-    const rows = await db.select({ count: sql`count(*)` }).from(nurses).where(activeNurseCondition());
+    const rows = await db.select({ count: sql2`count(*)` }).from(nurses).where(activeNurseCondition());
     return Number(rows[0]?.count ?? 0);
   }
   const sqlite = getSqliteDb();
@@ -2319,7 +2369,7 @@ var init_db = __esm({
     "use strict";
     init_nursetrack();
     init_schema();
-    init_env();
+    init_adminAccess();
     init_localDb();
     _db = null;
     _batchPg = null;
@@ -2334,7 +2384,7 @@ __export(service_exports, {
   sendEmail: () => sendEmail
 });
 async function sendEmail(opts) {
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = process.env.NODE_ENV === "test" && !process.env.TEST_RESEND_LIVE ? void 0 : process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.log(`[Email:Mock] To: ${opts.to} | Subject: "${opts.subject}" | Type: ${opts.emailType}`);
     await recordEmailLog({
@@ -2410,7 +2460,7 @@ var init_service = __esm({
   "server/email/service.ts"() {
     "use strict";
     init_db();
-    DEFAULT_FROM = process.env.EMAIL_FROM || "SKTI NurseTrack <notifications@sktinursetrack.com>";
+    DEFAULT_FROM = process.env.EMAIL_FROM || "SKTI NurseTrack <onboarding@resend.dev>";
   }
 });
 
@@ -2642,19 +2692,31 @@ __export(dispatcher_exports, {
   runLicenseExpiryEmailPass: () => runLicenseExpiryEmailPass,
   runUpcomingSeminarEmailPass: () => runUpcomingSeminarEmailPass
 });
+import { eq as eq8, and as and6, isNull as isNull6, isNotNull as isNotNull2, gte as gte2, lte as lte2, sql as sql8 } from "drizzle-orm";
 async function fetchLinkedNursesWithExpiringCredentials() {
   const db = await getDb();
   if (db) {
-    const rows2 = await db.execute(
-      `SELECT n.id as nurseId, n.firstName, n.middleName, n.lastName, n.suffix, n.accountEmail, n.linkedUserId,
-              c.id as credentialId, c.licenseNumber, c.expiryDate, c.renewalCycleKey, ct.name as typeName
-       FROM nurses n
-       INNER JOIN nurseCredentials c ON c.nurseId = n.id
-       LEFT JOIN credentialTypes ct ON ct.id = c.credentialTypeId
-       WHERE n.archivedAt IS NULL AND n.linkedUserId IS NOT NULL AND n.accountEmail IS NOT NULL`
+    const rows2 = await db.select({
+      nurseId: nurses.id,
+      firstName: nurses.firstName,
+      middleName: nurses.middleName,
+      lastName: nurses.lastName,
+      suffix: nurses.suffix,
+      accountEmail: nurses.accountEmail,
+      linkedUserId: nurses.linkedUserId,
+      credentialId: nurseCredentials.id,
+      licenseNumber: nurseCredentials.licenseNumber,
+      expiryDate: nurseCredentials.expiryDate,
+      renewalCycleKey: nurseCredentials.renewalCycleKey,
+      typeName: credentialTypes.name
+    }).from(nurses).innerJoin(nurseCredentials, eq8(nurseCredentials.nurseId, nurses.id)).leftJoin(credentialTypes, eq8(credentialTypes.id, nurseCredentials.credentialTypeId)).where(
+      and6(
+        isNull6(nurses.archivedAt),
+        isNotNull2(nurses.linkedUserId),
+        isNotNull2(nurses.accountEmail)
+      )
     );
-    const list = rows2[0] || [];
-    return list.map((r) => ({
+    return rows2.map((r) => ({
       nurseId: Number(r.nurseId),
       fullName: nurseFullName(r),
       accountEmail: r.accountEmail,
@@ -2738,23 +2800,64 @@ async function runLicenseExpiryEmailPass(today = todayDate()) {
   return { processed, sent, skipped };
 }
 async function runUpcomingSeminarEmailPass() {
-  const sqlite = getSqliteDb();
-  const today = todayDate();
-  const upcomingEvents = sqlite.prepare(`
-    SELECT e.id, e.startDate, e.startTime, e.venue, c.name as trainingName
-    FROM trainingEvents e
-    INNER JOIN trainingCatalog c ON c.id = e.trainingId
-    WHERE date(e.startDate) >= date('now', '+1 day') AND date(e.startDate) <= date('now', '+3 days')
-  `).all();
+  const db = await getDb();
+  let upcomingEvents = [];
+  if (db) {
+    const in1Day = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+    const in3Days = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
+    const events = await db.select({
+      id: trainingEvents.id,
+      startDate: trainingEvents.startDate,
+      startTime: trainingEvents.startTime,
+      venue: trainingEvents.venue,
+      trainingName: trainingCatalog.name
+    }).from(trainingEvents).innerJoin(trainingCatalog, eq8(trainingCatalog.id, trainingEvents.trainingId)).where(and6(gte2(trainingEvents.startDate, sql8`${in1Day}::date`), lte2(trainingEvents.startDate, sql8`${in3Days}::date`)));
+    upcomingEvents = events.map((e) => ({
+      id: e.id,
+      startDate: dateKey(e.startDate),
+      startTime: e.startTime,
+      venue: e.venue,
+      trainingName: e.trainingName
+    }));
+  } else {
+    const sqlite = getSqliteDb();
+    upcomingEvents = sqlite.prepare(`
+      SELECT e.id, e.startDate, e.startTime, e.venue, c.name as trainingName
+      FROM trainingEvents e
+      INNER JOIN trainingCatalog c ON c.id = e.trainingId
+      WHERE date(e.startDate) >= date('now', '+1 day') AND date(e.startDate) <= date('now', '+3 days')
+    `).all();
+  }
   let processed = 0;
   let sent = 0;
   for (const ev of upcomingEvents) {
-    const attendees = sqlite.prepare(`
-      SELECT n.id as nurseId, n.firstName, n.middleName, n.lastName, n.suffix, n.accountEmail
-      FROM nurseTrainings t
-      INNER JOIN nurses n ON n.id = t.nurseId
-      WHERE t.eventId = ? AND n.archivedAt IS NULL AND n.linkedUserId IS NOT NULL AND n.accountEmail IS NOT NULL
-    `).all(ev.id);
+    let attendees = [];
+    if (db) {
+      const rows = await db.select({
+        nurseId: nurses.id,
+        firstName: nurses.firstName,
+        middleName: nurses.middleName,
+        lastName: nurses.lastName,
+        suffix: nurses.suffix,
+        accountEmail: nurses.accountEmail
+      }).from(nurseTrainings).innerJoin(nurses, eq8(nurses.id, nurseTrainings.nurseId)).where(
+        and6(
+          eq8(nurseTrainings.eventId, ev.id),
+          isNull6(nurses.archivedAt),
+          isNotNull2(nurses.linkedUserId),
+          isNotNull2(nurses.accountEmail)
+        )
+      );
+      attendees = rows;
+    } else {
+      const sqlite = getSqliteDb();
+      attendees = sqlite.prepare(`
+        SELECT n.id as nurseId, n.firstName, n.middleName, n.lastName, n.suffix, n.accountEmail
+        FROM nurseTrainings t
+        INNER JOIN nurses n ON n.id = t.nurseId
+        WHERE t.eventId = ? AND n.archivedAt IS NULL AND n.linkedUserId IS NOT NULL AND n.accountEmail IS NOT NULL
+      `).all(ev.id);
+    }
     for (const att of attendees) {
       processed++;
       const isDup = await isEmailDuplicate({
@@ -2792,6 +2895,7 @@ var init_dispatcher = __esm({
     init_db();
     init_localDb();
     init_nursetrack();
+    init_schema();
     init_templates();
     init_service();
     EXPIRY_THRESHOLDS = [
@@ -2818,6 +2922,8 @@ var UNAUTHED_ERR_MSG = "Please login (10001)";
 var NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
 var OAUTH_STATE_COOKIE = "__Host-oauth_state";
 var OAUTH_STATE_COOKIE_PLAIN = "oauth_state";
+var CLAIM_COOKIE_NAME = "staff_claim_session";
+var CLAIM_TTL_MS = 1e3 * 60 * 30;
 var decodeOAuthState = (state) => {
   let decoded;
   try {
@@ -2854,6 +2960,12 @@ function getSessionCookieOptions(req) {
     secure
   };
 }
+function getClaimCookieOptions(req) {
+  return { ...getSessionCookieOptions(req), maxAge: CLAIM_TTL_MS };
+}
+
+// server/_core/sdk.ts
+import { randomBytes } from "crypto";
 
 // shared/_core/errors.ts
 var HttpError = class extends Error {
@@ -2867,10 +2979,28 @@ var ForbiddenError = (msg) => new HttpError(403, msg);
 
 // server/_core/sdk.ts
 init_db();
-init_env();
 import axios from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import { SignJWT, jwtVerify } from "jose";
+
+// server/_core/env.ts
+var ENV = {
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+  cookieSecret: process.env.JWT_SECRET ?? "",
+  databaseUrl: process.env.DATABASE_URL ?? "",
+  ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
+  ownerEmail: process.env.OWNER_EMAIL ?? process.env.ADMIN_EMAIL ?? "",
+  adminEmails: (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean),
+  localDevAuth: process.env.LOCAL_DEV_AUTH === "1",
+  isProduction: process.env.NODE_ENV === "production",
+  s3BucketName: process.env.S3_BUCKET_NAME ?? "",
+  s3Region: process.env.AWS_REGION ?? process.env.S3_REGION ?? "",
+  openRouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
+  openRouterModel: process.env.OPENROUTER_MODEL ?? "nvidia/nemotron-3-super-120b-a12b:free"
+};
+
+// server/_core/sdk.ts
 var isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
 var GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 var GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
@@ -2912,6 +3042,9 @@ var OAuthService = class {
       GOOGLE_USERINFO_URL,
       { headers: { Authorization: `Bearer ${token.accessToken}` } }
     );
+    if (data.email_verified !== true) {
+      throw ForbiddenError("Google email is not verified");
+    }
     return {
       openId: data.sub,
       name: data.name || data.email || data.sub,
@@ -3012,6 +3145,31 @@ var SDKServer = class {
       return null;
     }
   }
+  /**
+   * Sign a short-lived staff claim token binding one nurseId to the browser
+   * that identified via PRC/employee ID, before any Google login exists.
+   * Distinct `typ` claim keeps it from ever being accepted as a session token
+   * (and vice versa), even though both share the app's JWT secret.
+   */
+  async createClaimToken(nurseId) {
+    const secretKey = this.getSessionSecret();
+    const nonce = randomBytes(16).toString("hex");
+    const expirationSeconds = Math.floor((Date.now() + CLAIM_TTL_MS) / 1e3);
+    return new SignJWT({ typ: "staff-claim", nurseId, nonce }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
+  }
+  async verifyClaimToken(cookieValue) {
+    if (!cookieValue) return null;
+    try {
+      const secretKey = this.getSessionSecret();
+      const { payload } = await jwtVerify(cookieValue, secretKey, { algorithms: ["HS256"] });
+      if (payload.typ !== "staff-claim") return null;
+      const { nurseId } = payload;
+      return typeof nurseId === "number" && Number.isFinite(nurseId) ? nurseId : null;
+    } catch (error) {
+      console.warn("[Auth] Claim token verification failed", String(error));
+      return null;
+    }
+  }
   async authenticateRequest(req) {
     const cookies = this.parseCookies(req.headers.cookie);
     const sessionToken = cookies.get(COOKIE_NAME);
@@ -3083,7 +3241,6 @@ function registerOAuthRoutes(app) {
 }
 
 // server/storage.ts
-init_env();
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 var _client = null;
@@ -3147,6 +3304,8 @@ function registerStorageProxy(app) {
 import { z } from "zod";
 
 // server/_core/trpc.ts
+init_adminAccess();
+init_db();
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 var t = initTRPC.context().create({
@@ -3167,10 +3326,25 @@ var requireUser = t.middleware(async (opts) => {
   });
 });
 var protectedProcedure = t.procedure.use(requireUser);
+var staffProcedure = t.procedure.use(
+  t.middleware(async (opts) => {
+    const { ctx, next } = opts;
+    if (ctx.user) {
+      const nurse = await getNurseByLinkedUserId(ctx.user.id);
+      if (nurse) {
+        return next({ ctx: { ...ctx, nurseId: nurse.id, authMode: "google" } });
+      }
+    }
+    if (ctx.claimNurseId) {
+      return next({ ctx: { ...ctx, nurseId: ctx.claimNurseId, authMode: "claim" } });
+    }
+    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  })
+);
 var adminProcedure = t.procedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
-    if (!ctx.user || ctx.user.role !== "admin") {
+    if (!ctx.user || !hasFullAccess(ctx.user.email)) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
     return next({
@@ -3259,6 +3433,63 @@ var nursesRouter = router({
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     const { status, licenseNumber } = await getNurseLicenseInfo(nurse.id);
     return { ...nurse, currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null, licenseStatus: status, licenseNumber };
+  }),
+  profile: adminProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
+    const nurse = await getNurseById(input.id);
+    if (!nurse) throw new TRPCError2({ code: "NOT_FOUND", message: "Nurse not found" });
+    const [areaRows, licenseInfo, assignments, rawCreds, rawTrainings, credTypes, catalog] = await Promise.all([
+      listAreas(false),
+      getNurseLicenseInfo(nurse.id),
+      listAssignmentsForNurse(nurse.id),
+      listCredentials({ nurseId: nurse.id }),
+      listNurseTrainings({ nurseId: nurse.id }),
+      listCredentialTypes(),
+      listTrainingCatalog(false)
+    ]);
+    const areaById = new Map(areaRows.map((a) => [a.id, a]));
+    const credTypeById = new Map(credTypes.map((t2) => [t2.id, t2]));
+    const catById = new Map(catalog.map((t2) => [t2.id, t2]));
+    const credentials = rawCreds.map((c) => ({
+      ...c,
+      typeName: credTypeById.get(c.credentialTypeId)?.name ?? "Unknown",
+      derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
+      daysRemaining: daysUntilExpiry(dateKey(c.expiryDate))
+    }));
+    const trainings = rawTrainings.map((r) => ({
+      ...r,
+      trainingName: catById.get(r.trainingId)?.name ?? "Unknown"
+    }));
+    let compliance = null;
+    if (nurse.currentAreaId) {
+      const requiredIds = await getAreaTrainingRequirementIds(nurse.currentAreaId);
+      const comp = trainingCompliance({
+        requiredTrainingIds: requiredIds,
+        nurseTrainingRecords: rawTrainings.map((r) => ({
+          trainingId: r.trainingId,
+          status: r.status,
+          expiryDate: r.expiryDate,
+          completionDate: r.completionDate
+        }))
+      });
+      const completedValid = requiredIds.filter((tid) => {
+        const recs = rawTrainings.filter((r) => r.trainingId === tid && r.status === "Completed");
+        return recs.some((r) => !r.expiryDate || new Date(r.expiryDate) > /* @__PURE__ */ new Date());
+      }).length;
+      compliance = { compliancePercent: comp, requiredCount: requiredIds.length, completedCount: completedValid };
+    }
+    return {
+      nurse: {
+        ...nurse,
+        currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
+        licenseStatus: licenseInfo.status,
+        licenseNumber: licenseInfo.licenseNumber
+      },
+      assignments,
+      credentials,
+      trainings,
+      compliance,
+      catalog
+    };
   }),
   create: adminProcedure.input(
     z2.object({
@@ -3608,7 +3839,7 @@ var credentialsRouter = router({
         nurse: nurseById.get(c.nurseId),
         typeName: typeById.get(c.credentialTypeId)?.name ?? "Unknown",
         derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
-        daysRemaining: Math.floor((parseForDays(c.expiryDate) - parseForDays(dateKey(/* @__PURE__ */ new Date()))) / 864e5)
+        daysRemaining: daysUntilExpiry(dateKey(c.expiryDate))
       })),
       nurses: activeNurses,
       types
@@ -3628,7 +3859,7 @@ var credentialsRouter = router({
         nurse,
         typeName,
         derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
-        daysRemaining: Math.floor((parseForDays(c.expiryDate) - Date.now()) / 864e5)
+        daysRemaining: daysUntilExpiry(dateKey(c.expiryDate))
       };
     });
   }),
@@ -3640,7 +3871,7 @@ var credentialsRouter = router({
       ...c,
       typeName: typeById.get(c.credentialTypeId)?.name ?? "Unknown",
       derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
-      daysRemaining: Math.floor((parseForDays(c.expiryDate) - Date.now()) / 864e5)
+      daysRemaining: daysUntilExpiry(dateKey(c.expiryDate))
     }));
   }),
   create: adminProcedure.input(
@@ -3781,13 +4012,6 @@ var credentialsRouter = router({
     return { id: newId };
   })
 });
-function parseForDays(expiry) {
-  if (typeof expiry === "string") {
-    const [y, m, d] = expiry.split("-").map(Number);
-    return new Date(y, m - 1, d).getTime();
-  }
-  return expiry.getTime();
-}
 
 // server/routers/trainings.ts
 import { z as z4 } from "zod";
@@ -4266,7 +4490,7 @@ var notificationsRouter = router({
 });
 
 // server/routers/dashboard.ts
-import { asc as asc2, and as and2, desc as desc2, eq as eq2, isNull as isNull2, sql as sql2 } from "drizzle-orm";
+import { asc as asc2, and as and2, desc as desc2, eq as eq2, isNull as isNull2, sql as sql3 } from "drizzle-orm";
 import { z as z7 } from "zod";
 init_db();
 init_schema();
@@ -4385,13 +4609,13 @@ function getLocalDashboardInitial() {
 }
 function getLocalSeminarsList(input) {
   const sqlite = getSqliteDb();
-  let sql8 = `
+  let sql10 = `
     SELECT e.*, c.id as c_id, c.name as c_name, c.category as c_category, c.kind as c_kind
     FROM trainingEvents e
     INNER JOIN trainingCatalog c ON c.id = e.trainingId
     ORDER BY date(e.startDate) DESC, c.name ASC
   `;
-  const rows = sqlite.prepare(sql8).all();
+  const rows = sqlite.prepare(sql10).all();
   const records = sqlite.prepare("SELECT eventId, status FROM nurseTrainings WHERE eventId IS NOT NULL").all();
   const counts = /* @__PURE__ */ new Map();
   for (const record of records) {
@@ -4928,7 +5152,7 @@ var dashboardRouter = router({
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
     const today = todayDate();
-    const [activeRow] = await db.select({ count: sql2`count(*)` }).from(nurses).where(activeNurseCondition());
+    const [activeRow] = await db.select({ count: sql3`count(*)` }).from(nurses).where(activeNurseCondition());
     const activeNurses = Number(activeRow?.count ?? 0);
     const creds = await db.select({
       expiryDate: nurseCredentials.expiryDate,
@@ -4970,7 +5194,7 @@ var dashboardRouter = router({
     const today = todayDate();
     const areaRows = await db.select().from(areas).orderBy(areas.sortOrder);
     const activeNurseCond = activeNurseCondition();
-    const nurseCounts = await db.select({ areaId: nurses.currentAreaId, count: sql2`count(*)` }).from(nurses).where(activeNurseCond).groupBy(nurses.currentAreaId);
+    const nurseCounts = await db.select({ areaId: nurses.currentAreaId, count: sql3`count(*)` }).from(nurses).where(activeNurseCond).groupBy(nurses.currentAreaId);
     const countByArea = new Map(nurseCounts.map((r) => [r.areaId ?? 0, Number(r.count)]));
     const photoNurses = await db.select({ currentAreaId: nurses.currentAreaId, id: nurses.id, profilePhotoKey: nurses.profilePhotoKey }).from(nurses).where(activeNurseCond).limit(300);
     const creds = await db.select({ areaId: nurses.currentAreaId, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).innerJoin(nurses, eq2(nurses.id, nurseCredentials.nurseId)).where(isNull2(nurses.archivedAt));
@@ -5142,16 +5366,16 @@ var dashboardRouter = router({
       eventDate: customCalendarEvents.eventDate,
       nurseId: customCalendarEvents.nurseId,
       areaId: customCalendarEvents.areaId,
-      nurseName: sql2`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
+      nurseName: sql3`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
       areaName: areas.name
-    }).from(customCalendarEvents).leftJoin(nurses, eq2(nurses.id, customCalendarEvents.nurseId)).leftJoin(areas, eq2(areas.id, customCalendarEvents.areaId)).where(sql2`${customCalendarEvents.eventDate} >= ${today}`).orderBy(asc2(customCalendarEvents.eventDate)).limit(10);
+    }).from(customCalendarEvents).leftJoin(nurses, eq2(nurses.id, customCalendarEvents.nurseId)).leftJoin(areas, eq2(areas.id, customCalendarEvents.areaId)).where(sql3`${customCalendarEvents.eventDate} >= ${today}`).orderBy(asc2(customCalendarEvents.eventDate)).limit(10);
     const upcomingLicenses = await db.select({
       id: nurseCredentials.id,
       nurseId: nurseCredentials.nurseId,
       expiryDate: nurseCredentials.expiryDate,
-      nurseName: sql2`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
-      daysRemaining: sql2`(${nurseCredentials.expiryDate} - CURRENT_DATE)`
-    }).from(nurseCredentials).innerJoin(nurses, eq2(nurses.id, nurseCredentials.nurseId)).where(and2(isNull2(nurses.archivedAt), sql2`${nurseCredentials.expiryDate} >= CURRENT_DATE`)).orderBy(asc2(nurseCredentials.expiryDate)).limit(10);
+      nurseName: sql3`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
+      daysRemaining: sql3`(${nurseCredentials.expiryDate} - CURRENT_DATE)`
+    }).from(nurseCredentials).innerJoin(nurses, eq2(nurses.id, nurseCredentials.nurseId)).where(and2(isNull2(nurses.archivedAt), sql3`${nurseCredentials.expiryDate} >= CURRENT_DATE`)).orderBy(asc2(nurseCredentials.expiryDate)).limit(10);
     return {
       upcomingCustoms: upcomingCustoms.map((r) => ({
         ...r,
@@ -5171,7 +5395,7 @@ var dashboardRouter = router({
 // server/routers/areas.ts
 import { z as z8 } from "zod";
 import { TRPCError as TRPCError5 } from "@trpc/server";
-import { and as and3, eq as eq3, isNull as isNull3, sql as sql3 } from "drizzle-orm";
+import { and as and3, eq as eq3, isNull as isNull3, sql as sql4 } from "drizzle-orm";
 init_db();
 init_schema();
 init_schema();
@@ -5250,7 +5474,7 @@ var areasRouter = router({
     let licenseAttention = 0;
     let expired = 0;
     if (nurseIds.length > 0) {
-      const creds = await db.select({ expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).where(sql3`${nurseCredentials.nurseId} IN (${sql3.join(nurseIds, sql3`, `)})`);
+      const creds = await db.select({ expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).where(sql4`${nurseCredentials.nurseId} IN (${sql4.join(nurseIds, sql4`, `)})`);
       for (const c of creds) {
         const status = deriveLicenseStatus(dateKey(c.expiryDate), today);
         if (status === "Expired") expired++;
@@ -5259,7 +5483,7 @@ var areasRouter = router({
     }
     let trainingAttention = 0;
     if (nurseIds.length > 0) {
-      const trainings = await db.select({ status: nurseTrainings.status, scheduledDate: nurseTrainings.scheduledDate, expiryDate: nurseTrainings.expiryDate }).from(nurseTrainings).where(sql3`${nurseTrainings.nurseId} IN (${sql3.join(nurseIds, sql3`, `)})`);
+      const trainings = await db.select({ status: nurseTrainings.status, scheduledDate: nurseTrainings.scheduledDate, expiryDate: nurseTrainings.expiryDate }).from(nurseTrainings).where(sql4`${nurseTrainings.nurseId} IN (${sql4.join(nurseIds, sql4`, `)})`);
       for (const t2 of trainings) {
         if (t2.status === "Scheduled" && t2.scheduledDate && dateKey(t2.scheduledDate) <= today) trainingAttention++;
         if (t2.status === "Completed" && t2.expiryDate && daysUntilExpiry(dateKey(t2.expiryDate), today) <= 0) trainingAttention++;
@@ -5269,7 +5493,7 @@ var areasRouter = router({
       nurse: { id: nurses.id, firstName: nurses.firstName, lastName: nurses.lastName },
       startDate: areaAssignments.startDate,
       assignmentType: areaAssignments.assignmentType
-    }).from(areaAssignments).innerJoin(nurses, eq3(nurses.id, areaAssignments.nurseId)).where(and3(eq3(areaAssignments.areaId, input.id), isNull3(areaAssignments.endDate), sql3`${areaAssignments.startDate} > ${today}`)).orderBy(sql3`${areaAssignments.startDate} ASC`).limit(10);
+    }).from(areaAssignments).innerJoin(nurses, eq3(nurses.id, areaAssignments.nurseId)).where(and3(eq3(areaAssignments.areaId, input.id), isNull3(areaAssignments.endDate), sql4`${areaAssignments.startDate} > ${today}`)).orderBy(sql4`${areaAssignments.startDate} ASC`).limit(10);
     const durations = staff.filter((s) => s.assignment.startDate).map((s) => daysBetween(dateKey(s.assignment.startDate), today));
     return {
       area,
@@ -5316,7 +5540,7 @@ async function listAreasWithCounts() {
   }
   const today = todayDate();
   const areaRows = await db.select().from(areas).orderBy(areas.sortOrder);
-  const nurseCounts = await db.select({ areaId: nurses.currentAreaId, count: sql3`count(*)` }).from(nurses).where(activeNurseCondition()).groupBy(nurses.currentAreaId);
+  const nurseCounts = await db.select({ areaId: nurses.currentAreaId, count: sql4`count(*)` }).from(nurses).where(activeNurseCondition()).groupBy(nurses.currentAreaId);
   const countByArea = new Map(nurseCounts.map((r) => [r.areaId ?? 0, Number(r.count)]));
   const creds = await db.select({ areaId: nurses.currentAreaId, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).innerJoin(nurses, eq3(nurses.id, nurseCredentials.nurseId)).where(isNull3(nurses.archivedAt));
   const attentionByArea = /* @__PURE__ */ new Map();
@@ -5334,7 +5558,7 @@ async function listAreasWithCounts() {
 
 // server/routers/reports.ts
 init_nursetrack();
-import { and as and4, asc as asc3, desc as desc3, eq as eq4, isNull as isNull4, sql as sql4 } from "drizzle-orm";
+import { and as and4, asc as asc3, desc as desc3, eq as eq4, isNull as isNull4, sql as sql5 } from "drizzle-orm";
 import { z as z9 } from "zod";
 init_db();
 init_schema();
@@ -5356,9 +5580,9 @@ var reportsRouter = router({
     }
     const today = todayDate();
     const activeNurseCond = activeNurseCondition();
-    const [activeRow] = await db.select({ count: sql4`count(*)` }).from(nurses).where(activeNurseCond);
+    const [activeRow] = await db.select({ count: sql5`count(*)` }).from(nurses).where(activeNurseCond);
     const areaCount = (await db.select().from(areas).where(eq4(areas.active, true))).length;
-    const expiredCount = (await db.select({ count: sql4`count(*)` }).from(nurseCredentials).innerJoin(nurses, eq4(nurses.id, nurseCredentials.nurseId)).where(isNull4(nurses.archivedAt))).length;
+    const expiredCount = (await db.select({ count: sql5`count(*)` }).from(nurseCredentials).innerJoin(nurses, eq4(nurses.id, nurseCredentials.nurseId)).where(isNull4(nurses.archivedAt))).length;
     return [
       { type: "licenseStatus", label: "License Status Overview", description: "Active license status of all nurses by area", rowHint: activeRow?.count ?? 0 },
       { type: "licenseDue", label: "Licenses Due for Renewal", description: "Licenses expiring within 1 year, sorted by urgency", rowHint: null },
@@ -5421,7 +5645,7 @@ var reportsRouter = router({
         expiryDate: nurseCredentials.expiryDate,
         renewalStatus: nurseCredentials.renewalStatus,
         archivedAt: nurses.archivedAt
-      }).from(nurseCredentials).innerJoin(nurses, eq4(nurses.id, nurseCredentials.nurseId)).innerJoin(credentialTypes, eq4(credentialTypes.id, nurseCredentials.credentialTypeId)).where(sql4`(${nurseCredentials.expiryDate} - CURRENT_DATE) <= 365`).orderBy(sql4`(${nurseCredentials.expiryDate} - CURRENT_DATE) ASC`).limit(300);
+      }).from(nurseCredentials).innerJoin(nurses, eq4(nurses.id, nurseCredentials.nurseId)).innerJoin(credentialTypes, eq4(credentialTypes.id, nurseCredentials.credentialTypeId)).where(sql5`(${nurseCredentials.expiryDate} - CURRENT_DATE) <= 365`).orderBy(sql5`(${nurseCredentials.expiryDate} - CURRENT_DATE) ASC`).limit(300);
       const areaRows = await db.select().from(areas);
       const areaById = new Map(areaRows.map((a) => [a.id, a]));
       return rows2.filter((r) => !r.archivedAt).map((r) => ({
@@ -5551,7 +5775,7 @@ var reportsRouter = router({
 async function latestLicenseNumbersByNurse(db, nurseIds) {
   const uniqueIds = Array.from(new Set(nurseIds));
   if (uniqueIds.length === 0) return /* @__PURE__ */ new Map();
-  const rows = await db.select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).where(sql4`${nurseCredentials.nurseId} IN (${sql4.join(uniqueIds.map((id) => sql4`${id}`), sql4`, `)})`);
+  const rows = await db.select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).where(sql5`${nurseCredentials.nurseId} IN (${sql5.join(uniqueIds.map((id) => sql5`${id}`), sql5`, `)})`);
   const latestByNurse = /* @__PURE__ */ new Map();
   for (const r of rows) {
     const existing = latestByNurse.get(r.nurseId);
@@ -5572,7 +5796,7 @@ function daysBetween2(start, end, today = todayDate()) {
 // server/routers/settings.ts
 import { z as z10 } from "zod";
 import { TRPCError as TRPCError6 } from "@trpc/server";
-import { eq as eq8 } from "drizzle-orm";
+import { eq as eq9 } from "drizzle-orm";
 init_db();
 init_schema();
 init_nursetrack();
@@ -5581,7 +5805,7 @@ init_nursetrack();
 init_schema();
 init_db();
 init_nursetrack();
-import { eq as eq5, isNull as isNull5, sql as sql5 } from "drizzle-orm";
+import { eq as eq5, isNull as isNull5, sql as sql6 } from "drizzle-orm";
 var DEFAULT_THRESHOLDS = [365, 180];
 async function fetchActiveCredentials() {
   const db = await getDb();
@@ -5625,6 +5849,10 @@ async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
   if (!db) return results;
   const areaRows = await listAreas(false);
   const areaById = new Map(areaRows.map((a) => [a.id, a.name]));
+  const existingReminders = await listReminders();
+  const existingSet = new Set(
+    existingReminders.map((r) => `${r.credentialId}:${r.thresholdDays}:${r.renewalCycleKey}`)
+  );
   const duePairs = [];
   const expiredIds = [];
   const expiredNotes = [];
@@ -5642,6 +5870,11 @@ async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
     }
     for (const threshold of thresholds) {
       if (days > threshold) continue;
+      const cycleKey = `${cred.id}:${threshold}:${cred.renewalCycleKey}`;
+      if (existingSet.has(cycleKey)) {
+        results.skippedExisting++;
+        continue;
+      }
       const areaName = cred.nurse.currentAreaId ? areaById.get(cred.nurse.currentAreaId) ?? "Unknown area" : "Unassigned";
       duePairs.push({ cred, threshold, days, areaName });
     }
@@ -5654,12 +5887,12 @@ async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
       triggerDate: new Date((/* @__PURE__ */ new Date(`${today}T00:00:00`)).getTime() + threshold * 864e5)
     }));
     await db.insert(licenseReminders).values(rows).onConflictDoNothing();
-    results.created += duePairs.length;
+    results.created = duePairs.length;
   }
   if (expiredIds.length > 0) {
     const db2 = await getDb();
     if (db2) {
-      await db2.update(licenseReminders).set({ status: "expired" }).where(sql5`${licenseReminders.credentialId} IN (${sql5.join(expiredIds.map((i) => sql5`${i}`), sql5`, `)})`);
+      await db2.update(licenseReminders).set({ status: "expired" }).where(sql6`${licenseReminders.credentialId} IN (${sql6.join(expiredIds.map((i) => sql6`${i}`), sql6`, `)})`);
     }
   }
   const expiredNotifs = expiredNotes.map(({ cred }) => ({
@@ -5675,10 +5908,17 @@ async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
     await createNotificationsBatch(expiredNotifs);
   }
   results.expiredCredentials = expiredIds.length;
-  const notifPayloads = duePairs.map(({ cred, threshold, days }) => ({
+  const notifsByCred = /* @__PURE__ */ new Map();
+  for (const pair of duePairs) {
+    const prev = notifsByCred.get(pair.cred.id);
+    if (!prev || pair.threshold < prev.threshold) {
+      notifsByCred.set(pair.cred.id, pair);
+    }
+  }
+  const notifPayloads = Array.from(notifsByCred.values()).map(({ cred, threshold, days }) => ({
     type: "license.renewalReminder",
     severity: threshold >= 365 ? "attention" : "upcoming_renewal",
-    title: `${threshold === 365 ? "1-year" : "6-month"} renewal reminder \u2014 ${cred.nurse.firstName} ${cred.nurse.lastName}`,
+    title: `${threshold === 365 ? "1-year" : `${threshold}-day`} renewal reminder \u2014 ${cred.nurse.firstName} ${cred.nurse.lastName}`,
     message: `${cred.nurse.firstName} ${cred.nurse.lastName} has a license expiring in ${days <= 0 ? "about " + (Math.abs(days) + 1) + " day(s) (due " + dateKey(cred.expiryDate) + ")" : days + " days"}. Review the license and begin renewal.`,
     nurseId: cred.nurseId,
     relatedEntityType: "credential",
@@ -6425,7 +6665,7 @@ var settingsRouter = router({
   get: adminProcedure.input(z10.object({ key: settingKey })).query(async ({ input }) => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const rows = await db.select().from(appSettings).where(eq8(appSettings.key, input.key)).limit(1);
+    const rows = await db.select().from(appSettings).where(eq9(appSettings.key, input.key)).limit(1);
     return { key: input.key, value: rows[0]?.value ?? null };
   }),
   getAll: adminProcedure.query(async () => {
@@ -6446,16 +6686,16 @@ var settingsRouter = router({
     if (input.key === "reminderThresholdDays") {
       const nums = input.value ? input.value.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0 && n <= 365) : [];
       if (nums.length === 0) throw new TRPCError6({ code: "BAD_REQUEST", message: "Thresholds must be positive integers up to 365, separated by commas (e.g. 365,180)." });
-      await db.update(appSettings).set({ value: nums.join(",") }).where(eq8(appSettings.key, "reminderThresholdDays"));
+      await db.update(appSettings).set({ value: nums.join(",") }).where(eq9(appSettings.key, "reminderThresholdDays"));
     } else {
-      await db.update(appSettings).set({ value: input.value }).where(eq8(appSettings.key, input.key));
+      await db.update(appSettings).set({ value: input.value }).where(eq9(appSettings.key, input.key));
     }
     return { success: true };
   }),
   runRemindersNow: adminProcedure.mutation(async () => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const rows = await db.select().from(appSettings).where(eq8(appSettings.key, "reminderThresholdDays"));
+    const rows = await db.select().from(appSettings).where(eq9(appSettings.key, "reminderThresholdDays"));
     const raw = rows[0]?.value ?? "365,180";
     const thresholds = raw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
     const results = await runDailyReminders(todayDate(), thresholds.length ? thresholds : [365, 180]);
@@ -6495,7 +6735,7 @@ var settingsRouter = router({
         message: `Missing columns: ${missing.join(", ")}. Required: ${expected.join(", ")}.`
       });
     }
-    const areaRows = await db.select().from(areas).where(eq8(areas.active, true));
+    const areaRows = await db.select().from(areas).where(eq9(areas.active, true));
     const areaByName = new Map(areaRows.map((a) => [a.name.toLowerCase(), a]));
     const issues = [];
     const preview = [];
@@ -6548,7 +6788,7 @@ var settingsRouter = router({
       const idx = header.indexOf(col);
       return idx >= 0 ? (r[idx] ?? "").trim() : "";
     };
-    const areaRows = await db.select().from(areas).where(eq8(areas.active, true));
+    const areaRows = await db.select().from(areas).where(eq9(areas.active, true));
     const areaByName = new Map(areaRows.map((a) => [a.name.toLowerCase(), a]));
     const results = { imported: 0, skipped: 0, errors: [] };
     for (let i = 1; i < rows.length; i++) {
@@ -6612,7 +6852,7 @@ var settingsRouter = router({
   }),
   emailStatus: adminProcedure.query(async () => {
     const hasKey = Boolean(process.env.RESEND_API_KEY);
-    const fromAddress = process.env.EMAIL_FROM || "SKTI NurseTrack <notifications@sktinursetrack.com>";
+    const fromAddress = process.env.EMAIL_FROM || "SKTI NurseTrack <onboarding@resend.dev>";
     return {
       configured: hasKey,
       mode: hasKey ? "live" : "mock",
@@ -6687,7 +6927,7 @@ function parseCsv(text2) {
 init_schema();
 init_nursetrack();
 import { TRPCError as TRPCError7 } from "@trpc/server";
-import { and as and6, asc as asc4, desc as desc4, eq as eq9, gte as gte2, isNull as isNull7, lte as lte2, notInArray } from "drizzle-orm";
+import { and as and7, asc as asc4, desc as desc4, eq as eq10, gte as gte3, isNull as isNull8, lte as lte3, notInArray } from "drizzle-orm";
 import { z as z11 } from "zod";
 init_db();
 var dateString = z11.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
@@ -6722,9 +6962,9 @@ var seminarsRouter = router({
       return getLocalSeminarsList(input);
     }
     const conditions = [];
-    if (input?.from) conditions.push(gte2(trainingEvents.endDate, input.from));
-    if (input?.to) conditions.push(lte2(trainingEvents.startDate, input.to));
-    const rows = await db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq9(trainingCatalog.id, trainingEvents.trainingId)).where(conditions.length ? and6(...conditions) : void 0).orderBy(desc4(trainingEvents.startDate), asc4(trainingCatalog.name));
+    if (input?.from) conditions.push(gte3(trainingEvents.endDate, input.from));
+    if (input?.to) conditions.push(lte3(trainingEvents.startDate, input.to));
+    const rows = await db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq10(trainingCatalog.id, trainingEvents.trainingId)).where(conditions.length ? and7(...conditions) : void 0).orderBy(desc4(trainingEvents.startDate), asc4(trainingCatalog.name));
     const records = await db.select({ eventId: nurseTrainings.eventId, status: nurseTrainings.status }).from(nurseTrainings);
     const counts = /* @__PURE__ */ new Map();
     for (const record of records) {
@@ -6753,7 +6993,7 @@ var seminarsRouter = router({
     }
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const [training] = await db.select().from(trainingCatalog).where(eq9(trainingCatalog.id, input.trainingId)).limit(1);
+    const [training] = await db.select().from(trainingCatalog).where(eq10(trainingCatalog.id, input.trainingId)).limit(1);
     if (!training) throw new TRPCError7({ code: "NOT_FOUND", message: "Training catalog item not found." });
     const result = await db.insert(trainingEvents).values({
       ...input,
@@ -6793,14 +7033,14 @@ var seminarsRouter = router({
       if (!detail) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
       return detail;
     }
-    const [selected] = await db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq9(trainingCatalog.id, trainingEvents.trainingId)).where(eq9(trainingEvents.id, input.eventId)).limit(1);
+    const [selected] = await db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq10(trainingCatalog.id, trainingEvents.trainingId)).where(eq10(trainingEvents.id, input.eventId)).limit(1);
     if (!selected) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
     const [records, allTrainingRecords, staff, areaRows, relatedEvents] = await Promise.all([
-      db.select().from(nurseTrainings).where(eq9(nurseTrainings.eventId, input.eventId)).orderBy(desc4(nurseTrainings.completionDate)),
-      db.select().from(nurseTrainings).where(eq9(nurseTrainings.trainingId, selected.training.id)).orderBy(desc4(nurseTrainings.completionDate)),
+      db.select().from(nurseTrainings).where(eq10(nurseTrainings.eventId, input.eventId)).orderBy(desc4(nurseTrainings.completionDate)),
+      db.select().from(nurseTrainings).where(eq10(nurseTrainings.trainingId, selected.training.id)).orderBy(desc4(nurseTrainings.completionDate)),
       db.select().from(nurses).orderBy(asc4(nurses.lastName), asc4(nurses.firstName)),
       db.select().from(areas),
-      db.select().from(trainingEvents).where(eq9(trainingEvents.trainingId, selected.training.id))
+      db.select().from(trainingEvents).where(eq10(trainingEvents.trainingId, selected.training.id))
     ]);
     const staffById = new Map(staff.map((person) => [person.id, person]));
     const areaById = new Map(areaRows.map((area) => [area.id, area]));
@@ -6854,9 +7094,9 @@ var seminarsRouter = router({
   })).mutation(async ({ ctx, input }) => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const [event] = await db.select().from(trainingEvents).where(eq9(trainingEvents.id, input.eventId)).limit(1);
+    const [event] = await db.select().from(trainingEvents).where(eq10(trainingEvents.id, input.eventId)).limit(1);
     if (!event) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
-    const [person] = await db.select().from(nurses).where(eq9(nurses.id, input.nurseId)).limit(1);
+    const [person] = await db.select().from(nurses).where(eq10(nurses.id, input.nurseId)).limit(1);
     if (!person) throw new TRPCError7({ code: "NOT_FOUND", message: "Staff member not found." });
     if (person.archivedAt || inactiveStatuses.includes(person.employmentStatus)) {
       throw new TRPCError7({ code: "BAD_REQUEST", message: "Attendance can only be added for active staff." });
@@ -6870,7 +7110,7 @@ var seminarsRouter = router({
     if (input.completionDate && input.expiryDate && input.expiryDate < input.completionDate) {
       throw new TRPCError7({ code: "BAD_REQUEST", message: "Expiry date cannot be before completion date." });
     }
-    const duplicate = await db.select({ id: nurseTrainings.id }).from(nurseTrainings).where(and6(eq9(nurseTrainings.eventId, input.eventId), eq9(nurseTrainings.nurseId, input.nurseId))).limit(1);
+    const duplicate = await db.select({ id: nurseTrainings.id }).from(nurseTrainings).where(and7(eq10(nurseTrainings.eventId, input.eventId), eq10(nurseTrainings.nurseId, input.nurseId))).limit(1);
     if (duplicate.length) throw new TRPCError7({ code: "CONFLICT", message: "Staff member is already listed for this seminar." });
     return db.transaction(async (tx) => {
       const result = await tx.insert(nurseTrainings).values({
@@ -6928,15 +7168,15 @@ var seminarsRouter = router({
     if (!db) {
       return getLocalSeminarMatrix(input);
     }
-    const staffConditions = [isNull7(nurses.archivedAt), notInArray(nurses.employmentStatus, inactiveStatuses)];
-    if (input?.staffType) staffConditions.push(eq9(nurses.staffType, input.staffType));
-    if (input?.areaId) staffConditions.push(eq9(nurses.currentAreaId, input.areaId));
+    const staffConditions = [isNull8(nurses.archivedAt), notInArray(nurses.employmentStatus, inactiveStatuses)];
+    if (input?.staffType) staffConditions.push(eq10(nurses.staffType, input.staffType));
+    if (input?.areaId) staffConditions.push(eq10(nurses.currentAreaId, input.areaId));
     const eventConditions = [];
-    if (input?.from) eventConditions.push(gte2(trainingEvents.endDate, input.from));
-    if (input?.to) eventConditions.push(lte2(trainingEvents.startDate, input.to));
+    if (input?.from) eventConditions.push(gte3(trainingEvents.endDate, input.from));
+    if (input?.to) eventConditions.push(lte3(trainingEvents.startDate, input.to));
     const [staff, events, records] = await Promise.all([
-      db.select().from(nurses).where(and6(...staffConditions)).orderBy(asc4(nurses.lastName), asc4(nurses.firstName)),
-      db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq9(trainingCatalog.id, trainingEvents.trainingId)).where(eventConditions.length ? and6(...eventConditions) : void 0).orderBy(asc4(trainingEvents.startDate), asc4(trainingCatalog.name)),
+      db.select().from(nurses).where(and7(...staffConditions)).orderBy(asc4(nurses.lastName), asc4(nurses.firstName)),
+      db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq10(trainingCatalog.id, trainingEvents.trainingId)).where(eventConditions.length ? and7(...eventConditions) : void 0).orderBy(asc4(trainingEvents.startDate), asc4(trainingCatalog.name)),
       db.select().from(nurseTrainings)
     ]);
     const eventIds = new Set(events.map((item) => item.event.id));
@@ -6953,8 +7193,8 @@ var seminarsRouter = router({
       return getLocalMonthlySummary(input.year);
     }
     const [records, staff] = await Promise.all([
-      db.select().from(nurseTrainings).where(eq9(nurseTrainings.status, "Completed")),
-      db.select().from(nurses).where(and6(isNull7(nurses.archivedAt), notInArray(nurses.employmentStatus, inactiveStatuses))).orderBy(asc4(nurses.lastName), asc4(nurses.firstName))
+      db.select().from(nurseTrainings).where(eq10(nurseTrainings.status, "Completed")),
+      db.select().from(nurses).where(and7(isNull8(nurses.archivedAt), notInArray(nurses.employmentStatus, inactiveStatuses))).orderBy(asc4(nurses.lastName), asc4(nurses.firstName))
     ]);
     return staff.map((person) => {
       const months = Array.from({ length: 12 }, () => 0);
@@ -6974,7 +7214,7 @@ var seminarsRouter = router({
     const startMonth = (input.quarter - 1) * 3;
     const from = new Date(input.year, startMonth, 1);
     const to = new Date(input.year, startMonth + 3, 0);
-    const rows = await db.select({ record: nurseTrainings, person: nurses, event: trainingEvents, training: trainingCatalog }).from(nurseTrainings).innerJoin(nurses, eq9(nurses.id, nurseTrainings.nurseId)).leftJoin(trainingEvents, eq9(trainingEvents.id, nurseTrainings.eventId)).innerJoin(trainingCatalog, eq9(trainingCatalog.id, nurseTrainings.trainingId)).where(and6(eq9(nurseTrainings.status, "Completed"), gte2(nurseTrainings.completionDate, from), lte2(nurseTrainings.completionDate, to))).orderBy(asc4(nurseTrainings.completionDate), asc4(nurses.lastName), asc4(trainingCatalog.name));
+    const rows = await db.select({ record: nurseTrainings, person: nurses, event: trainingEvents, training: trainingCatalog }).from(nurseTrainings).innerJoin(nurses, eq10(nurses.id, nurseTrainings.nurseId)).leftJoin(trainingEvents, eq10(trainingEvents.id, nurseTrainings.eventId)).innerJoin(trainingCatalog, eq10(trainingCatalog.id, nurseTrainings.trainingId)).where(and7(eq10(nurseTrainings.status, "Completed"), gte3(nurseTrainings.completionDate, from), lte3(nurseTrainings.completionDate, to))).orderBy(asc4(nurseTrainings.completionDate), asc4(nurses.lastName), asc4(trainingCatalog.name));
     return rows.map((row) => ({
       recordId: row.record.id,
       nurseId: row.person.id,
@@ -6994,27 +7234,70 @@ var seminarsRouter = router({
 // server/routers/staffAccount.ts
 import { z as z12 } from "zod";
 import { TRPCError as TRPCError8 } from "@trpc/server";
+
+// server/_core/rateLimit.ts
+var windows = /* @__PURE__ */ new Map();
+function checkRateLimit(key, opts) {
+  const now = Date.now();
+  const entry = windows.get(key);
+  if (!entry || entry.resetAt <= now) {
+    windows.set(key, { count: 1, resetAt: now + opts.windowMs });
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= opts.max;
+}
+
+// server/routers/staffAccount.ts
 init_db();
 init_nursetrack();
+var GENERIC_CLAIM_ERROR = "No matching staff record, or this profile already has a sign-in email.";
+var CLAIM_RATE_LIMIT = { max: 10, windowMs: 15 * 60 * 1e3 };
 var staffAccountRouter = router({
-  myLink: protectedProcedure.query(async ({ ctx }) => {
-    const nurse = await getNurseByLinkedUserId(ctx.user.id);
-    return { linked: Boolean(nurse), nurseId: nurse?.id ?? null };
+  myLink: staffProcedure.query(async ({ ctx }) => {
+    return { linked: true, nurseId: ctx.nurseId, authMode: ctx.authMode };
   }),
-  linkByPrc: protectedProcedure.input(z12.object({ prcNumber: z12.string().min(1).max(64), fullName: z12.string().min(1).max(256) })).mutation(async ({ ctx, input }) => {
-    const existing = await getNurseByLinkedUserId(ctx.user.id);
-    if (existing) throw new TRPCError8({ code: "CONFLICT", message: "Your account is already linked to a staff profile." });
-    const result = await linkNurseByPrcAndName(input.prcNumber, input.fullName, ctx.user.id);
-    if (!result.ok) {
-      if (result.reason === "already_linked") {
-        throw new TRPCError8({ code: "CONFLICT", message: "That staff profile is already linked to a different account." });
-      }
-      throw new TRPCError8({ code: "NOT_FOUND", message: "No staff profile matches that PRC/license number and name. Check for typos or contact your supervisor." });
+  /** First visit: identify by PRC/license number (RN) or employee ID (attendant, no PRC on file). */
+  startClaim: publicProcedure.input(z12.object({ identifier: z12.string().min(1).max(64) })).mutation(async ({ ctx, input }) => {
+    const ip = ctx.req.ip || ctx.req.socket?.remoteAddress || "unknown";
+    if (!checkRateLimit(`staff-claim:${ip}`, CLAIM_RATE_LIMIT)) {
+      throw new TRPCError8({ code: "NOT_FOUND", message: GENERIC_CLAIM_ERROR });
     }
-    return { nurseId: result.nurse.id };
+    const result = await claimNurseByIdentifier(input.identifier);
+    if (!result.ok) {
+      throw new TRPCError8({ code: "NOT_FOUND", message: GENERIC_CLAIM_ERROR });
+    }
+    const token = await sdk.createClaimToken(result.nurseId);
+    ctx.res.cookie(CLAIM_COOKIE_NAME, token, getClaimCookieOptions(ctx.req));
+    return { ok: true };
   }),
-  myProfile: protectedProcedure.query(async ({ ctx }) => {
-    const nurse = await getNurseByLinkedUserId(ctx.user.id);
+  /** End of first visit (D3): staff types their Gmail and it's saved at once. */
+  saveClaimEmail: staffProcedure.input(z12.object({ email: z12.string().email().max(320) })).mutation(async ({ ctx, input }) => {
+    if (ctx.authMode !== "claim") {
+      throw new TRPCError8({ code: "FORBIDDEN", message: "Already signed in with Google \u2014 use change email instead." });
+    }
+    const result = await saveClaimEmail(ctx.nurseId, input.email);
+    if (!result.ok) {
+      if (result.reason === "already_claimed") {
+        throw new TRPCError8({ code: "CONFLICT", message: GENERIC_CLAIM_ERROR });
+      }
+      throw new TRPCError8({ code: "CONFLICT", message: "That email is already in use." });
+    }
+    return { ok: true };
+  }),
+  /** D6: change the sign-in Gmail from an established Google session only. */
+  changeEmail: staffProcedure.input(z12.object({ email: z12.string().email().max(320) })).mutation(async ({ ctx, input }) => {
+    if (ctx.authMode !== "google") {
+      throw new TRPCError8({ code: "FORBIDDEN", message: "Sign in with Google to change your sign-in email." });
+    }
+    const result = await changeNurseAccountEmail(ctx.nurseId, input.email);
+    if (!result.ok) {
+      throw new TRPCError8({ code: "CONFLICT", message: "That email is already in use." });
+    }
+    return { ok: true };
+  }),
+  myProfile: staffProcedure.query(async ({ ctx }) => {
+    const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
     const [areaRows, types, catalog] = await Promise.all([
       listAreas(false),
@@ -7041,17 +7324,18 @@ var staffAccountRouter = router({
         ...t2,
         trainingName: catalogById.get(t2.trainingId) ?? "Training"
       })),
-      assignments
+      assignments,
+      authMode: ctx.authMode
     };
   }),
-  updateMyBasicInfo: protectedProcedure.input(z12.object({ contactNumber: z12.string().max(32).optional() })).mutation(async ({ ctx, input }) => {
-    const nurse = await getNurseByLinkedUserId(ctx.user.id);
+  updateMyBasicInfo: staffProcedure.input(z12.object({ contactNumber: z12.string().max(32).optional() })).mutation(async ({ ctx, input }) => {
+    const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
     await updateNurse(nurse.id, { contactNumber: input.contactNumber ?? null });
     return { ok: true };
   }),
-  uploadMyPhoto: protectedProcedure.input(z12.object({ fileBase64: z12.string(), fileName: z12.string().max(200), mimeType: z12.string() })).mutation(async ({ ctx, input }) => {
-    const nurse = await getNurseByLinkedUserId(ctx.user.id);
+  uploadMyPhoto: staffProcedure.input(z12.object({ fileBase64: z12.string(), fileName: z12.string().max(200), mimeType: z12.string() })).mutation(async ({ ctx, input }) => {
+    const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
     const mimeCheck = validateMime(input.mimeType, "photo");
     if (!mimeCheck.ok) throw new TRPCError8({ code: "BAD_REQUEST", message: mimeCheck.error });
@@ -7061,7 +7345,7 @@ var staffAccountRouter = router({
     const { url } = await storagePut(key, buffer, input.mimeType);
     await updateNurse(nurse.id, { profilePhotoKey: key });
     await logActivity({
-      supervisorId: ctx.user.id,
+      supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
       actionType: "nurse.photo.updated",
       entityType: "nurse",
@@ -7070,10 +7354,10 @@ var staffAccountRouter = router({
     });
     return { url };
   }),
-  listCatalog: protectedProcedure.query(async () => {
+  listCatalog: staffProcedure.query(async () => {
     return listTrainingCatalog(false);
   }),
-  uploadCredentialDocument: protectedProcedure.input(
+  uploadCredentialDocument: staffProcedure.input(
     z12.object({
       credentialId: z12.number(),
       fileBase64: z12.string(),
@@ -7081,7 +7365,7 @@ var staffAccountRouter = router({
       mimeType: z12.string()
     })
   ).mutation(async ({ ctx, input }) => {
-    const nurse = await getNurseByLinkedUserId(ctx.user.id);
+    const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
     const allCreds = await listCredentials({ nurseId: nurse.id });
     const cred = allCreds.find((c) => c.id === input.credentialId);
@@ -7094,7 +7378,7 @@ var staffAccountRouter = router({
     const { url } = await storagePut(key, buffer, input.mimeType);
     await updateCredential(input.credentialId, { documentKey: key });
     await logActivity({
-      supervisorId: ctx.user.id,
+      supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
       actionType: "license.document.uploaded",
       entityType: "credential",
@@ -7103,7 +7387,7 @@ var staffAccountRouter = router({
     });
     return { url };
   }),
-  addTrainingRecord: protectedProcedure.input(
+  addTrainingRecord: staffProcedure.input(
     z12.object({
       trainingId: z12.number(),
       provider: z12.string().max(128).optional(),
@@ -7114,7 +7398,7 @@ var staffAccountRouter = router({
       remarks: z12.string().max(2e3).optional()
     })
   ).mutation(async ({ ctx, input }) => {
-    const nurse = await getNurseByLinkedUserId(ctx.user.id);
+    const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
     const id = await createNurseTraining({
       nurseId: nurse.id,
@@ -7128,7 +7412,7 @@ var staffAccountRouter = router({
       remarks: input.remarks || void 0
     });
     await logActivity({
-      supervisorId: ctx.user.id,
+      supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
       actionType: "training.created",
       entityType: "nurseTraining",
@@ -7137,7 +7421,7 @@ var staffAccountRouter = router({
     });
     return { id };
   }),
-  uploadTrainingCertificate: protectedProcedure.input(
+  uploadTrainingCertificate: staffProcedure.input(
     z12.object({
       recordId: z12.number(),
       fileBase64: z12.string(),
@@ -7145,7 +7429,7 @@ var staffAccountRouter = router({
       mimeType: z12.string()
     })
   ).mutation(async ({ ctx, input }) => {
-    const nurse = await getNurseByLinkedUserId(ctx.user.id);
+    const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
     const trainings = await listNurseTrainings({ nurseId: nurse.id });
     const record = trainings.find((t2) => t2.id === input.recordId);
@@ -7158,7 +7442,7 @@ var staffAccountRouter = router({
     const { url } = await storagePut(key, buffer, input.mimeType);
     await updateNurseTraining(input.recordId, { certificateKey: key });
     await logActivity({
-      supervisorId: ctx.user.id,
+      supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
       actionType: "training.certificate.uploaded",
       entityType: "nurseTraining",
@@ -7323,7 +7607,6 @@ async function extractDocx(buffer) {
 // server/_core/aiExtraction.ts
 import { z as z13 } from "zod";
 init_nursetrack();
-init_env();
 var fieldValueSchema = z13.object({
   value: z13.union([z13.string(), z13.number(), z13.boolean(), z13.null()]).nullable(),
   confidence: z13.number().min(0).max(1)
@@ -7769,7 +8052,6 @@ import { TRPCError as TRPCError10 } from "@trpc/server";
 // server/_core/aiInsights.ts
 init_db();
 init_nursetrack();
-init_env();
 async function buildDataDigest() {
   const [nurses2, areas2, credentials, trainingRecords, credentialTypes2, trainingCatalog2] = await Promise.all([
     listNurses(),
@@ -7874,11 +8156,24 @@ async function callOpenRouter(messages) {
     },
     body: JSON.stringify({ model: ENV.openRouterModel, messages, temperature: 0.3 })
   });
+  const rawText = await response.text().catch(() => "");
   if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    throw new Error(`AI request failed (${response.status}): ${errText || response.statusText}`);
+    let errorDetail = rawText;
+    try {
+      const errJson = JSON.parse(rawText);
+      errorDetail = errJson?.error?.message ?? errJson?.message ?? rawText;
+    } catch {
+      errorDetail = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 200);
+    }
+    throw new Error(`AI request failed (${response.status}): ${errorDetail || response.statusText}`);
   }
-  const json2 = await response.json();
+  let json2;
+  try {
+    json2 = JSON.parse(rawText);
+  } catch {
+    const preview = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 150);
+    throw new Error(`AI service returned unexpected non-JSON response: ${preview || "Unknown error"}`);
+  }
   const content = json2.choices?.[0]?.message?.content;
   if (!content) throw new Error("AI request returned an empty response.");
   return content;
@@ -7886,9 +8181,9 @@ async function callOpenRouter(messages) {
 async function generateInsightsReport() {
   const digest = await buildDataDigest();
   const prompt = `You are a nurse-staffing analyst for a hospital nephrology department. Below is today's roster/license/training data snapshot. Write a concise report (use short headed sections, plain text, no markdown tables) covering:
-1. Urgent license expirations (expired or expiring within 30 days) \u2014 name each person.
-2. Licenses expiring within 6 months \u2014 summarize, group by area if there are many.
-3. Upcoming trainings/seminars in the next 60 days \u2014 list them.
+1. Urgent license expirations (expired or expiring within 30 days): name each person.
+2. Licenses expiring within 6 months: summarize, group by area if there are many.
+3. Upcoming trainings/seminars in the next 60 days: list them.
 4. Any notable staffing pattern you can see from the area counts (e.g. heavy imbalance between areas), stated as an observation, not a recommendation you're not qualified to make.
 Be factual and specific using only the data given below. If a section has nothing to report, say so briefly.
 
@@ -7964,6 +8259,7 @@ var appRouter = router({
 });
 
 // server/importStaffEmails.ts
+init_adminAccess();
 import { z as z16 } from "zod";
 init_db();
 var bodySchema = z16.object({
@@ -7977,7 +8273,7 @@ async function importStaffEmailsHandler(req, res) {
     } catch {
       return res.status(403).json({ error: "not-authenticated" });
     }
-    if (user.role !== "admin") {
+    if (!hasFullAccess(user.email)) {
       return res.status(403).json({ error: "admin-only" });
     }
     const parsed = bodySchema.safeParse(req.body);
@@ -7993,6 +8289,7 @@ async function importStaffEmailsHandler(req, res) {
 }
 
 // server/importStaffRoster.ts
+init_adminAccess();
 import { z as z17 } from "zod";
 init_db();
 init_nursetrack();
@@ -8018,7 +8315,7 @@ async function importStaffRosterHandler(req, res) {
     } catch {
       return res.status(403).json({ error: "not-authenticated" });
     }
-    if (user.role !== "admin") {
+    if (!hasFullAccess(user.email)) {
       return res.status(403).json({ error: "admin-only" });
     }
     const parsed = bodySchema2.safeParse(req.body);
@@ -8080,6 +8377,7 @@ async function importStaffRosterHandler(req, res) {
 }
 
 // server/importStaffAreas.ts
+init_adminAccess();
 import { z as z18 } from "zod";
 init_db();
 var rowSchema2 = z18.object({ fullName: z18.string().min(1).max(256), areaName: z18.string().min(1).max(128) });
@@ -8104,7 +8402,7 @@ async function importStaffAreasHandler(req, res) {
     } catch {
       return res.status(403).json({ error: "not-authenticated" });
     }
-    if (user.role !== "admin") {
+    if (!hasFullAccess(user.email)) {
       return res.status(403).json({ error: "admin-only" });
     }
     const parsed = bodySchema3.safeParse(req.body);
@@ -8174,6 +8472,7 @@ async function importStaffAreasHandler(req, res) {
 }
 
 // server/importStaffTrainings.ts
+init_adminAccess();
 import { z as z19 } from "zod";
 init_db();
 var rowSchema3 = z19.object({
@@ -8229,7 +8528,7 @@ async function importStaffTrainingsHandler(req, res) {
     } catch {
       return res.status(403).json({ error: "not-authenticated" });
     }
-    if (user.role !== "admin") {
+    if (!hasFullAccess(user.email)) {
       return res.status(403).json({ error: "admin-only" });
     }
     const parsed = bodySchema4.safeParse(req.body);
@@ -8312,21 +8611,7 @@ async function importStaffTrainingsHandler(req, res) {
 }
 
 // server/_core/context.ts
-init_env();
-function localAdminUser() {
-  const now = /* @__PURE__ */ new Date();
-  return {
-    id: 1,
-    openId: "local-dev-admin",
-    name: "Local Supervisor",
-    email: null,
-    loginMethod: "local-development",
-    role: "admin",
-    createdAt: now,
-    updatedAt: now,
-    lastSignedIn: now
-  };
-}
+import { parse as parseCookieHeader3 } from "cookie";
 async function createContext(opts) {
   let user = null;
   try {
@@ -8334,16 +8619,18 @@ async function createContext(opts) {
   } catch (error) {
     user = null;
   }
-  if (!user && !ENV.isProduction) {
-    const cookies = opts.req.headers.cookie ?? "";
-    if (!cookies.includes(COOKIE_NAME)) {
-      user = localAdminUser();
-    }
+  let claimNurseId = null;
+  try {
+    const cookies = parseCookieHeader3(opts.req.headers.cookie ?? "");
+    claimNurseId = await sdk.verifyClaimToken(cookies[CLAIM_COOKIE_NAME]);
+  } catch (error) {
+    claimNurseId = null;
   }
   return {
     req: opts.req,
     res: opts.res,
-    user
+    user,
+    claimNurseId
   };
 }
 

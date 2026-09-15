@@ -230,7 +230,7 @@ export const settingsRouter = router({
 
   emailStatus: adminProcedure.query(async () => {
     const hasKey = Boolean(process.env.RESEND_API_KEY);
-    const fromAddress = process.env.EMAIL_FROM || "SKTI NurseTrack <notifications@sktinursetrack.com>";
+    const fromAddress = process.env.EMAIL_FROM || "SKTI NurseTrack <onboarding@resend.dev>";
     return {
       configured: hasKey,
       mode: hasKey ? "live" : "mock",

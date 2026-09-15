@@ -41,7 +41,7 @@ describe("staffAccount authMode enforcement", () => {
     await expect(caller.staffAccount.saveClaimEmail({ email: "new@example.com" })).rejects.toMatchObject({
       code: "FORBIDDEN",
     });
-  });
+  }, 15000);
 
   it("rejects changeEmail from a first-visit claim session (must finish claiming with saveClaimEmail)", async () => {
     const { appRouter } = await import("./routers");

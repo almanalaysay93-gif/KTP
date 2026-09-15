@@ -1,6 +1,8 @@
+import { eq, and, isNull, isNotNull, gte, lte, sql } from "drizzle-orm";
 import { getDb, isEmailDuplicate } from "../db";
 import { getSqliteDb } from "../localDb";
 import { daysUntilExpiry, todayDate, nurseFullName, dateKey } from "../../shared/nursetrack";
+import { nurses, nurseCredentials, credentialTypes, trainingEvents, trainingCatalog, nurseTrainings } from "../../drizzle/schema";
 import { renderLicenseExpiryEmail, renderSeminarReminderEmail } from "./templates";
 import { sendEmail } from "./service";
 
@@ -29,17 +31,33 @@ interface ActiveNurseWithCredentials {
 export async function fetchLinkedNursesWithExpiringCredentials(): Promise<ActiveNurseWithCredentials[]> {
   const db = await getDb();
   if (db) {
-    // MySQL query
-    const rows = await db.execute(
-      `SELECT n.id as nurseId, n.firstName, n.middleName, n.lastName, n.suffix, n.accountEmail, n.linkedUserId,
-              c.id as credentialId, c.licenseNumber, c.expiryDate, c.renewalCycleKey, ct.name as typeName
-       FROM nurses n
-       INNER JOIN nurseCredentials c ON c.nurseId = n.id
-       LEFT JOIN credentialTypes ct ON ct.id = c.credentialTypeId
-       WHERE n.archivedAt IS NULL AND n.linkedUserId IS NOT NULL AND n.accountEmail IS NOT NULL`
-    );
-    const list = ((rows as any)[0] as any[]) || [];
-    return list.map((r) => ({
+    const rows = await db
+      .select({
+        nurseId: nurses.id,
+        firstName: nurses.firstName,
+        middleName: nurses.middleName,
+        lastName: nurses.lastName,
+        suffix: nurses.suffix,
+        accountEmail: nurses.accountEmail,
+        linkedUserId: nurses.linkedUserId,
+        credentialId: nurseCredentials.id,
+        licenseNumber: nurseCredentials.licenseNumber,
+        expiryDate: nurseCredentials.expiryDate,
+        renewalCycleKey: nurseCredentials.renewalCycleKey,
+        typeName: credentialTypes.name,
+      })
+      .from(nurses)
+      .innerJoin(nurseCredentials, eq(nurseCredentials.nurseId, nurses.id))
+      .leftJoin(credentialTypes, eq(credentialTypes.id, nurseCredentials.credentialTypeId))
+      .where(
+        and(
+          isNull(nurses.archivedAt),
+          isNotNull(nurses.linkedUserId),
+          isNotNull(nurses.accountEmail)
+        )
+      );
+
+    return rows.map((r) => ({
       nurseId: Number(r.nurseId),
       fullName: nurseFullName(r),
       accountEmail: r.accountEmail,
@@ -155,28 +173,76 @@ export async function runLicenseExpiryEmailPass(today = todayDate()): Promise<{ 
  * and sends reminder emails if not already sent.
  */
 export async function runUpcomingSeminarEmailPass(): Promise<{ processed: number; sent: number }> {
-  const sqlite = getSqliteDb();
-  const today = todayDate();
-  
-  // Look for events with startDate between now+1 day and now+3 days
-  const upcomingEvents = sqlite.prepare(`
-    SELECT e.id, e.startDate, e.startTime, e.venue, c.name as trainingName
-    FROM trainingEvents e
-    INNER JOIN trainingCatalog c ON c.id = e.trainingId
-    WHERE date(e.startDate) >= date('now', '+1 day') AND date(e.startDate) <= date('now', '+3 days')
-  `).all() as any[];
+  const db = await getDb();
+  let upcomingEvents: { id: number; startDate: string; startTime: string | null; venue: string | null; trainingName: string }[] = [];
+
+  if (db) {
+    const in1Day = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+    const in3Days = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
+    const events = await db
+      .select({
+        id: trainingEvents.id,
+        startDate: trainingEvents.startDate,
+        startTime: trainingEvents.startTime,
+        venue: trainingEvents.venue,
+        trainingName: trainingCatalog.name,
+      })
+      .from(trainingEvents)
+      .innerJoin(trainingCatalog, eq(trainingCatalog.id, trainingEvents.trainingId))
+      .where(and(gte(trainingEvents.startDate, sql`${in1Day}::date`), lte(trainingEvents.startDate, sql`${in3Days}::date`)));
+
+    upcomingEvents = events.map((e) => ({
+      id: e.id,
+      startDate: dateKey(e.startDate),
+      startTime: e.startTime,
+      venue: e.venue,
+      trainingName: e.trainingName,
+    }));
+  } else {
+    const sqlite = getSqliteDb();
+    upcomingEvents = sqlite.prepare(`
+      SELECT e.id, e.startDate, e.startTime, e.venue, c.name as trainingName
+      FROM trainingEvents e
+      INNER JOIN trainingCatalog c ON c.id = e.trainingId
+      WHERE date(e.startDate) >= date('now', '+1 day') AND date(e.startDate) <= date('now', '+3 days')
+    `).all() as any[];
+  }
 
   let processed = 0;
   let sent = 0;
 
   for (const ev of upcomingEvents) {
-    // Get attendees with linked accounts
-    const attendees = sqlite.prepare(`
-      SELECT n.id as nurseId, n.firstName, n.middleName, n.lastName, n.suffix, n.accountEmail
-      FROM nurseTrainings t
-      INNER JOIN nurses n ON n.id = t.nurseId
-      WHERE t.eventId = ? AND n.archivedAt IS NULL AND n.linkedUserId IS NOT NULL AND n.accountEmail IS NOT NULL
-    `).all(ev.id) as any[];
+    let attendees: { nurseId: number; firstName: string; middleName: string | null; lastName: string; suffix: string | null; accountEmail: string }[] = [];
+    if (db) {
+      const rows = await db
+        .select({
+          nurseId: nurses.id,
+          firstName: nurses.firstName,
+          middleName: nurses.middleName,
+          lastName: nurses.lastName,
+          suffix: nurses.suffix,
+          accountEmail: nurses.accountEmail,
+        })
+        .from(nurseTrainings)
+        .innerJoin(nurses, eq(nurses.id, nurseTrainings.nurseId))
+        .where(
+          and(
+            eq(nurseTrainings.eventId, ev.id),
+            isNull(nurses.archivedAt),
+            isNotNull(nurses.linkedUserId),
+            isNotNull(nurses.accountEmail)
+          )
+        );
+      attendees = rows as any;
+    } else {
+      const sqlite = getSqliteDb();
+      attendees = sqlite.prepare(`
+        SELECT n.id as nurseId, n.firstName, n.middleName, n.lastName, n.suffix, n.accountEmail
+        FROM nurseTrainings t
+        INNER JOIN nurses n ON n.id = t.nurseId
+        WHERE t.eventId = ? AND n.archivedAt IS NULL AND n.linkedUserId IS NOT NULL AND n.accountEmail IS NOT NULL
+      `).all(ev.id) as any[];
+    }
 
     for (const att of attendees) {
       processed++;

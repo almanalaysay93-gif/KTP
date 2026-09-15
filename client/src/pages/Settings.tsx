@@ -400,10 +400,10 @@ function EmailAutomationTab() {
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>Sender:</span>
-              <span className="font-mono">{status?.fromAddress ?? "notifications@sktinursetrack.com"}</span>
+              <span className="font-mono">{status?.fromAddress ?? "onboarding@resend.dev"}</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              To activate live delivery to staff mailboxes, add <code>RESEND_API_KEY</code> to your environment variables on Railway.
+              To activate live delivery to staff mailboxes, add <code>RESEND_API_KEY</code> and optional <code>EMAIL_FROM</code> to your Environment Variables on Vercel.
             </p>
           </CardContent>
         </Card>
