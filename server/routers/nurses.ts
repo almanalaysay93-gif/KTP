@@ -100,7 +100,7 @@ export const nursesRouter = router({
                  from nursetrack."nurseCredentials"
                  where "nurseId" = ${nurseId}
                  order by "expiryDate" desc`,
-              `select id, "nurseId", "trainingId", "completionDate"::text as "completionDate", "expiryDate"::text as "expiryDate", "scheduledDate"::text as "scheduledDate", status, "trainingHours", "cpdUnits", provider, venue, "certificateKey", remarks, "eventId"
+              `select id, "nurseId", "trainingId", "eventId", "participationRole", "completionDate"::text as "completionDate", "expiryDate"::text as "expiryDate", "scheduledDate"::text as "scheduledDate", status, "trainingHours", "cpdUnits", provider, "certificateNumber", "certificateKey", remarks
                  from nursetrack."nurseTrainings"
                  where "nurseId" = ${nurseId}
                  order by "completionDate" desc nulls last, id desc`,
