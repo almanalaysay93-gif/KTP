@@ -125,6 +125,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           >
             Sign in with Google
           </Button>
+          <Link href="/staff-signin" className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-4">
+            Nurse or attendant? Sign in here instead
+          </Link>
         </div>
       </div>
     );
