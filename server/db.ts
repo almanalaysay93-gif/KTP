@@ -495,6 +495,36 @@ export async function saveClaimEmail(
 }
 
 /**
+ * Supervisor-side set/clear of a nurse's sign-in email, from the Add/Edit
+ * Nurse form. `email: null` clears both `accountEmail` and `linkedUserId`
+ * (E10 — resets the row so first-visit claim can run again for a new
+ * account); a value is validated the same as the staff-facing paths.
+ */
+export async function adminSetNurseAccountEmail(
+  nurseId: number,
+  email: string | null,
+): Promise<{ ok: true } | { ok: false; reason: "in_use" }> {
+  const dbConn = await getDb();
+  if (!dbConn) return { ok: false, reason: "in_use" };
+
+  if (email === null) {
+    await dbConn.update(nurses).set({ accountEmail: null, linkedUserId: null }).where(eq(nurses.id, nurseId));
+    return { ok: true };
+  }
+
+  const norm = email.trim().toLowerCase();
+  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
+
+  try {
+    await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
+    return { ok: true };
+  } catch (error: any) {
+    if (error?.code === "23505") return { ok: false, reason: "in_use" };
+    throw error;
+  }
+}
+
+/**
  * Change accountEmail from an already-linked Google session (D6, section
  * 5.5). Not guarded by `accountEmail IS NULL` since this session already
  * owns the row — still subject to the same uniqueness rule.

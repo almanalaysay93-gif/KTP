@@ -31,6 +31,7 @@ interface NurseEditData {
   contactNumber?: string | null;
   currentAreaId?: number | null;
   profilePhotoKey?: string | null;
+  accountEmail?: string | null;
 }
 
 export function NurseFormDialog({
@@ -56,6 +57,7 @@ export function NurseFormDialog({
   const [employmentStatus, setEmploymentStatus] = useState("Active");
   const [dateHired, setDateHired] = useState("");
   const [contactNumber, setContactNumber] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
   const [areaId, setAreaId] = useState("");
   const [photo, setPhoto] = useState<{ fileBase64: string; fileName: string; mimeType: string } | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -73,6 +75,7 @@ export function NurseFormDialog({
         setEmploymentStatus(nurse.employmentStatus ?? "Active");
         setDateHired(nurse.dateHired instanceof Date ? nurse.dateHired.toISOString().slice(0, 10) : String(nurse.dateHired).slice(0, 10));
         setContactNumber(nurse.contactNumber ?? "");
+        setAccountEmail(nurse.accountEmail ?? "");
         setAreaId(nurse.currentAreaId ? String(nurse.currentAreaId) : "");
         setPhotoPreview(nurse.profilePhotoKey ? `/storage/${nurse.profilePhotoKey}` : null);
       } else {
@@ -86,6 +89,7 @@ export function NurseFormDialog({
         setEmploymentStatus("Active");
         setDateHired("");
         setContactNumber("");
+        setAccountEmail("");
         setAreaId("");
         setPhoto(null);
         setPhotoPreview(null);
@@ -152,9 +156,11 @@ export function NurseFormDialog({
     };
     let id = nurse?.id;
     if (nurse) {
-      await update.mutateAsync({ id: nurse.id, ...data });
+      // "" clears accountEmail (and unlinks the account) — create's schema has
+      // no clear case, so only update sends the empty string through.
+      await update.mutateAsync({ id: nurse.id, ...data, accountEmail: accountEmail.trim() });
     } else {
-      const created = await create.mutateAsync(data);
+      const created = await create.mutateAsync({ ...data, accountEmail: accountEmail.trim() || undefined });
       id = created.id;
     }
     if (photo && id) {
@@ -239,6 +245,21 @@ export function NurseFormDialog({
           <div>
             <Label className="mb-1 block">Current Area</Label>
             <AreaSelect value={areaId} onValueChange={setAreaId} placeholder="Unassigned" />
+          </div>
+          <div className="col-span-2">
+            <Label htmlFor="accountEmail" className="mb-1 block">Sign-in email</Label>
+            <Input
+              id="accountEmail"
+              type="email"
+              value={accountEmail}
+              onChange={(e) => setAccountEmail(e.target.value)}
+              placeholder="staff-gmail@example.com (optional)"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              {nurse
+                ? "Clear this to reset sign-in — the staff member can claim their profile again with PRC/employee ID."
+                : "Optional. Staff can also set this themselves on first sign-in — see /staff-signin."}
+            </p>
           </div>
           <div className="col-span-2 flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

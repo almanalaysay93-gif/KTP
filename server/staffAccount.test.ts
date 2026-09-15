@@ -131,6 +131,31 @@ describe("db.isNurseClaimable", () => {
   });
 });
 
+describe("nurses.update — admin sign-in email field", () => {
+  it("requires an existing nurse before touching accountEmail", async () => {
+    // No DATABASE_URL in this test env: db.getNurseById returns undefined for
+    // any id, so the router's existence check must fail closed before ever
+    // calling db.adminSetNurseAccountEmail.
+    const adminUser = {
+      id: 1,
+      openId: "admin-sub",
+      email: "almanalaysay93@gmail.com",
+      name: "Admin",
+      loginMethod: "google" as const,
+      role: "admin" as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    };
+    const { ctx } = makeCtx({ user: adminUser });
+    const caller = appRouter.createCaller(ctx);
+
+    await expect(
+      caller.nurses.update({ id: 99999, accountEmail: "new-staff@example.com" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
 describe("sdk claim token handling", () => {
   it("round-trips a claim token to the signed nurseId", async () => {
     const { sdk } = await import("./_core/sdk");

@@ -157,13 +157,19 @@ export const nursesRouter = router({
         dateHired: nullableDateInput,
         employmentStatus: z.enum([...EMPLOYMENT_STATUSES] as [string, ...string[]]),
         currentAreaId: z.number().optional(),
+        accountEmail: z.string().email().max(320).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const { accountEmail, ...nurseData } = input;
       const byId = await db.getNurseByEmployeeId(input.employeeId);
       if (byId) throw new TRPCError({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
-      const id = await db.createNurse(input as Parameters<typeof db.createNurse>[0]);
+      const id = await db.createNurse(nurseData as Parameters<typeof db.createNurse>[0]);
       await db.updateNurse(id, { currentAreaId: input.currentAreaId ?? null });
+      if (accountEmail) {
+        const result = await db.adminSetNurseAccountEmail(id, accountEmail);
+        if (!result.ok) throw new TRPCError({ code: "CONFLICT", message: "That sign-in email is already in use." });
+      }
       if (input.currentAreaId) {
         await db.createAssignment({
           nurseId: id,
@@ -198,10 +204,11 @@ export const nursesRouter = router({
         dateHired: nullableDateInput,
         employmentStatus: z.enum([...EMPLOYMENT_STATUSES] as [string, ...string[]]).optional(),
         currentAreaId: z.number().optional(),
+        accountEmail: z.union([z.string().email().max(320), z.literal("")]).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, employeeId, ...rest } = input;
+      const { id, employeeId, accountEmail, ...rest } = input;
       const nurse = await db.getNurseById(id);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Nurse not found" });
       if (employeeId !== undefined && employeeId !== nurse.employeeId) {
@@ -209,6 +216,12 @@ export const nursesRouter = router({
         if (taken) throw new TRPCError({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
       }
       await db.updateNurse(id, { ...rest, ...(employeeId ? { employeeId } : {}) } as Parameters<typeof db.updateNurse>[1]);
+      if (accountEmail !== undefined) {
+        // "" clears accountEmail + linkedUserId (E10 supervisor reset) so the
+        // claim flow can run again for a new account.
+        const result = await db.adminSetNurseAccountEmail(id, accountEmail === "" ? null : accountEmail);
+        if (!result.ok) throw new TRPCError({ code: "CONFLICT", message: "That sign-in email is already in use." });
+      }
       if (input.currentAreaId !== undefined && input.currentAreaId !== nurse.currentAreaId) {
         await db.clearCurrentAssignmentsForNurse(id);
         if (input.currentAreaId) {
