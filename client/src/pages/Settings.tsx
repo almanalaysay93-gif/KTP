@@ -413,9 +413,6 @@ function EmailAutomationTab() {
               <span>Sender:</span>
               <span className="font-mono">{status?.fromAddress ?? "onboarding@resend.dev"}</span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              To activate live delivery to staff mailboxes, add <code>RESEND_API_KEY</code> and optional <code>EMAIL_FROM</code> to your Environment Variables on Vercel.
-            </p>
           </CardContent>
         </Card>
 
