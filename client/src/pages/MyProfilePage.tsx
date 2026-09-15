@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Redirect } from "wouter";
+import { Redirect, useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { startLogin } from "@/const";
@@ -21,6 +21,21 @@ import { FileCheck, LogOut, Plus, Upload, CheckCircle2 } from "lucide-react";
 
 function StaffShell({ children }: { children: React.ReactNode }) {
   const { logout } = useAuth();
+  const utils = trpc.useUtils();
+  const [, navigate] = useLocation();
+
+  const handleSignOut = async () => {
+    // logout() clears the Google session cookie AND the claim cookie server-side
+    // (server/routers.ts) — a claim session has no Google cookie, so this used
+    // to look like a no-op. Clear the cached profile too, so a second staff
+    // member on this browser never sees the previous one's data before the
+    // redirect lands.
+    await logout();
+    utils.staffAccount.myLink.setData(undefined, undefined);
+    utils.staffAccount.myProfile.setData(undefined, undefined);
+    navigate("/staff-signin");
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="flex items-center justify-between px-6 py-4 border-b glass-panel">
@@ -28,7 +43,7 @@ function StaffShell({ children }: { children: React.ReactNode }) {
           <img src="/branding/spmc-nephro-cluster.jpg" alt="" className="h-8 w-8 object-contain rounded-full bg-white shrink-0" />
           <span className="font-bold tracking-tight">NurseTrack</span>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => logout()}>
+        <Button variant="ghost" size="sm" onClick={handleSignOut}>
           <LogOut className="h-4 w-4 mr-1.5" />
           Sign out
         </Button>

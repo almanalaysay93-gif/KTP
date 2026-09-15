@@ -1,5 +1,5 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
+import { CLAIM_COOKIE_NAME, COOKIE_NAME } from "@shared/const";
+import { getClaimCookieOptions, getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { nursesRouter } from "./routers/nurses";
@@ -23,6 +23,10 @@ export const appRouter = router({
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      // A staff claim session (see docs/plans/2026-09-15-staff-signin-claim-then-google-design.md)
+      // has no Google cookie to clear — without this, Sign out did nothing
+      // during a claim session, since the claim cookie stayed valid.
+      ctx.res.clearCookie(CLAIM_COOKIE_NAME, { ...getClaimCookieOptions(ctx.req), maxAge: -1 });
       return {
         success: true,
       } as const;
