@@ -62,7 +62,9 @@ export function NurseEditPage() {
           setOpen(v);
           if (!v) {
             utils.nurses.get.invalidate({ id });
-            navigate(`/nurses/${id}`);
+            // replace: true, matching the navigation in — keeps /nurses/:id/edit
+            // out of the back-stack entirely, see NurseProfile.tsx's Edit button.
+            navigate(`/nurses/${id}`, { replace: true });
           }
         }}
         nurse={editData as never}

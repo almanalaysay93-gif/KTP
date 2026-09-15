@@ -282,7 +282,10 @@ export default function NurseProfile() {
           </Button>
           <Button variant="outline" size="sm" onClick={() => {
             utils.nurses.get.invalidate();
-            navigate(`/nurses/${id}/edit`);
+            // replace: true — /nurses/:id/edit must not sit as its own history
+            // entry, or Back from the profile replays it and the edit dialog
+            // (which defaults open) pops back up instead of leaving the page.
+            navigate(`/nurses/${id}/edit`, { replace: true });
           }}>
             <Pencil className="h-4 w-4 mr-1" />
             Edit
