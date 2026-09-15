@@ -27,6 +27,7 @@ import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { startLogin } from "@/const";
 import {
+  ArrowUp,
   Bell,
   BedDouble,
   Bot,
@@ -37,15 +38,20 @@ import {
   LogOut,
   MapPin,
   FileBarChart,
+  FileText,
   GraduationCap,
+  Moon,
   Search,
   Settings,
+  Shield,
   Sparkles,
+  Sun,
   Users,
   UserCog,
 } from "lucide-react";
 import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearch } from "wouter";
+import { useTheme } from "@/contexts/ThemeContext";
 import { ChatAssistantWidget } from "./ChatAssistantWidget";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
@@ -185,6 +191,12 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
 
   return (
     <>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 z-50 px-4 py-2 bg-primary text-primary-foreground font-medium rounded-md shadow-lg outline-none ring-2 ring-ring"
+      >
+        Skip to main content
+      </a>
       <div className="relative" ref={sidebarRef}>
         <Sidebar
           collapsible="offcanvas"
@@ -257,10 +269,18 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                   </div>
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuItem onClick={() => setLocation("/settings")} className="cursor-pointer">
                   <Settings className="mr-2 h-4 w-4" />
                   <span>Settings</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLocation("/privacy")} className="cursor-pointer">
+                  <Shield className="mr-2 h-4 w-4" />
+                  <span>Privacy Policy</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLocation("/terms")} className="cursor-pointer">
+                  <FileText className="mr-2 h-4 w-4" />
+                  <span>Terms of Service</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive focus:text-destructive">
@@ -296,7 +316,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             <Button
               variant="ghost"
               size="icon"
@@ -306,14 +326,16 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
             >
               <Search className="h-4 w-4" />
             </Button>
+            <ThemeToggle />
             <NotificationsBell />
           </div>
         </div>
         {isMobile && <MobileBottomNav />}
-        <main className="flex-1 min-w-0 p-3 md:p-5 pb-20 md:pb-5 overflow-x-auto">{children}</main>
+        <main id="main-content" className="flex-1 min-w-0 p-3 md:p-5 pb-20 md:pb-5 overflow-x-auto">{children}</main>
       </SidebarInset>
 
       <NurseSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <ScrollToTop />
       <ChatAssistantWidget />
     </>
   );
@@ -392,6 +414,49 @@ function NotificationsBell() {
         </SheetContent>
       </Sheet>
     </>
+  );
+}
+
+function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="rounded-lg"
+      onClick={toggleTheme}
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {theme === "dark" ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
+    </Button>
+  );
+}
+
+function ScrollToTop() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setVisible(window.scrollY > 300);
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <Button
+      variant="outline"
+      size="icon"
+      className="fixed bottom-20 md:bottom-6 right-6 z-40 rounded-full shadow-lg bg-background/80 backdrop-blur-sm hover:bg-accent border-primary/20"
+      onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      aria-label="Scroll to top"
+      title="Scroll to top"
+    >
+      <ArrowUp className="h-4 w-4" />
+    </Button>
   );
 }
 

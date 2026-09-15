@@ -873,6 +873,7 @@ __export(db_exports, {
   INACTIVE_STATUS_SQL_LIST: () => INACTIVE_STATUS_SQL_LIST,
   acknowledgeReminder: () => acknowledgeReminder,
   activeNurseCondition: () => activeNurseCondition,
+  adminSetNurseAccountEmail: () => adminSetNurseAccountEmail,
   autoLinkNurseByEmail: () => autoLinkNurseByEmail,
   bulkSetAccountEmailsByLicense: () => bulkSetAccountEmailsByLicense,
   changeNurseAccountEmail: () => changeNurseAccountEmail,
@@ -1323,6 +1324,23 @@ async function saveClaimEmail(nurseId, email) {
   try {
     const rows = await dbConn.update(nurses).set({ accountEmail: norm }).where(and(eq(nurses.id, nurseId), isNull(nurses.accountEmail))).returning({ id: nurses.id });
     if (rows.length === 0) return { ok: false, reason: "already_claimed" };
+    return { ok: true };
+  } catch (error) {
+    if (error?.code === "23505") return { ok: false, reason: "in_use" };
+    throw error;
+  }
+}
+async function adminSetNurseAccountEmail(nurseId, email) {
+  const dbConn = await getDb();
+  if (!dbConn) return { ok: false, reason: "in_use" };
+  if (email === null) {
+    await dbConn.update(nurses).set({ accountEmail: null, linkedUserId: null }).where(eq(nurses.id, nurseId));
+    return { ok: true };
+  }
+  const norm = email.trim().toLowerCase();
+  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
+  try {
+    await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
     return { ok: true };
   } catch (error) {
     if (error?.code === "23505") return { ok: false, reason: "in_use" };
@@ -3502,13 +3520,19 @@ var nursesRouter = router({
       staffType: z2.enum(STAFF_TYPES).optional(),
       dateHired: nullableDateInput,
       employmentStatus: z2.enum([...EMPLOYMENT_STATUSES]),
-      currentAreaId: z2.number().optional()
+      currentAreaId: z2.number().optional(),
+      accountEmail: z2.string().email().max(320).optional()
     })
   ).mutation(async ({ ctx, input }) => {
+    const { accountEmail, ...nurseData } = input;
     const byId = await getNurseByEmployeeId(input.employeeId);
     if (byId) throw new TRPCError2({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
-    const id = await createNurse(input);
+    const id = await createNurse(nurseData);
     await updateNurse(id, { currentAreaId: input.currentAreaId ?? null });
+    if (accountEmail) {
+      const result = await adminSetNurseAccountEmail(id, accountEmail);
+      if (!result.ok) throw new TRPCError2({ code: "CONFLICT", message: "That sign-in email is already in use." });
+    }
     if (input.currentAreaId) {
       await createAssignment({
         nurseId: id,
@@ -3540,10 +3564,11 @@ var nursesRouter = router({
       staffType: z2.enum(STAFF_TYPES).optional(),
       dateHired: nullableDateInput,
       employmentStatus: z2.enum([...EMPLOYMENT_STATUSES]).optional(),
-      currentAreaId: z2.number().optional()
+      currentAreaId: z2.number().optional(),
+      accountEmail: z2.union([z2.string().email().max(320), z2.literal("")]).optional()
     })
   ).mutation(async ({ ctx, input }) => {
-    const { id, employeeId, ...rest } = input;
+    const { id, employeeId, accountEmail, ...rest } = input;
     const nurse = await getNurseById(id);
     if (!nurse) throw new TRPCError2({ code: "NOT_FOUND", message: "Nurse not found" });
     if (employeeId !== void 0 && employeeId !== nurse.employeeId) {
@@ -3551,6 +3576,10 @@ var nursesRouter = router({
       if (taken) throw new TRPCError2({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
     }
     await updateNurse(id, { ...rest, ...employeeId ? { employeeId } : {} });
+    if (accountEmail !== void 0) {
+      const result = await adminSetNurseAccountEmail(id, accountEmail === "" ? null : accountEmail);
+      if (!result.ok) throw new TRPCError2({ code: "CONFLICT", message: "That sign-in email is already in use." });
+    }
     if (input.currentAreaId !== void 0 && input.currentAreaId !== nurse.currentAreaId) {
       await clearCurrentAssignmentsForNurse(id);
       if (input.currentAreaId) {
@@ -8238,6 +8267,7 @@ var appRouter = router({
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie(CLAIM_COOKIE_NAME, { ...getClaimCookieOptions(ctx.req), maxAge: -1 });
       return {
         success: true
       };

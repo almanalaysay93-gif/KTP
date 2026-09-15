@@ -24,6 +24,8 @@ import Seminars from "./pages/Seminars";
 import SeminarDetail from "./pages/SeminarDetail";
 import SmartImportPage from "./pages/SmartImport";
 import AiInsightsPage from "./pages/AiInsights";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 
 // Admin/supervisor routes. Signed-in non-admin (staff) accounts are bounced
 // to /me — they only ever get their own profile, never the full dashboard.
@@ -129,6 +131,12 @@ function Router() {
           <SettingsPage />
         </Protected>
       </Route>
+      <Route path="/privacy">
+        <PrivacyPolicy />
+      </Route>
+      <Route path="/terms">
+        <TermsOfService />
+      </Route>
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
@@ -138,7 +146,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="light">
+      <ThemeProvider defaultTheme="light" switchable={true}>
         <div aria-hidden className="glass-bg" />
         <div className="relative z-[1] min-h-screen">
           <TooltipProvider>

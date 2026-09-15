@@ -1,0 +1,16 @@
+# https://nodandnatracker.vercel.app/robots.txt
+User-agent: *
+Allow: /
+Allow: /dashboard
+Allow: /areas
+Allow: /nurses
+Allow: /trainings
+Allow: /seminars
+Allow: /licenses
+Allow: /staff-signin
+Allow: /privacy
+Allow: /terms
+Disallow: /api/
+Disallow: /me
+
+Sitemap: https://nodandnatracker.vercel.app/sitemap.xml

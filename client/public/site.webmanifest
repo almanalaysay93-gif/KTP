@@ -1,0 +1,21 @@
+{
+  "name": "SKTI NurseTrack — SPMC Nephrology Cluster",
+  "short_name": "NurseTrack",
+  "description": "Southern Philippines Medical Center Kidney Transplant Institute Nurse & Attendant Monitoring Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#122A5E",
+  "icons": [
+    {
+      "src": "/branding/spmc-nephro-cluster.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "/branding/spmc-nephro-cluster.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}
