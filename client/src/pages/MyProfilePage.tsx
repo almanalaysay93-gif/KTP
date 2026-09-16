@@ -435,12 +435,11 @@ function MyProfileView() {
 }
 
 export default function MyProfilePage() {
-  const { loading: authLoading } = useAuth();
-  // staffAccount.myLink accepts either a linked Google session or a valid
-  // claim cookie — it runs regardless of whether useAuth() resolved a user.
-  const linkQuery = trpc.staffAccount.myLink.useQuery(undefined, { retry: false });
+  // The profile endpoint checks Google and claim sessions itself.
+  // Load it without waiting for a separate link request.
+  const profileQuery = trpc.staffAccount.myProfile.useQuery(undefined, { retry: false });
 
-  if (authLoading || linkQuery.isLoading) {
+  if (profileQuery.isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Skeleton className="h-40 w-full max-w-2xl mx-4" />
@@ -450,8 +449,17 @@ export default function MyProfilePage() {
 
   // Neither a linked Google session nor a claim cookie: the sign-in portal
   // handles both entry paths (design doc section 5.2).
-  if (linkQuery.error) {
+  if (profileQuery.error?.data?.code === "UNAUTHORIZED") {
     return <Redirect to="/staff-signin" />;
+  }
+
+  if (profileQuery.error) {
+    return (
+      <div className="w-full max-w-2xl mx-auto p-6" role="alert">
+        <p>Could not load your profile. Please try again.</p>
+        <Button onClick={() => void profileQuery.refetch()}>Retry</Button>
+      </div>
+    );
   }
 
   return (

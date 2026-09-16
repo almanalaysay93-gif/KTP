@@ -8938,18 +8938,19 @@ var staffAccountRouter = router({
   myProfile: staffProcedure.query(async ({ ctx }) => {
     const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
-    const [areaRows, types, catalog] = await Promise.all([
+    const [areaRows, types, catalog, licenseInfo, credentials, trainings, assignments] = await Promise.all([
       listAreas(false),
       listCredentialTypes(true),
-      listTrainingCatalog(true)
+      listTrainingCatalog(true),
+      getNurseLicenseInfo(nurse.id),
+      listCredentials({ nurseId: nurse.id }),
+      listNurseTrainings({ nurseId: nurse.id }),
+      listAssignmentsForNurse(nurse.id)
     ]);
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     const typeById = new Map(types.map((t2) => [t2.id, t2.name]));
     const catalogById = new Map(catalog.map((c) => [c.id, c.name]));
-    const { status, licenseNumber } = await getNurseLicenseInfo(nurse.id);
-    const credentials = await listCredentials({ nurseId: nurse.id });
-    const trainings = await listNurseTrainings({ nurseId: nurse.id });
-    const assignments = await listAssignmentsForNurse(nurse.id);
+    const { status, licenseNumber } = licenseInfo;
     return {
       ...nurse,
       currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
