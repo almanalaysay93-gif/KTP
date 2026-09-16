@@ -567,7 +567,18 @@ export default function NurseProfile() {
       {areaOpen && (
         <Dialog open={areaOpen} onOpenChange={setAreaOpen}>
           <DialogContent>
-            <DialogHeader>
+            <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+                onClick={() => setAreaOpen(false)}
+                aria-label="Back"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span className="text-xs font-medium">Back</span>
+              </Button>
               <DialogTitle>Change Area of Assignment</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4">
@@ -634,7 +645,18 @@ export default function NurseProfile() {
       {emailNoticeOpen && (
         <Dialog open={emailNoticeOpen} onOpenChange={setEmailNoticeOpen}>
           <DialogContent className="max-w-md">
-            <DialogHeader>
+            <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+                onClick={() => setEmailNoticeOpen(false)}
+                aria-label="Back"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span className="text-xs font-medium">Back</span>
+              </Button>
               <DialogTitle>Send Email Notice to Staff</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
@@ -860,7 +882,18 @@ function CredentialDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => onOpenChange(false)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
           <DialogTitle>{credentialId ? "Edit Credential" : "Add Credential"}</DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-4">
