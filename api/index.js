@@ -8985,6 +8985,67 @@ var staffAccountRouter = router({
     return { ok: true };
   }),
   myProfile: staffProcedure.query(async ({ ctx }) => {
+    const nurseId = Math.floor(ctx.nurseId);
+    const pg = getBatchClient();
+    if (pg) {
+      const sets = await pg.unsafe(
+        [
+          `select * from nursetrack.nurses where id = ${nurseId} limit 1`,
+          `select * from nursetrack.areas order by "sortOrder"`,
+          `select * from nursetrack."credentialTypes"`,
+          `select * from nursetrack."trainingCatalog" order by name`,
+          `select id, "nurseId", "areaId", "startDate"::text as "startDate", "endDate"::text as "endDate", "assignmentType", remarks, "isCurrent"
+               from nursetrack."areaAssignments"
+               where "nurseId" = ${nurseId}
+               order by "startDate" desc`,
+          `select id, "nurseId", "credentialTypeId", "licenseNumber", "issuingOrganization", "issueDate"::text as "issueDate", "expiryDate"::text as "expiryDate", "renewalStatus", "verificationStatus", "documentKey", "renewalCycleKey", remarks
+               from nursetrack."nurseCredentials"
+               where "nurseId" = ${nurseId}
+               order by "expiryDate" desc`,
+          `select id, "nurseId", "trainingId", "eventId", "participationRole", "completionDate"::text as "completionDate", "expiryDate"::text as "expiryDate", "scheduledDate"::text as "scheduledDate", status, "trainingHours", "cpdUnits", provider, "certificateNumber", "certificateKey", remarks
+               from nursetrack."nurseTrainings"
+               where "nurseId" = ${nurseId}
+               order by "completionDate" desc nulls last, id desc`
+        ].join(";\n")
+      ).simple();
+      const [nurseRows, areaRows2, credTypes, catalog2, rawAssignments, rawCreds, rawTrainings] = sets;
+      const nurse2 = nurseRows[0];
+      if (!nurse2) {
+        throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
+      }
+      const areaById2 = new Map(areaRows2.map((a) => [a.id, a]));
+      const typeById2 = new Map(credTypes.map((t2) => [t2.id, t2.name]));
+      const catalogById2 = new Map(catalog2.map((c) => [c.id, c.name]));
+      const latestCred = rawCreds[0];
+      const expKey = latestCred ? dateKey(latestCred.expiryDate) : null;
+      const days = expKey ? daysUntilExpiry(expKey) : null;
+      const licenseStatus = latestCred ? latestCred.renewalStatus === "Renewed" ? "Valid" : expKey ? deriveLicenseStatus(expKey) : null : null;
+      return {
+        ...nurse2,
+        currentArea: nurse2.currentAreaId ? areaById2.get(nurse2.currentAreaId) ?? null : null,
+        licenseStatus,
+        licenseNumber: latestCred?.licenseNumber ?? null,
+        licenseExpiryDate: expKey,
+        licenseDaysRemaining: days,
+        credentials: rawCreds.map((c) => ({
+          ...c,
+          typeName: typeById2.get(c.credentialTypeId) ?? "Credential / License"
+        })),
+        trainings: rawTrainings.map((t2) => ({
+          ...t2,
+          trainingName: catalogById2.get(t2.trainingId) ?? "Training"
+        })),
+        assignments: rawAssignments.map((a) => {
+          const area = areaById2.get(a.areaId) ?? null;
+          return {
+            ...a,
+            area,
+            areaName: area?.name ?? "Unknown"
+          };
+        }),
+        authMode: ctx.authMode
+      };
+    }
     const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
     const [areaRows, types, catalog, licenseInfo, credentials, trainings, assignments] = await Promise.all([

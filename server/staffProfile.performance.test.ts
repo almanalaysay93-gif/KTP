@@ -3,6 +3,7 @@ import { staffAccountRouter } from "./routers/staffAccount";
 import * as db from "./db";
 
 vi.mock("./db", () => ({
+  getBatchClient: vi.fn(() => null),
   getNurseById: vi.fn(),
   listAreas: vi.fn(),
   listCredentialTypes: vi.fn(),

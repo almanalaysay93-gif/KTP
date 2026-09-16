@@ -251,8 +251,7 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   );
 }
 
-function MyProfileView() {
-  const { data: profile, isLoading } = trpc.staffAccount.myProfile.useQuery();
+function MyProfileView({ profile }: { profile: any }) {
   const utils = trpc.useUtils();
   const [contactNumber, setContactNumber] = useState<string | null>(null);
   const [trainingDialogOpen, setTrainingDialogOpen] = useState(false);
@@ -285,16 +284,6 @@ function MyProfileView() {
     },
     onError: (err) => toast.error(err.message),
   });
-
-  if (isLoading || !profile) {
-    return (
-      <Card className="glass-card p-6 space-y-4">
-        <Skeleton className="h-20 w-20 rounded-full" />
-        <Skeleton className="h-6 w-48" />
-        <Skeleton className="h-4 w-32" />
-      </Card>
-    );
-  }
 
   const currentContact = contactNumber ?? profile.contactNumber ?? "";
 
@@ -443,36 +432,43 @@ function MyProfileView() {
 }
 
 export default function MyProfilePage() {
-  // The profile endpoint checks Google and claim sessions itself.
-  // Load it without waiting for a separate link request.
   const profileQuery = trpc.staffAccount.myProfile.useQuery(undefined, { retry: false });
 
-  if (profileQuery.isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Skeleton className="h-40 w-full max-w-2xl mx-4" />
-      </div>
-    );
-  }
-
-  // Neither a linked Google session nor a claim cookie: the sign-in portal
-  // handles both entry paths (design doc section 5.2).
   if (profileQuery.error?.data?.code === "UNAUTHORIZED") {
     return <Redirect to="/staff-signin" />;
   }
 
-  if (profileQuery.error) {
-    return (
-      <div className="w-full max-w-2xl mx-auto p-6" role="alert">
-        <p>Could not load your profile. Please try again.</p>
-        <Button onClick={() => void profileQuery.refetch()}>Retry</Button>
-      </div>
-    );
-  }
-
   return (
     <StaffShell>
-      <MyProfileView />
+      {profileQuery.error ? (
+        <Card className="glass-card p-6 space-y-3" role="alert">
+          <p className="text-sm font-medium text-destructive">Could not load your profile. Please try again.</p>
+          <Button size="sm" onClick={() => void profileQuery.refetch()}>Retry</Button>
+        </Card>
+      ) : profileQuery.isLoading || !profileQuery.data ? (
+        <div className="space-y-4">
+          <Card className="glass-card p-6 space-y-4">
+            <div className="flex items-center gap-4">
+              <Skeleton className="h-20 w-20 rounded-full" />
+              <div className="space-y-2 flex-1">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+            </div>
+          </Card>
+          <Card className="glass-card p-6 space-y-3">
+            <Skeleton className="h-5 w-24" />
+            <Skeleton className="h-6 w-40" />
+          </Card>
+          <Card className="glass-card p-6 space-y-3">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-10 w-full" />
+          </Card>
+        </div>
+      ) : (
+        <MyProfileView profile={profileQuery.data} />
+      )}
     </StaffShell>
   );
 }
