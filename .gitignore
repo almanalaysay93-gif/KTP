@@ -221,3 +221,4 @@ __pycache__/
 *.pyo
 
 .vercel
+scripts/backups/
