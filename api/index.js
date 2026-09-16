@@ -1108,6 +1108,7 @@ __export(db_exports, {
   deleteNurseTraining: () => deleteNurseTraining,
   deleteTrainingCatalogItem: () => deleteTrainingCatalogItem,
   deleteTrainingEvent: () => deleteTrainingEvent,
+  findNurseIdsByLicenseNumber: () => findNurseIdsByLicenseNumber,
   findNurseTrainingByKey: () => findNurseTrainingByKey,
   findOrCreateTrainingEvent: () => findOrCreateTrainingEvent,
   getAllNurseLicenseInfos: () => getAllNurseLicenseInfos,
@@ -1158,6 +1159,7 @@ __export(db_exports, {
   updateNurse: () => updateNurse,
   updateNurseTraining: () => updateNurseTraining,
   updateTrainingType: () => updateTrainingType,
+  upsertNursePrcLicense: () => upsertNursePrcLicense,
   upsertUser: () => upsertUser
 });
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, not, or, sql as sql2 } from "drizzle-orm";
@@ -1459,11 +1461,15 @@ async function getNurseByLinkedUserId(userId) {
   return sqlite.prepare("SELECT * FROM nurses WHERE linkedUserId = ?").get(userId);
 }
 async function findNurseIdsByLicenseNumber(licenseNumber) {
-  const db = await getDb();
-  if (!db) return [];
   const normPrc = normalizeForMatch(licenseNumber);
-  const credRows = await db.select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber }).from(nurseCredentials).where(isNotNull(nurseCredentials.licenseNumber));
-  return credRows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
+  const db = await getDb();
+  if (db) {
+    const credRows = await db.select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber }).from(nurseCredentials).where(isNotNull(nurseCredentials.licenseNumber));
+    return credRows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
+  }
+  const sqlite = getSqliteDb();
+  const rows = sqlite.prepare("SELECT nurseId, licenseNumber FROM nurseCredentials WHERE licenseNumber IS NOT NULL").all();
+  return rows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
 }
 async function bulkSetAccountEmailsByLicense(rows) {
   const db = await getDb();
@@ -1924,6 +1930,41 @@ async function updateCredential(id, data) {
     vals.push(id);
     sqlite.prepare(`UPDATE nurseCredentials SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
   }
+}
+async function upsertNursePrcLicense(nurseId, licenseNumber) {
+  const norm = licenseNumber ? licenseNumber.trim() : null;
+  if (norm) {
+    const matchingNurseIds = await findNurseIdsByLicenseNumber(norm);
+    const hasConflict = matchingNurseIds.some((id) => id !== nurseId);
+    if (hasConflict) {
+      return { ok: false, reason: "conflict" };
+    }
+  }
+  const creds = await listCredentials({ nurseId });
+  const types = await listCredentialTypes(true);
+  const prcType = types.find((t2) => t2.name.toLowerCase().includes("prc")) ?? types[0];
+  const existingPrc = creds.find((c) => prcType && c.credentialTypeId === prcType.id) ?? creds[0];
+  if (existingPrc) {
+    await updateCredential(existingPrc.id, { licenseNumber: norm || null });
+    return { ok: true, credentialId: existingPrc.id };
+  }
+  if (norm) {
+    const expiryDate = /* @__PURE__ */ new Date();
+    expiryDate.setFullYear(expiryDate.getFullYear() + 3);
+    const typeId = prcType ? prcType.id : 1;
+    const credId = await createCredential({
+      nurseId,
+      credentialTypeId: typeId,
+      licenseNumber: norm,
+      issuingOrganization: prcType?.issuingOrganizationDefault || "Professional Regulation Commission (PRC)",
+      expiryDate,
+      renewalStatus: "Not Started",
+      verificationStatus: "Unverified",
+      renewalCycleKey: renewalCycleKey(`prc-${nurseId}-${Date.now()}`)
+    });
+    return { ok: true, credentialId: credId };
+  }
+  return { ok: true };
 }
 async function listCredentialTypes(includeInactive = true) {
   const db = await getDb();
@@ -4975,14 +5016,19 @@ var nursesRouter = router({
       dateHired: nullableDateInput,
       employmentStatus: z2.enum([...EMPLOYMENT_STATUSES]),
       currentAreaId: z2.number().optional(),
-      accountEmail: z2.string().email().max(320).optional()
+      accountEmail: z2.string().email().max(320).optional(),
+      licenseNumber: z2.string().max(64).optional()
     })
   ).mutation(async ({ ctx, input }) => {
-    const { accountEmail, ...nurseData } = input;
+    const { accountEmail, licenseNumber, ...nurseData } = input;
     const byId = await getNurseByEmployeeId(input.employeeId);
     if (byId) throw new TRPCError2({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
     const id = await createNurse(nurseData);
     await updateNurse(id, { currentAreaId: input.currentAreaId ?? null });
+    if (licenseNumber !== void 0) {
+      const licRes = await upsertNursePrcLicense(id, licenseNumber);
+      if (!licRes.ok) throw new TRPCError2({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+    }
     if (accountEmail) {
       const result = await adminSetNurseAccountEmail(id, accountEmail);
       if (!result.ok) throw new TRPCError2({ code: "CONFLICT", message: "That sign-in email is already in use." });
@@ -5019,10 +5065,11 @@ var nursesRouter = router({
       dateHired: nullableDateInput,
       employmentStatus: z2.enum([...EMPLOYMENT_STATUSES]).optional(),
       currentAreaId: z2.number().optional(),
-      accountEmail: z2.union([z2.string().email().max(320), z2.literal("")]).optional()
+      accountEmail: z2.union([z2.string().email().max(320), z2.literal("")]).optional(),
+      licenseNumber: z2.string().max(64).optional().nullable()
     })
   ).mutation(async ({ ctx, input }) => {
-    const { id, employeeId, accountEmail, ...rest } = input;
+    const { id, employeeId, accountEmail, licenseNumber, ...rest } = input;
     const nurse = await getNurseById(id);
     if (!nurse) throw new TRPCError2({ code: "NOT_FOUND", message: "Nurse not found" });
     if (employeeId !== void 0 && employeeId !== nurse.employeeId) {
@@ -5030,6 +5077,10 @@ var nursesRouter = router({
       if (taken) throw new TRPCError2({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
     }
     await updateNurse(id, { ...rest, ...employeeId ? { employeeId } : {} });
+    if (licenseNumber !== void 0) {
+      const licRes = await upsertNursePrcLicense(id, licenseNumber);
+      if (!licRes.ok) throw new TRPCError2({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+    }
     if (accountEmail !== void 0) {
       const result = await adminSetNurseAccountEmail(id, accountEmail === "" ? null : accountEmail);
       if (!result.ok) throw new TRPCError2({ code: "CONFLICT", message: "That sign-in email is already in use." });
@@ -9109,6 +9160,23 @@ var staffAccountRouter = router({
     const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
     await updateNurse(nurse.id, { contactNumber: input.contactNumber ?? null });
+    return { ok: true };
+  }),
+  updateMyPrcLicense: staffProcedure.input(z12.object({ licenseNumber: z12.string().max(64).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    const nurse = await getNurseById(ctx.nurseId);
+    if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
+    const licResult = await upsertNursePrcLicense(nurse.id, input.licenseNumber ?? null);
+    if (!licResult.ok) {
+      throw new TRPCError8({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+    }
+    await logActivity({
+      supervisorId: ctx.user?.id ?? null,
+      nurseId: nurse.id,
+      actionType: "nurse.updated",
+      entityType: "nurse",
+      entityId: nurse.id,
+      summary: `PRC License Number updated to ${input.licenseNumber || "none"} by ${nurseFullName(nurse)} (self-service)`
+    });
     return { ok: true };
   }),
   uploadMyPhoto: staffProcedure.input(z12.object({ fileBase64: z12.string(), fileName: z12.string().max(200), mimeType: z12.string() })).mutation(async ({ ctx, input }) => {

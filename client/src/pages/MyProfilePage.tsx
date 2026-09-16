@@ -254,11 +254,19 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 function MyProfileView({ profile }: { profile: any }) {
   const utils = trpc.useUtils();
   const [contactNumber, setContactNumber] = useState<string | null>(null);
+  const [prcLicense, setPrcLicense] = useState<string | null>(null);
   const [trainingDialogOpen, setTrainingDialogOpen] = useState(false);
 
   const saveMutation = trpc.staffAccount.updateMyBasicInfo.useMutation({
     onSuccess: () => {
       toast.success("Contact info saved.");
+      utils.staffAccount.myProfile.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const saveLicenseMutation = trpc.staffAccount.updateMyPrcLicense.useMutation({
+    onSuccess: () => {
+      toast.success("PRC License Number updated.");
       utils.staffAccount.myProfile.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -286,6 +294,7 @@ function MyProfileView({ profile }: { profile: any }) {
   });
 
   const currentContact = contactNumber ?? profile.contactNumber ?? "";
+  const currentLicense = prcLicense ?? profile.licenseNumber ?? "";
 
   return (
     <div className="space-y-4">
@@ -316,8 +325,8 @@ function MyProfileView({ profile }: { profile: any }) {
       </Card>
 
       <Card className="glass-card p-6 space-y-3">
-        <h2 className="font-semibold">License</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">PRC License</h2>
           {profile.licenseStatus ? (
             <LicenseStatusBadge
               status={profile.licenseStatus as never}
@@ -327,7 +336,24 @@ function MyProfileView({ profile }: { profile: any }) {
           ) : (
             <Badge variant="outline">No license on file</Badge>
           )}
-          {profile.licenseNumber ? <span className="text-sm text-muted-foreground font-mono">{profile.licenseNumber}</span> : null}
+        </div>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <Input
+              value={currentLicense}
+              onChange={(e) => setPrcLicense(e.target.value)}
+              placeholder="e.g. 0123456"
+            />
+            <Button
+              disabled={saveLicenseMutation.isPending || currentLicense.trim() === (profile.licenseNumber ?? "")}
+              onClick={() => saveLicenseMutation.mutate({ licenseNumber: currentLicense.trim() || null })}
+            >
+              {saveLicenseMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Enter or update your Professional Regulation Commission (PRC) license number.
+          </p>
         </div>
       </Card>
 

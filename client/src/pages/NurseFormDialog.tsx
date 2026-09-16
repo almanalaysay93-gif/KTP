@@ -32,6 +32,7 @@ interface NurseEditData {
   currentAreaId?: number | null;
   profilePhotoKey?: string | null;
   accountEmail?: string | null;
+  licenseNumber?: string | null;
 }
 
 export function NurseFormDialog({
@@ -48,6 +49,7 @@ export function NurseFormDialog({
 }) {
   const utils = trpc.useUtils();
   const [employeeId, setEmployeeId] = useState("");
+  const [licenseNumber, setLicenseNumber] = useState("");
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -66,6 +68,7 @@ export function NurseFormDialog({
     if (open) {
       if (nurse) {
         setEmployeeId(nurse.employeeId);
+        setLicenseNumber(nurse.licenseNumber ?? "");
         setFirstName(nurse.firstName);
         setMiddleName(nurse.middleName ?? "");
         setLastName(nurse.lastName);
@@ -80,6 +83,7 @@ export function NurseFormDialog({
         setPhotoPreview(nurse.profilePhotoKey ? `/storage/${nurse.profilePhotoKey}` : null);
       } else {
         setEmployeeId("");
+        setLicenseNumber("");
         setFirstName("");
         setMiddleName("");
         setLastName("");
@@ -119,6 +123,7 @@ export function NurseFormDialog({
       utils.nurses.list.invalidate();
       utils.nurses.initial.invalidate();
       utils.nurses.getAssignments.invalidate();
+      utils.credentials.invalidate();
       utils.areas.list.invalidate();
       utils.areas.get.invalidate();
       utils.areas.areaDashboard.invalidate();
@@ -158,9 +163,18 @@ export function NurseFormDialog({
     if (nurse) {
       // "" clears accountEmail (and unlinks the account) — create's schema has
       // no clear case, so only update sends the empty string through.
-      await update.mutateAsync({ id: nurse.id, ...data, accountEmail: accountEmail.trim() });
+      await update.mutateAsync({
+        id: nurse.id,
+        ...data,
+        accountEmail: accountEmail.trim(),
+        licenseNumber: licenseNumber.trim(),
+      });
     } else {
-      const created = await create.mutateAsync({ ...data, accountEmail: accountEmail.trim() || undefined });
+      const created = await create.mutateAsync({
+        ...data,
+        accountEmail: accountEmail.trim() || undefined,
+        licenseNumber: licenseNumber.trim() || undefined,
+      });
       id = created.id;
     }
     if (photo && id) {
@@ -197,13 +211,8 @@ export function NurseFormDialog({
             <Input id="employeeId" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="e.g., N-2026-001" />
           </div>
           <div>
-            <Label className="mb-1 block">Employment Status</Label>
-            <Select value={employmentStatus} onValueChange={setEmploymentStatus}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {EMPLOYMENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="licenseNumber" className="mb-1 block">PRC License Number</Label>
+            <Input id="licenseNumber" value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="e.g., 0123456" />
           </div>
           <div>
             <Label className="mb-1 block">First Name *</Label>
@@ -235,16 +244,25 @@ export function NurseFormDialog({
             </Select>
           </div>
           <div>
+            <Label className="mb-1 block">Employment Status</Label>
+            <Select value={employmentStatus} onValueChange={setEmploymentStatus}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {EMPLOYMENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="mb-1 block">Current Area</Label>
+            <AreaSelect value={areaId} onValueChange={setAreaId} placeholder="Unassigned" />
+          </div>
+          <div>
             <Label className="mb-1 block">Contact Number</Label>
             <Input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} />
           </div>
           <div>
             <Label className="mb-1 block">Date Hired *</Label>
             <Input type="date" value={dateHired} onChange={(e) => setDateHired(e.target.value)} />
-          </div>
-          <div>
-            <Label className="mb-1 block">Current Area</Label>
-            <AreaSelect value={areaId} onValueChange={setAreaId} placeholder="Unassigned" />
           </div>
           <div className="col-span-2">
             <Label htmlFor="accountEmail" className="mb-1 block">Sign-in email</Label>

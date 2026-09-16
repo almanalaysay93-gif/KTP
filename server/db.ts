@@ -1,4 +1,4 @@
-import { dateKey, daysUntilExpiry, INACTIVE_EMPLOYMENT_STATUSES } from "../shared/nursetrack";
+import { dateKey, daysUntilExpiry, INACTIVE_EMPLOYMENT_STATUSES, renewalCycleKey } from "../shared/nursetrack";
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, like, lte, not, or, sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -353,15 +353,19 @@ export async function getNurseByLinkedUserId(userId: number) {
 const normalizeForMatch = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /** All nurseIds carrying a credential whose licenseNumber matches (normalized). */
-async function findNurseIdsByLicenseNumber(licenseNumber: string): Promise<number[]> {
-  const db = await getDb();
-  if (!db) return [];
+export async function findNurseIdsByLicenseNumber(licenseNumber: string): Promise<number[]> {
   const normPrc = normalizeForMatch(licenseNumber);
-  const credRows = await db
-    .select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber })
-    .from(nurseCredentials)
-    .where(isNotNull(nurseCredentials.licenseNumber));
-  return credRows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
+  const db = await getDb();
+  if (db) {
+    const credRows = await db
+      .select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber })
+      .from(nurseCredentials)
+      .where(isNotNull(nurseCredentials.licenseNumber));
+    return credRows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
+  }
+  const sqlite = getSqliteDb();
+  const rows = sqlite.prepare("SELECT nurseId, licenseNumber FROM nurseCredentials WHERE licenseNumber IS NOT NULL").all() as any[];
+  return rows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
 }
 
 /**
@@ -974,6 +978,55 @@ export async function updateCredential(id: number, data: Partial<typeof nurseCre
     vals.push(id);
     sqlite.prepare(`UPDATE nurseCredentials SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
   }
+}
+
+/**
+ * Upsert the PRC Registered Nurse License credential for a nurse.
+ * Updates the existing PRC credential if found, or inserts a new one with a default 3-year validity.
+ * Validates uniqueness across all other nurses to prevent collisions.
+ */
+export async function upsertNursePrcLicense(
+  nurseId: number,
+  licenseNumber: string | null | undefined,
+): Promise<{ ok: true; credentialId?: number } | { ok: false; reason: "conflict" }> {
+  const norm = licenseNumber ? licenseNumber.trim() : null;
+  if (norm) {
+    const matchingNurseIds = await findNurseIdsByLicenseNumber(norm);
+    const hasConflict = matchingNurseIds.some((id) => id !== nurseId);
+    if (hasConflict) {
+      return { ok: false, reason: "conflict" };
+    }
+  }
+
+  const creds = await listCredentials({ nurseId });
+  const types = await listCredentialTypes(true);
+  const prcType = types.find((t) => t.name.toLowerCase().includes("prc")) ?? types[0];
+
+  const existingPrc = creds.find((c) => prcType && c.credentialTypeId === prcType.id) ?? creds[0];
+
+  if (existingPrc) {
+    await updateCredential(existingPrc.id, { licenseNumber: norm || null });
+    return { ok: true, credentialId: existingPrc.id };
+  }
+
+  if (norm) {
+    const expiryDate = new Date();
+    expiryDate.setFullYear(expiryDate.getFullYear() + 3);
+    const typeId = prcType ? prcType.id : 1;
+    const credId = await createCredential({
+      nurseId,
+      credentialTypeId: typeId,
+      licenseNumber: norm,
+      issuingOrganization: prcType?.issuingOrganizationDefault || "Professional Regulation Commission (PRC)",
+      expiryDate,
+      renewalStatus: "Not Started",
+      verificationStatus: "Unverified",
+      renewalCycleKey: renewalCycleKey(`prc-${nurseId}-${Date.now()}`),
+    });
+    return { ok: true, credentialId: credId };
+  }
+
+  return { ok: true };
 }
 
 export async function listCredentialTypes(includeInactive = true) {

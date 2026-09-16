@@ -534,6 +534,7 @@ export default function NurseProfile() {
                 <DetailRow label="Last Name" value={nurse.lastName} />
                 <DetailRow label="Suffix" value={nurse.suffix} />
                 <DetailRow label="Employee ID" value={nurse.employeeId} />
+                <DetailRow label="PRC License" value={nurse.licenseNumber} />
                 <DetailRow label="Position" value={nurse.position} />
 
                 <DetailRow label="Date Hired" value={nurse.dateHired ? formatDate(nurse.dateHired) : "—"} />

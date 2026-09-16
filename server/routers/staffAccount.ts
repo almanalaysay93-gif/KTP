@@ -213,6 +213,26 @@ export const staffAccountRouter = router({
       return { ok: true };
     }),
 
+  updateMyPrcLicense: staffProcedure
+    .input(z.object({ licenseNumber: z.string().max(64).nullable().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const nurse = await db.getNurseById(ctx.nurseId);
+      if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
+      const licResult = await db.upsertNursePrcLicense(nurse.id, input.licenseNumber ?? null);
+      if (!licResult.ok) {
+        throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+      }
+      await db.logActivity({
+        supervisorId: ctx.user?.id ?? null,
+        nurseId: nurse.id,
+        actionType: "nurse.updated",
+        entityType: "nurse",
+        entityId: nurse.id,
+        summary: `PRC License Number updated to ${input.licenseNumber || "none"} by ${nurseFullName(nurse)} (self-service)`,
+      });
+      return { ok: true };
+    }),
+
   uploadMyPhoto: staffProcedure
     .input(z.object({ fileBase64: z.string(), fileName: z.string().max(200), mimeType: z.string() }))
     .mutation(async ({ ctx, input }) => {
