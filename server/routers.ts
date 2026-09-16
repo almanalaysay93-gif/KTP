@@ -13,6 +13,7 @@ import { reportsRouter } from "./routers/reports";
 import { settingsRouter } from "./routers/settings";
 import { seminarsRouter } from "./routers/seminars";
 import { staffAccountRouter } from "./routers/staffAccount";
+import { staffFeedRouter } from "./routers/staffFeed";
 import { smartImportRouter } from "./routers/smartImport";
 import { aiInsightsRouter } from "./routers/aiInsights";
 
@@ -43,6 +44,7 @@ export const appRouter = router({
   settings: settingsRouter,
   seminars: seminarsRouter,
   staffAccount: staffAccountRouter,
+  staffFeed: staffFeedRouter,
   smartImport: smartImportRouter,
   aiInsights: aiInsightsRouter,
 });

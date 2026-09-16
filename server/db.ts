@@ -1101,11 +1101,7 @@ export async function listNurseTrainings(opts: { nurseId?: number } = {}) {
   return sqlite.prepare("SELECT * FROM nurseTrainings ORDER BY date(scheduledDate) DESC").all() as any[];
 }
 
-export async function createNurseTraining(data: {
-  nurseId: number; trainingId: number; eventId?: number; provider?: string; status?: "Scheduled" | "Completed" | "Expired" | "Cancelled";
-  scheduledDate?: Date | string | null; completionDate?: Date | string | null; expiryDate?: Date | string | null; trainingHours?: number | null;
-  cpdUnits?: number | null; certificateNumber?: string; certificateKey?: string; remarks?: string; participationRole?: "Participant" | "Speaker" | "Facilitator" | "Preceptor";
-}) {
+export async function createNurseTraining(data: Partial<typeof nurseTrainings.$inferInsert> & { nurseId: number; trainingId: number }) {
   const db = await getDb();
   if (db) {
     const [row] = await db.insert(nurseTrainings).values(data as any).returning({ id: nurseTrainings.id });
@@ -1116,13 +1112,35 @@ export async function createNurseTraining(data: {
   const comp = data.completionDate ? (data.completionDate instanceof Date ? data.completionDate.toISOString().slice(0, 10) : String(data.completionDate)) : null;
   const exp = data.expiryDate ? (data.expiryDate instanceof Date ? data.expiryDate.toISOString().slice(0, 10) : String(data.expiryDate)) : null;
   const res = sqlite.prepare(`
-    INSERT INTO nurseTrainings (nurseId, trainingId, eventId, participationRole, provider, status, scheduledDate, completionDate, expiryDate, trainingHours, cpdUnits, certificateNumber, certificateKey, remarks)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO nurseTrainings (
+      nurseId, trainingId, eventId, participationRole, provider, status, scheduledDate, completionDate, expiryDate,
+      trainingHours, cpdUnits, certificateNumber, certificateKey, remarks, scheduleVersion, staffResponse,
+      staffResponseReason, attendanceOutcome, evidenceStatus, evidenceRequired, conflictOverrideReason, conflictOverrideBy
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    data.nurseId, data.trainingId, data.eventId ?? null, data.participationRole ?? "Participant",
-    data.provider ?? null, data.status ?? "Scheduled", sched, comp, exp,
-    data.trainingHours ?? null, data.cpdUnits ?? null, data.certificateNumber ?? null,
-    data.certificateKey ?? null, data.remarks ?? null
+    data.nurseId,
+    data.trainingId,
+    data.eventId ?? null,
+    data.participationRole ?? "Participant",
+    data.provider ?? null,
+    data.status ?? "Scheduled",
+    sched,
+    comp,
+    exp,
+    data.trainingHours ?? null,
+    data.cpdUnits ?? null,
+    data.certificateNumber ?? null,
+    data.certificateKey ?? null,
+    data.remarks ?? null,
+    data.scheduleVersion ?? 1,
+    data.staffResponse ?? "Pending",
+    data.staffResponseReason ?? null,
+    data.attendanceOutcome ?? "not_recorded",
+    data.evidenceStatus ?? "None",
+    data.evidenceRequired !== undefined ? (data.evidenceRequired ? 1 : 0) : 0,
+    data.conflictOverrideReason ?? null,
+    data.conflictOverrideBy ?? null
   );
   return Number(res.lastInsertRowid);
 }
@@ -1136,9 +1154,34 @@ export async function updateNurseTraining(id: number, data: Partial<typeof nurse
   const sqlite = getSqliteDb();
   const sets: string[] = [];
   const vals: any[] = [];
-  const fields = ["status", "participationRole", "provider", "trainingHours", "cpdUnits", "certificateNumber", "certificateKey", "remarks"] as const;
+  const fields = [
+    "status",
+    "participationRole",
+    "provider",
+    "trainingHours",
+    "cpdUnits",
+    "certificateNumber",
+    "certificateKey",
+    "remarks",
+    "scheduleVersion",
+    "staffResponse",
+    "staffResponseReason",
+    "staffResponseVersion",
+    "attendanceOutcome",
+    "attendanceRecordedBy",
+    "attendanceNote",
+    "evidenceStatus",
+    "evidenceRequired",
+    "evidenceReviewedBy",
+    "evidenceReviewNote",
+    "conflictOverrideReason",
+    "conflictOverrideBy",
+  ] as const;
   for (const f of fields) {
-    if (data[f] !== undefined) { sets.push(`${f} = ?`); vals.push(data[f] ?? null); }
+    if (data[f] !== undefined) {
+      sets.push(`${f} = ?`);
+      vals.push(data[f] ?? null);
+    }
   }
   if (data.scheduledDate !== undefined) {
     sets.push("scheduledDate = ?");
@@ -1151,6 +1194,22 @@ export async function updateNurseTraining(id: number, data: Partial<typeof nurse
   if (data.expiryDate !== undefined) {
     sets.push("expiryDate = ?");
     vals.push(data.expiryDate ? (data.expiryDate instanceof Date ? data.expiryDate.toISOString().slice(0, 10) : String(data.expiryDate)) : null);
+  }
+  if (data.staffRespondedAt !== undefined) {
+    sets.push("staffRespondedAt = ?");
+    vals.push(data.staffRespondedAt ? (data.staffRespondedAt instanceof Date ? data.staffRespondedAt.toISOString() : String(data.staffRespondedAt)) : null);
+  }
+  if (data.attendanceRecordedAt !== undefined) {
+    sets.push("attendanceRecordedAt = ?");
+    vals.push(data.attendanceRecordedAt ? (data.attendanceRecordedAt instanceof Date ? data.attendanceRecordedAt.toISOString() : String(data.attendanceRecordedAt)) : null);
+  }
+  if (data.evidenceSubmittedAt !== undefined) {
+    sets.push("evidenceSubmittedAt = ?");
+    vals.push(data.evidenceSubmittedAt ? (data.evidenceSubmittedAt instanceof Date ? data.evidenceSubmittedAt.toISOString() : String(data.evidenceSubmittedAt)) : null);
+  }
+  if (data.evidenceReviewedAt !== undefined) {
+    sets.push("evidenceReviewedAt = ?");
+    vals.push(data.evidenceReviewedAt ? (data.evidenceReviewedAt instanceof Date ? data.evidenceReviewedAt.toISOString() : String(data.evidenceReviewedAt)) : null);
   }
   if (sets.length) {
     vals.push(id);

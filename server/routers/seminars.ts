@@ -25,6 +25,12 @@ import {
   getLocalMonthlySummary,
   getLocalQuarterlyLedger,
 } from "../sqliteHelpers";
+import {
+  checkTrainingConflicts,
+  enqueueTrainingNotice,
+  createMilestonesForAssignment,
+  dispatchSingleOutboxItem,
+} from "../trainingReminders";
 
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const [year, month, day] = value.split("-").map(Number);
@@ -201,7 +207,7 @@ export const seminarsRouter = router({
     .input(z.object({
       eventId: z.number().int().positive(),
       nurseId: z.number().int().positive(),
-      status: z.enum(attendanceStatuses).default("Completed"),
+      status: z.enum(attendanceStatuses).default("Scheduled"),
       completionDate: optionalDateInput,
       participationRole: z.enum(PARTICIPATION_ROLES).default("Participant"),
       trainingHours: z.number().int().positive().optional(),
@@ -209,6 +215,7 @@ export const seminarsRouter = router({
       certificateNumber: z.string().max(64).optional(),
       expiryDate: optionalDateInput,
       remarks: z.string().max(2000).optional(),
+      conflictOverrideReason: z.string().max(1000).optional(),
     }).superRefine((value, ctx) => {
       if ((value.status === "Completed" || value.status === "Expired") && !value.completionDate) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["completionDate"], message: "Completion date is required for completed attendance." });
@@ -239,7 +246,30 @@ export const seminarsRouter = router({
         .where(and(eq(nurseTrainings.eventId, input.eventId), eq(nurseTrainings.nurseId, input.nurseId)))
         .limit(1);
       if (duplicate.length) throw new TRPCError({ code: "CONFLICT", message: "Staff member is already listed for this seminar." });
-      return db.transaction(async (tx) => {
+
+      const startDateStr = dateKey(event.startDate);
+      const endDateStr = dateKey(event.endDate);
+
+      // Conflict validation for scheduled assignment
+      if (input.status === "Scheduled") {
+        const conflictRes = await checkTrainingConflicts(
+          input.nurseId,
+          startDateStr,
+          endDateStr,
+          event.startTime,
+          event.endTime
+        );
+        if (conflictRes.hasConflict && !conflictRes.warningOnly) {
+          if (!input.conflictOverrideReason || input.conflictOverrideReason.trim().length === 0) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: `Scheduling conflict detected with: ${conflictRes.conflicts.map((c) => c.trainingName).join(", ")}. Override reason is required to proceed.`,
+            });
+          }
+        }
+      }
+
+      const id = await db.transaction(async (tx) => {
         const result = await tx.insert(nurseTrainings).values({
           nurseId: input.nurseId,
           trainingId: event.trainingId,
@@ -254,18 +284,49 @@ export const seminarsRouter = router({
           certificateNumber: input.certificateNumber ?? null,
           expiryDate: input.expiryDate ?? null,
           remarks: input.remarks ?? null,
+          scheduleVersion: 1,
+          staffResponse: "Pending",
+          evidenceRequired: true,
+          conflictOverrideReason: input.conflictOverrideReason ?? null,
+          conflictOverrideBy: input.conflictOverrideReason ? ctx.user.id : null,
         }).returning({ id: nurseTrainings.id });
-        const id = Number(result[0].id);
+        const newId = Number(result[0].id);
         await tx.insert(activityLog).values({
           supervisorId: ctx.user.id,
           nurseId: input.nurseId,
           actionType: "seminar.attendance.added",
           entityType: "nurseTraining",
-          entityId: id,
+          entityId: newId,
           summary: `Seminar attendance added for ${nurseFullName(person)}`,
         });
-        return { id };
+        return newId;
       });
+
+      // Enqueue immediate notice and milestone jobs if Scheduled
+      if (input.status === "Scheduled") {
+        try {
+          const noticeItem = await enqueueTrainingNotice({
+            assignmentId: id,
+            scheduleVersion: 1,
+            noticeKind: "assigned",
+            recipientNurseId: input.nurseId,
+            actorUserId: ctx.user.id,
+          });
+          await createMilestonesForAssignment({
+            assignmentId: id,
+            scheduleVersion: 1,
+            startDateStr,
+            recipientNurseId: input.nurseId,
+          });
+          if (noticeItem?.id) {
+            await dispatchSingleOutboxItem(noticeItem.id).catch(() => {});
+          }
+        } catch (noticeErr) {
+          console.warn("[Seminars] Failed to enqueue training notice:", noticeErr);
+        }
+      }
+
+      return { id };
     }),
 
   removeAttendance: adminProcedure

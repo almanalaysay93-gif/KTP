@@ -231,6 +231,162 @@ export function renderProfileUpdateEmail({
   });
 }
 
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+export function renderTrainingNoticeEmail({
+  nurseName,
+  noticeKind,
+  trainingTitle,
+  dateRangeStr,
+  timeStr,
+  venue,
+  instructions,
+  actionUrl,
+}: {
+  nurseName: string;
+  noticeKind: "assigned" | "rescheduled" | "cancelled";
+  trainingTitle: string;
+  dateRangeStr: string;
+  timeStr?: string | null;
+  venue?: string | null;
+  instructions?: string | null;
+  actionUrl: string;
+}): string {
+  const safeTitle = escapeHtml(trainingTitle);
+  const safeName = escapeHtml(nurseName);
+  const safeDates = escapeHtml(dateRangeStr);
+  const safeTime = timeStr ? escapeHtml(timeStr) : "Time not specified";
+  const safeVenue = venue ? escapeHtml(venue) : null;
+  const safeInstructions = instructions ? escapeHtml(instructions) : null;
+
+  let badgeClass = "badge-info";
+  let badgeLabel = "Training Assignment";
+  let leadText = `You have been assigned to <strong>${safeTitle}</strong>.`;
+
+  if (noticeKind === "rescheduled") {
+    badgeClass = "badge-warning";
+    badgeLabel = "Schedule Change";
+    leadText = `The schedule for <strong>${safeTitle}</strong> has been updated. Attendance confirmation is required for the new schedule.`;
+  } else if (noticeKind === "cancelled") {
+    badgeClass = "badge-urgent";
+    badgeLabel = "Training Cancelled";
+    leadText = `The training assignment for <strong>${safeTitle}</strong> has been cancelled. Attendance is no longer required.`;
+  }
+
+  const content = `
+    <div style="margin-bottom: 16px;">
+      <span class="${badgeClass}">${badgeLabel}</span>
+    </div>
+    <h2 style="margin: 0 0 12px 0; font-size: 18px; color: #0f172a;">Hello, ${safeName}</h2>
+    <p style="margin: 0 0 16px 0; color: #334155;">
+      ${leadText}
+    </p>
+    <div class="card-box">
+      <table style="width: 100%; font-size: 13px; color: #334155;">
+        <tr><td style="padding: 4px 0; font-weight: 600; width: 120px;">Training:</td><td>${safeTitle}</td></tr>
+        <tr><td style="padding: 4px 0; font-weight: 600;">Dates:</td><td>${safeDates}</td></tr>
+        <tr><td style="padding: 4px 0; font-weight: 600;">Time:</td><td>${safeTime}</td></tr>
+        ${safeVenue ? `<tr><td style="padding: 4px 0; font-weight: 600;">Venue:</td><td>${safeVenue}</td></tr>` : ""}
+        ${safeInstructions ? `<tr><td style="padding: 4px 0; font-weight: 600;">Instructions:</td><td>${safeInstructions}</td></tr>` : ""}
+      </table>
+    </div>
+    ${
+      noticeKind !== "cancelled"
+        ? `<p style="margin: 16px 0 0 0; font-size: 13px; color: #64748b;">
+            Please visit your staff training calendar to confirm attendance or notify your supervisor if you cannot attend.
+          </p>`
+        : `<p style="margin: 16px 0 0 0; font-size: 13px; color: #64748b;">
+            This event has been removed from your active requirements.
+          </p>`
+    }
+  `;
+
+  return baseLayout({
+    title: `${badgeLabel}: ${safeTitle}`,
+    preheader: `${badgeLabel} notice for ${safeTitle}`,
+    contentHtml: content,
+    actionButton: { label: "View in Staff Calendar", url: actionUrl },
+  });
+}
+
+export function renderTrainingMilestoneEmail({
+  nurseName,
+  trainingTitle,
+  dateRangeStr,
+  timeStr,
+  venue,
+  instructions,
+  daysRemaining,
+  isTodayOrTomorrow,
+  actionUrl,
+}: {
+  nurseName: string;
+  trainingTitle: string;
+  dateRangeStr: string;
+  timeStr?: string | null;
+  venue?: string | null;
+  instructions?: string | null;
+  daysRemaining: number;
+  isTodayOrTomorrow?: "today" | "tomorrow" | null;
+  actionUrl: string;
+}): string {
+  const safeTitle = escapeHtml(trainingTitle);
+  const safeName = escapeHtml(nurseName);
+  const safeDates = escapeHtml(dateRangeStr);
+  const safeTime = timeStr ? escapeHtml(timeStr) : "Time not specified";
+  const safeVenue = venue ? escapeHtml(venue) : null;
+  const safeInstructions = instructions ? escapeHtml(instructions) : null;
+
+  let badgeClass = "badge-info";
+  let label = `Upcoming Training: ${daysRemaining} Days`;
+  if (isTodayOrTomorrow === "today" || daysRemaining <= 0) {
+    badgeClass = "badge-urgent";
+    label = "Training Today";
+  } else if (isTodayOrTomorrow === "tomorrow" || daysRemaining === 1) {
+    badgeClass = "badge-warning";
+    label = "Training Tomorrow";
+  } else if (daysRemaining <= 7) {
+    badgeClass = "badge-warning";
+    label = `Training in ${daysRemaining} Days`;
+  }
+
+  const content = `
+    <div style="margin-bottom: 16px;">
+      <span class="${badgeClass}">${label}</span>
+    </div>
+    <h2 style="margin: 0 0 12px 0; font-size: 18px; color: #0f172a;">Hello, ${safeName}</h2>
+    <p style="margin: 0 0 16px 0; color: #334155;">
+      This is a reminder for your assigned training: <strong>${safeTitle}</strong>.
+    </p>
+    <div class="card-box">
+      <table style="width: 100%; font-size: 13px; color: #334155;">
+        <tr><td style="padding: 4px 0; font-weight: 600; width: 120px;">Training:</td><td>${safeTitle}</td></tr>
+        <tr><td style="padding: 4px 0; font-weight: 600;">Dates:</td><td>${safeDates}</td></tr>
+        <tr><td style="padding: 4px 0; font-weight: 600;">Time:</td><td>${safeTime}</td></tr>
+        ${safeVenue ? `<tr><td style="padding: 4px 0; font-weight: 600;">Venue:</td><td>${safeVenue}</td></tr>` : ""}
+        ${safeInstructions ? `<tr><td style="padding: 4px 0; font-weight: 600;">Instructions:</td><td>${safeInstructions}</td></tr>` : ""}
+      </table>
+    </div>
+    <p style="margin: 16px 0 0 0; font-size: 13px; color: #64748b;">
+      Please ensure your attendance is confirmed in your staff portal. If you cannot attend, submit your reason promptly so your unit supervisor can adjust coverage.
+    </p>
+  `;
+
+  return baseLayout({
+    title: `Reminder: ${safeTitle} (${label})`,
+    preheader: `Reminder: ${safeTitle} starts soon`,
+    contentHtml: content,
+    actionButton: { label: "View in Staff Calendar", url: actionUrl },
+  });
+}
+
 export function renderDirectNoticeEmail({
   nurseName,
   subject,

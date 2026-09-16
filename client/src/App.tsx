@@ -16,6 +16,9 @@ import NurseProfile from "./pages/NurseProfile";
 import { NurseEditPage } from "./pages/NurseEditPage";
 import Nurses from "./pages/Nurses";
 import MyProfilePage from "./pages/MyProfilePage";
+import StaffFeed from "./pages/StaffFeed";
+import StaffTrainingCalendar from "./pages/StaffTrainingCalendar";
+import StaffMessages from "./pages/StaffMessages";
 import StaffSignInPage from "./pages/StaffSignIn";
 import Reports from "./pages/Reports";
 import SettingsPage from "./pages/Settings";
@@ -51,7 +54,18 @@ function Router() {
         <RootRedirect />
       </Route>
       <Route path="/me">
+        <StaffFeed />
+      </Route>
+      <Route path="/me/calendar">
+        <StaffTrainingCalendar />
+      </Route>
+      <Route path="/me/profile">
         <MyProfilePage />
+      </Route>
+      <Route path="/messages">
+        <Protected>
+          <StaffMessages />
+        </Protected>
       </Route>
       <Route path="/staff-signin">
         <StaffSignInPage />

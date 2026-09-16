@@ -74,6 +74,7 @@ export const NAV_ITEMS: NavItem[] = [
   { icon: UserCog, label: "Nursing Attendants (NA)", path: "/nurses?type=Nursing%20Attendant" },
   { icon: ClipboardList, label: "Trainings", path: "/trainings" },
   { icon: GraduationCap, label: "Seminars & LDI", path: "/seminars" },
+  { icon: Bell, label: "Staff Messages", path: "/messages" },
   { icon: CreditCard, label: "Licenses", path: "/licenses" },
   { icon: CalendarDays, label: "Calendar", path: "/calendar" },
   { icon: FileBarChart, label: "Reports", path: "/reports" },

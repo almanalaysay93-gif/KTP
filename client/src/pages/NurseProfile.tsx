@@ -52,6 +52,7 @@ import {
   FileText,
   Mail,
   MapPin,
+  MessageSquare,
   Pencil,
   Trash2,
   Undo2,
@@ -280,6 +281,15 @@ export default function NurseProfile() {
           >
             <Mail className="h-4 w-4 mr-1" />
             Send Notice
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Send in-app message to nurse feed"
+            onClick={() => navigate(`/messages?nurseId=${id}`)}
+          >
+            <MessageSquare className="h-4 w-4 mr-1 text-sky-600" />
+            Direct Message
           </Button>
           <Button variant="outline" size="sm" onClick={() => {
             utils.nurses.get.invalidate();

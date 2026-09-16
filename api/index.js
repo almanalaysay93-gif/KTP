@@ -174,7 +174,7 @@ import {
   uniqueIndex,
   varchar
 } from "drizzle-orm/pg-core";
-var nursetrack, pgTable, touchedOnUpdate, date, users, areas, nurses, areaAssignments, credentialTypes, nurseCredentials, licenseReminders, trainingCatalog, trainingEvents, areaTrainingRequirements, nurseTrainings, customCalendarEvents, notifications, activityLog, appSettings, emailLogs;
+var nursetrack, pgTable, touchedOnUpdate, date, users, areas, nurses, areaAssignments, credentialTypes, nurseCredentials, licenseReminders, trainingCatalog, trainingEvents, areaTrainingRequirements, nurseTrainings, customCalendarEvents, notifications, activityLog, appSettings, emailLogs, staffMessages, staffMessageRecipients, staffMessageAcknowledgments, trainingOutbox, trainingActivity;
 var init_schema = __esm({
   "drizzle/schema.ts"() {
     "use strict";
@@ -378,6 +378,32 @@ var init_schema = __esm({
         certificateNumber: varchar("certificateNumber", { length: 64 }),
         certificateKey: text("certificateKey"),
         remarks: text("remarks"),
+        scheduleVersion: integer("scheduleVersion").default(1).notNull(),
+        staffResponse: varchar("staffResponse", {
+          length: 32,
+          enum: ["Pending", "Confirmed", "Cannot attend"]
+        }).default("Pending").notNull(),
+        staffResponseReason: text("staffResponseReason"),
+        staffRespondedAt: timestamp("staffRespondedAt"),
+        staffResponseVersion: integer("staffResponseVersion"),
+        attendanceOutcome: varchar("attendanceOutcome", {
+          length: 32,
+          enum: ["Not recorded", "Attended", "Missed", "Excused"]
+        }).default("Not recorded").notNull(),
+        attendanceRecordedAt: timestamp("attendanceRecordedAt"),
+        attendanceRecordedBy: integer("attendanceRecordedBy"),
+        attendanceNote: text("attendanceNote"),
+        evidenceStatus: varchar("evidenceStatus", {
+          length: 32,
+          enum: ["None", "Submitted", "Verified", "Rejected"]
+        }).default("None").notNull(),
+        evidenceRequired: boolean("evidenceRequired").default(false).notNull(),
+        evidenceSubmittedAt: timestamp("evidenceSubmittedAt"),
+        evidenceReviewedAt: timestamp("evidenceReviewedAt"),
+        evidenceReviewedBy: integer("evidenceReviewedBy"),
+        evidenceReviewNote: text("evidenceReviewNote"),
+        conflictOverrideReason: text("conflictOverrideReason"),
+        conflictOverrideBy: integer("conflictOverrideBy"),
         createdAt: timestamp("createdAt").defaultNow().notNull(),
         updatedAt: timestamp("updatedAt").defaultNow().$onUpdate(touchedOnUpdate).notNull()
       },
@@ -462,6 +488,92 @@ var init_schema = __esm({
         sentAt: timestamp("sentAt").defaultNow().notNull()
       },
       (t2) => [index("idx_email_nurse").on(t2.nurseId), index("idx_email_typeref").on(t2.emailType, t2.referenceId)]
+    );
+    staffMessages = pgTable(
+      "staffMessages",
+      {
+        id: serial("id").primaryKey(),
+        senderUserId: integer("senderUserId").notNull(),
+        title: varchar("title", { length: 160 }).notNull(),
+        body: text("body").notNull(),
+        revision: integer("revision").default(1).notNull(),
+        archivedAt: timestamp("archivedAt"),
+        createdAt: timestamp("createdAt").defaultNow().notNull(),
+        updatedAt: timestamp("updatedAt").defaultNow().$onUpdate(touchedOnUpdate).notNull()
+      },
+      (t2) => [index("idx_msg_created").on(t2.createdAt)]
+    );
+    staffMessageRecipients = pgTable(
+      "staffMessageRecipients",
+      {
+        id: serial("id").primaryKey(),
+        messageId: integer("messageId").notNull(),
+        nurseId: integer("nurseId").notNull(),
+        readAt: timestamp("readAt"),
+        lastReadRevision: integer("lastReadRevision"),
+        createdAt: timestamp("createdAt").defaultNow().notNull()
+      },
+      (t2) => [
+        uniqueIndex("uniq_msg_recipient").on(t2.messageId, t2.nurseId),
+        index("idx_msg_recip_nurse").on(t2.nurseId)
+      ]
+    );
+    staffMessageAcknowledgments = pgTable(
+      "staffMessageAcknowledgments",
+      {
+        id: serial("id").primaryKey(),
+        messageId: integer("messageId").notNull(),
+        nurseId: integer("nurseId").notNull(),
+        revision: integer("revision").notNull(),
+        acknowledgedAt: timestamp("acknowledgedAt").defaultNow().notNull()
+      },
+      (t2) => [
+        uniqueIndex("uniq_msg_ack").on(t2.messageId, t2.nurseId, t2.revision),
+        index("idx_msg_ack_nurse").on(t2.nurseId)
+      ]
+    );
+    trainingOutbox = pgTable(
+      "trainingOutbox",
+      {
+        id: serial("id").primaryKey(),
+        assignmentId: integer("assignmentId").notNull(),
+        scheduleVersion: integer("scheduleVersion").notNull(),
+        noticeKind: varchar("noticeKind", { length: 32 }).notNull(),
+        // assignment, reschedule, cancellation, reminder_14d, reminder_7d, reminder_1d, combined_due
+        thresholdDays: integer("thresholdDays"),
+        // 14, 7, 1, or null
+        dueDate: date("dueDate", { mode: "date" }),
+        recipientNurseId: integer("recipientNurseId").notNull(),
+        recipientEmail: varchar("recipientEmail", { length: 320 }),
+        status: varchar("status", { length: 32 }).default("pending").notNull(),
+        // pending, claimed, sent, mock_sent, failed, skipped, superseded
+        attempts: integer("attempts").default(0).notNull(),
+        lastAttemptAt: timestamp("lastAttemptAt"),
+        claimedAt: timestamp("claimedAt"),
+        providerMessageId: text("providerMessageId"),
+        errorDetail: text("errorDetail"),
+        createdAt: timestamp("createdAt").defaultNow().notNull(),
+        updatedAt: timestamp("updatedAt").defaultNow().$onUpdate(touchedOnUpdate).notNull()
+      },
+      (t2) => [
+        index("idx_outbox_status_due").on(t2.status, t2.dueDate),
+        index("idx_outbox_assignment").on(t2.assignmentId, t2.scheduleVersion),
+        uniqueIndex("uniq_outbox_milestone").on(t2.assignmentId, t2.scheduleVersion, t2.noticeKind)
+      ]
+    );
+    trainingActivity = pgTable(
+      "trainingActivity",
+      {
+        id: serial("id").primaryKey(),
+        nurseId: integer("nurseId").notNull(),
+        assignmentId: integer("assignmentId").notNull(),
+        activityType: varchar("activityType", { length: 32 }).notNull(),
+        title: varchar("title", { length: 256 }).notNull(),
+        message: text("message"),
+        readAt: timestamp("readAt"),
+        createdAt: timestamp("createdAt").defaultNow().notNull()
+      },
+      (t2) => [index("idx_tact_nurse").on(t2.nurseId), index("idx_tact_assignment").on(t2.assignmentId)]
     );
   }
 });
@@ -645,6 +757,23 @@ function initSchemaAndSeed(db) {
       certificateNumber TEXT,
       certificateKey TEXT,
       remarks TEXT,
+      scheduleVersion INTEGER DEFAULT 1 NOT NULL,
+      staffResponse TEXT DEFAULT 'Pending' NOT NULL,
+      staffResponseReason TEXT,
+      staffRespondedAt TEXT,
+      staffResponseVersion INTEGER,
+      attendanceOutcome TEXT DEFAULT 'not_recorded' NOT NULL,
+      attendanceRecordedAt TEXT,
+      attendanceRecordedBy INTEGER,
+      attendanceNote TEXT,
+      evidenceStatus TEXT DEFAULT 'None' NOT NULL,
+      evidenceRequired INTEGER DEFAULT 0 NOT NULL,
+      evidenceSubmittedAt TEXT,
+      evidenceReviewedAt TEXT,
+      evidenceReviewedBy INTEGER,
+      evidenceReviewNote TEXT,
+      conflictOverrideReason TEXT,
+      conflictOverrideBy INTEGER,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
       updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
@@ -707,12 +836,92 @@ function initSchemaAndSeed(db) {
       errorMessage TEXT,
       sentAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS staffMessages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      senderUserId INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      revision INTEGER DEFAULT 1 NOT NULL,
+      archivedAt TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS staffMessageRecipients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      messageId INTEGER NOT NULL,
+      nurseId INTEGER NOT NULL,
+      readAt TEXT,
+      lastReadRevision INTEGER,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      UNIQUE(messageId, nurseId)
+    );
+
+    CREATE TABLE IF NOT EXISTS staffMessageAcknowledgments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      messageId INTEGER NOT NULL,
+      nurseId INTEGER NOT NULL,
+      revision INTEGER NOT NULL,
+      acknowledgedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      UNIQUE(messageId, nurseId, revision)
+    );
+
+    CREATE TABLE IF NOT EXISTS trainingOutbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      assignmentId INTEGER NOT NULL,
+      scheduleVersion INTEGER NOT NULL,
+      noticeKind TEXT NOT NULL,
+      thresholdDays INTEGER,
+      dueDate TEXT,
+      recipientNurseId INTEGER NOT NULL,
+      recipientEmail TEXT,
+      status TEXT DEFAULT 'pending' NOT NULL,
+      attempts INTEGER DEFAULT 0 NOT NULL,
+      lastAttemptAt TEXT,
+      claimedAt TEXT,
+      providerMessageId TEXT,
+      errorDetail TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      UNIQUE(assignmentId, scheduleVersion, noticeKind)
+    );
+
+    CREATE TABLE IF NOT EXISTS trainingActivity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nurseId INTEGER NOT NULL,
+      assignmentId INTEGER NOT NULL,
+      activityType TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT,
+      readAt TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
   `);
   const cols = db.prepare("PRAGMA table_info(nurses)").all();
   const colSet = new Set(cols.map((c) => c.name));
   if (!colSet.has("contactNumber")) db.exec("ALTER TABLE nurses ADD COLUMN contactNumber TEXT");
   if (!colSet.has("accountEmail")) db.exec("ALTER TABLE nurses ADD COLUMN accountEmail TEXT");
   if (!colSet.has("linkedUserId")) db.exec("ALTER TABLE nurses ADD COLUMN linkedUserId INTEGER");
+  const ntCols = db.prepare("PRAGMA table_info(nurseTrainings)").all();
+  const ntColSet = new Set(ntCols.map((c) => c.name));
+  if (!ntColSet.has("scheduleVersion")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN scheduleVersion INTEGER DEFAULT 1 NOT NULL");
+  if (!ntColSet.has("staffResponse")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponse TEXT DEFAULT 'Pending' NOT NULL");
+  if (!ntColSet.has("staffResponseReason")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponseReason TEXT");
+  if (!ntColSet.has("staffRespondedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffRespondedAt TEXT");
+  if (!ntColSet.has("staffResponseVersion")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponseVersion INTEGER");
+  if (!ntColSet.has("attendanceOutcome")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceOutcome TEXT DEFAULT 'Not recorded' NOT NULL");
+  if (!ntColSet.has("attendanceRecordedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceRecordedAt TEXT");
+  if (!ntColSet.has("attendanceRecordedBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceRecordedBy INTEGER");
+  if (!ntColSet.has("attendanceNote")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceNote TEXT");
+  if (!ntColSet.has("evidenceStatus")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceStatus TEXT DEFAULT 'None' NOT NULL");
+  if (!ntColSet.has("evidenceRequired")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceRequired INTEGER DEFAULT 0 NOT NULL");
+  if (!ntColSet.has("evidenceSubmittedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceSubmittedAt TEXT");
+  if (!ntColSet.has("evidenceReviewedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewedAt TEXT");
+  if (!ntColSet.has("evidenceReviewedBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewedBy INTEGER");
+  if (!ntColSet.has("evidenceReviewNote")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewNote TEXT");
+  if (!ntColSet.has("conflictOverrideReason")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN conflictOverrideReason TEXT");
+  if (!ntColSet.has("conflictOverrideBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN conflictOverrideBy INTEGER");
   const countRow = db.prepare("SELECT count(*) as cnt FROM nurses").get();
   if (countRow.cnt === 0) {
     seedFromSeedJson(db);
@@ -1868,8 +2077,12 @@ async function createNurseTraining(data) {
   const comp = data.completionDate ? data.completionDate instanceof Date ? data.completionDate.toISOString().slice(0, 10) : String(data.completionDate) : null;
   const exp = data.expiryDate ? data.expiryDate instanceof Date ? data.expiryDate.toISOString().slice(0, 10) : String(data.expiryDate) : null;
   const res = sqlite.prepare(`
-    INSERT INTO nurseTrainings (nurseId, trainingId, eventId, participationRole, provider, status, scheduledDate, completionDate, expiryDate, trainingHours, cpdUnits, certificateNumber, certificateKey, remarks)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO nurseTrainings (
+      nurseId, trainingId, eventId, participationRole, provider, status, scheduledDate, completionDate, expiryDate,
+      trainingHours, cpdUnits, certificateNumber, certificateKey, remarks, scheduleVersion, staffResponse,
+      staffResponseReason, attendanceOutcome, evidenceStatus, evidenceRequired, conflictOverrideReason, conflictOverrideBy
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     data.nurseId,
     data.trainingId,
@@ -1884,7 +2097,15 @@ async function createNurseTraining(data) {
     data.cpdUnits ?? null,
     data.certificateNumber ?? null,
     data.certificateKey ?? null,
-    data.remarks ?? null
+    data.remarks ?? null,
+    data.scheduleVersion ?? 1,
+    data.staffResponse ?? "Pending",
+    data.staffResponseReason ?? null,
+    data.attendanceOutcome ?? "not_recorded",
+    data.evidenceStatus ?? "None",
+    data.evidenceRequired !== void 0 ? data.evidenceRequired ? 1 : 0 : 0,
+    data.conflictOverrideReason ?? null,
+    data.conflictOverrideBy ?? null
   );
   return Number(res.lastInsertRowid);
 }
@@ -1897,7 +2118,29 @@ async function updateNurseTraining(id, data) {
   const sqlite = getSqliteDb();
   const sets = [];
   const vals = [];
-  const fields = ["status", "participationRole", "provider", "trainingHours", "cpdUnits", "certificateNumber", "certificateKey", "remarks"];
+  const fields = [
+    "status",
+    "participationRole",
+    "provider",
+    "trainingHours",
+    "cpdUnits",
+    "certificateNumber",
+    "certificateKey",
+    "remarks",
+    "scheduleVersion",
+    "staffResponse",
+    "staffResponseReason",
+    "staffResponseVersion",
+    "attendanceOutcome",
+    "attendanceRecordedBy",
+    "attendanceNote",
+    "evidenceStatus",
+    "evidenceRequired",
+    "evidenceReviewedBy",
+    "evidenceReviewNote",
+    "conflictOverrideReason",
+    "conflictOverrideBy"
+  ];
   for (const f of fields) {
     if (data[f] !== void 0) {
       sets.push(`${f} = ?`);
@@ -1915,6 +2158,22 @@ async function updateNurseTraining(id, data) {
   if (data.expiryDate !== void 0) {
     sets.push("expiryDate = ?");
     vals.push(data.expiryDate ? data.expiryDate instanceof Date ? data.expiryDate.toISOString().slice(0, 10) : String(data.expiryDate) : null);
+  }
+  if (data.staffRespondedAt !== void 0) {
+    sets.push("staffRespondedAt = ?");
+    vals.push(data.staffRespondedAt ? data.staffRespondedAt instanceof Date ? data.staffRespondedAt.toISOString() : String(data.staffRespondedAt) : null);
+  }
+  if (data.attendanceRecordedAt !== void 0) {
+    sets.push("attendanceRecordedAt = ?");
+    vals.push(data.attendanceRecordedAt ? data.attendanceRecordedAt instanceof Date ? data.attendanceRecordedAt.toISOString() : String(data.attendanceRecordedAt) : null);
+  }
+  if (data.evidenceSubmittedAt !== void 0) {
+    sets.push("evidenceSubmittedAt = ?");
+    vals.push(data.evidenceSubmittedAt ? data.evidenceSubmittedAt instanceof Date ? data.evidenceSubmittedAt.toISOString() : String(data.evidenceSubmittedAt) : null);
+  }
+  if (data.evidenceReviewedAt !== void 0) {
+    sets.push("evidenceReviewedAt = ?");
+    vals.push(data.evidenceReviewedAt ? data.evidenceReviewedAt instanceof Date ? data.evidenceReviewedAt.toISOString() : String(data.evidenceReviewedAt) : null);
   }
   if (sets.length) {
     vals.push(id);
@@ -2615,7 +2874,8 @@ async function sendEmail(opts) {
       status: "sent",
       errorMessage: null
     });
-    return { success: true, status: "sent" };
+    const resData = await res.json().catch(() => null);
+    return { success: true, status: "sent", messageId: resData?.id };
   } catch (err) {
     const errorMsg = err?.message || String(err);
     console.error(`[Email:Exception] ${errorMsg}`);
@@ -2644,11 +2904,14 @@ var init_service = __esm({
 // server/email/templates.ts
 var templates_exports = {};
 __export(templates_exports, {
+  escapeHtml: () => escapeHtml,
   renderDirectNoticeEmail: () => renderDirectNoticeEmail,
   renderLicenseExpiryEmail: () => renderLicenseExpiryEmail,
   renderProfileUpdateEmail: () => renderProfileUpdateEmail,
   renderSeminarAnnouncementEmail: () => renderSeminarAnnouncementEmail,
-  renderSeminarReminderEmail: () => renderSeminarReminderEmail
+  renderSeminarReminderEmail: () => renderSeminarReminderEmail,
+  renderTrainingMilestoneEmail: () => renderTrainingMilestoneEmail,
+  renderTrainingNoticeEmail: () => renderTrainingNoticeEmail
 });
 function baseLayout({
   title,
@@ -2833,6 +3096,124 @@ function renderProfileUpdateEmail({
     actionButton: { label: "View My Profile", url: actionUrl }
   });
 }
+function escapeHtml(str2) {
+  return str2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+function renderTrainingNoticeEmail({
+  nurseName,
+  noticeKind,
+  trainingTitle,
+  dateRangeStr,
+  timeStr,
+  venue,
+  instructions,
+  actionUrl
+}) {
+  const safeTitle = escapeHtml(trainingTitle);
+  const safeName = escapeHtml(nurseName);
+  const safeDates = escapeHtml(dateRangeStr);
+  const safeTime = timeStr ? escapeHtml(timeStr) : "Time not specified";
+  const safeVenue = venue ? escapeHtml(venue) : null;
+  const safeInstructions = instructions ? escapeHtml(instructions) : null;
+  let badgeClass = "badge-info";
+  let badgeLabel = "Training Assignment";
+  let leadText = `You have been assigned to <strong>${safeTitle}</strong>.`;
+  if (noticeKind === "rescheduled") {
+    badgeClass = "badge-warning";
+    badgeLabel = "Schedule Change";
+    leadText = `The schedule for <strong>${safeTitle}</strong> has been updated. Attendance confirmation is required for the new schedule.`;
+  } else if (noticeKind === "cancelled") {
+    badgeClass = "badge-urgent";
+    badgeLabel = "Training Cancelled";
+    leadText = `The training assignment for <strong>${safeTitle}</strong> has been cancelled. Attendance is no longer required.`;
+  }
+  const content = `
+    <div style="margin-bottom: 16px;">
+      <span class="${badgeClass}">${badgeLabel}</span>
+    </div>
+    <h2 style="margin: 0 0 12px 0; font-size: 18px; color: #0f172a;">Hello, ${safeName}</h2>
+    <p style="margin: 0 0 16px 0; color: #334155;">
+      ${leadText}
+    </p>
+    <div class="card-box">
+      <table style="width: 100%; font-size: 13px; color: #334155;">
+        <tr><td style="padding: 4px 0; font-weight: 600; width: 120px;">Training:</td><td>${safeTitle}</td></tr>
+        <tr><td style="padding: 4px 0; font-weight: 600;">Dates:</td><td>${safeDates}</td></tr>
+        <tr><td style="padding: 4px 0; font-weight: 600;">Time:</td><td>${safeTime}</td></tr>
+        ${safeVenue ? `<tr><td style="padding: 4px 0; font-weight: 600;">Venue:</td><td>${safeVenue}</td></tr>` : ""}
+        ${safeInstructions ? `<tr><td style="padding: 4px 0; font-weight: 600;">Instructions:</td><td>${safeInstructions}</td></tr>` : ""}
+      </table>
+    </div>
+    ${noticeKind !== "cancelled" ? `<p style="margin: 16px 0 0 0; font-size: 13px; color: #64748b;">
+            Please visit your staff training calendar to confirm attendance or notify your supervisor if you cannot attend.
+          </p>` : `<p style="margin: 16px 0 0 0; font-size: 13px; color: #64748b;">
+            This event has been removed from your active requirements.
+          </p>`}
+  `;
+  return baseLayout({
+    title: `${badgeLabel}: ${safeTitle}`,
+    preheader: `${badgeLabel} notice for ${safeTitle}`,
+    contentHtml: content,
+    actionButton: { label: "View in Staff Calendar", url: actionUrl }
+  });
+}
+function renderTrainingMilestoneEmail({
+  nurseName,
+  trainingTitle,
+  dateRangeStr,
+  timeStr,
+  venue,
+  instructions,
+  daysRemaining,
+  isTodayOrTomorrow,
+  actionUrl
+}) {
+  const safeTitle = escapeHtml(trainingTitle);
+  const safeName = escapeHtml(nurseName);
+  const safeDates = escapeHtml(dateRangeStr);
+  const safeTime = timeStr ? escapeHtml(timeStr) : "Time not specified";
+  const safeVenue = venue ? escapeHtml(venue) : null;
+  const safeInstructions = instructions ? escapeHtml(instructions) : null;
+  let badgeClass = "badge-info";
+  let label = `Upcoming Training: ${daysRemaining} Days`;
+  if (isTodayOrTomorrow === "today" || daysRemaining <= 0) {
+    badgeClass = "badge-urgent";
+    label = "Training Today";
+  } else if (isTodayOrTomorrow === "tomorrow" || daysRemaining === 1) {
+    badgeClass = "badge-warning";
+    label = "Training Tomorrow";
+  } else if (daysRemaining <= 7) {
+    badgeClass = "badge-warning";
+    label = `Training in ${daysRemaining} Days`;
+  }
+  const content = `
+    <div style="margin-bottom: 16px;">
+      <span class="${badgeClass}">${label}</span>
+    </div>
+    <h2 style="margin: 0 0 12px 0; font-size: 18px; color: #0f172a;">Hello, ${safeName}</h2>
+    <p style="margin: 0 0 16px 0; color: #334155;">
+      This is a reminder for your assigned training: <strong>${safeTitle}</strong>.
+    </p>
+    <div class="card-box">
+      <table style="width: 100%; font-size: 13px; color: #334155;">
+        <tr><td style="padding: 4px 0; font-weight: 600; width: 120px;">Training:</td><td>${safeTitle}</td></tr>
+        <tr><td style="padding: 4px 0; font-weight: 600;">Dates:</td><td>${safeDates}</td></tr>
+        <tr><td style="padding: 4px 0; font-weight: 600;">Time:</td><td>${safeTime}</td></tr>
+        ${safeVenue ? `<tr><td style="padding: 4px 0; font-weight: 600;">Venue:</td><td>${safeVenue}</td></tr>` : ""}
+        ${safeInstructions ? `<tr><td style="padding: 4px 0; font-weight: 600;">Instructions:</td><td>${safeInstructions}</td></tr>` : ""}
+      </table>
+    </div>
+    <p style="margin: 16px 0 0 0; font-size: 13px; color: #64748b;">
+      Please ensure your attendance is confirmed in your staff portal. If you cannot attend, submit your reason promptly so your unit supervisor can adjust coverage.
+    </p>
+  `;
+  return baseLayout({
+    title: `Reminder: ${safeTitle} (${label})`,
+    preheader: `Reminder: ${safeTitle} starts soon`,
+    contentHtml: content,
+    actionButton: { label: "View in Staff Calendar", url: actionUrl }
+  });
+}
 function renderDirectNoticeEmail({
   nurseName,
   subject,
@@ -2862,8 +3243,512 @@ var init_templates = __esm({
   }
 });
 
+// server/trainingReminders.ts
+import { eq as eq2, and as and2, lte as lte2, isNull as isNull2, sql as sql3, inArray as inArray2, or as or2 } from "drizzle-orm";
+function getManilaTodayKey() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(/* @__PURE__ */ new Date());
+}
+function parseDateKey(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+function diffCalendarDays(dateStr2, dateStr1) {
+  const d1 = parseDateKey(dateStr1);
+  const d2 = parseDateKey(dateStr2);
+  const msPerDay = 864e5;
+  return Math.round((d2.getTime() - d1.getTime()) / msPerDay);
+}
+function addCalendarDays(dateStr, days) {
+  const d = parseDateKey(dateStr);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+async function resolveTrainingSchedule(assignmentId) {
+  const db = await getDb();
+  if (db) {
+    const rows = await db.select({
+      assignment: nurseTrainings,
+      event: trainingEvents,
+      catalog: trainingCatalog
+    }).from(nurseTrainings).leftJoin(trainingEvents, eq2(trainingEvents.id, nurseTrainings.eventId)).leftJoin(trainingCatalog, eq2(trainingCatalog.id, nurseTrainings.trainingId)).where(eq2(nurseTrainings.id, assignmentId)).limit(1);
+    if (rows.length === 0) return null;
+    const { assignment, event, catalog } = rows[0];
+    let startDateStr2 = "";
+    let endDateStr2 = "";
+    let startTime2 = null;
+    let endTime2 = null;
+    let venue2 = null;
+    if (event) {
+      startDateStr2 = event.startDate ? String(event.startDate).slice(0, 10) : "";
+      endDateStr2 = event.endDate ? String(event.endDate).slice(0, 10) : startDateStr2;
+      startTime2 = event.startTime || null;
+      endTime2 = event.endTime || null;
+      venue2 = event.venue || null;
+    } else if (assignment.scheduledDate) {
+      startDateStr2 = String(assignment.scheduledDate).slice(0, 10);
+      endDateStr2 = startDateStr2;
+    } else if (assignment.completionDate) {
+      startDateStr2 = String(assignment.completionDate).slice(0, 10);
+      endDateStr2 = startDateStr2;
+    }
+    const trainingName2 = catalog?.name || "Assigned Training";
+    return {
+      assignmentId: assignment.id,
+      nurseId: assignment.nurseId,
+      scheduleVersion: assignment.scheduleVersion ?? 1,
+      status: assignment.status,
+      trainingId: assignment.trainingId,
+      trainingName: trainingName2,
+      startDateStr: startDateStr2,
+      endDateStr: endDateStr2,
+      startTime: startTime2,
+      endTime: endTime2,
+      venue: venue2,
+      remarks: assignment.remarks || event?.remarks || null,
+      evidenceRequired: Boolean(assignment.evidenceRequired),
+      evidenceStatus: assignment.evidenceStatus || "None",
+      staffResponse: assignment.staffResponse || "Pending",
+      staffResponseReason: assignment.staffResponseReason || null,
+      attendanceOutcome: assignment.attendanceOutcome || "not_recorded"
+    };
+  }
+  const sqlite = getSqliteDb();
+  const row = sqlite.prepare(
+    `SELECT t.*, e.startDate as evStart, e.endDate as evEnd, e.startTime as evStartTime,
+              e.endTime as evEndTime, e.venue as evVenue, e.remarks as evRemarks,
+              c.name as catalogName
+       FROM nurseTrainings t
+       LEFT JOIN trainingEvents e ON e.id = t.eventId
+       LEFT JOIN trainingCatalog c ON c.id = t.trainingId
+       WHERE t.id = ?`
+  ).get(assignmentId);
+  if (!row) return null;
+  let startDateStr = "";
+  let endDateStr = "";
+  let startTime = null;
+  let endTime = null;
+  let venue = null;
+  if (row.eventId) {
+    startDateStr = row.evStart ? String(row.evStart).slice(0, 10) : "";
+    endDateStr = row.evEnd ? String(row.evEnd).slice(0, 10) : startDateStr;
+    startTime = row.evStartTime || null;
+    endTime = row.evEndTime || null;
+    venue = row.evVenue || null;
+  } else if (row.scheduledDate) {
+    startDateStr = String(row.scheduledDate).slice(0, 10);
+    endDateStr = startDateStr;
+  } else if (row.completionDate) {
+    startDateStr = String(row.completionDate).slice(0, 10);
+    endDateStr = startDateStr;
+  }
+  const trainingName = row.catalogName || "Assigned Training";
+  return {
+    assignmentId: row.id,
+    nurseId: row.nurseId,
+    scheduleVersion: row.scheduleVersion ?? 1,
+    status: row.status,
+    trainingId: row.trainingId,
+    trainingName,
+    startDateStr,
+    endDateStr,
+    startTime,
+    endTime,
+    venue,
+    remarks: row.remarks || row.evRemarks || null,
+    evidenceRequired: Boolean(row.evidenceRequired),
+    evidenceStatus: row.evidenceStatus || "None",
+    staffResponse: row.staffResponse || "Pending",
+    staffResponseReason: row.staffResponseReason || null,
+    attendanceOutcome: row.attendanceOutcome || "not_recorded"
+  };
+}
+async function checkTrainingConflicts(nurseId, startDateStr, endDateStr, startTime, endTime, excludeAssignmentId) {
+  const normEnd = endDateStr || startDateStr;
+  const db = await getDb();
+  let existingAssignments = [];
+  if (db) {
+    const rows = await db.select({
+      id: nurseTrainings.id,
+      eventId: nurseTrainings.eventId,
+      scheduledDate: nurseTrainings.scheduledDate,
+      status: nurseTrainings.status
+    }).from(nurseTrainings).where(and2(eq2(nurseTrainings.nurseId, nurseId), eq2(nurseTrainings.status, "Scheduled")));
+    existingAssignments = rows;
+  } else {
+    const sqlite = getSqliteDb();
+    existingAssignments = sqlite.prepare("SELECT id, eventId, scheduledDate, status FROM nurseTrainings WHERE nurseId = ? AND status = 'Scheduled'").all(nurseId);
+  }
+  const conflicts = [];
+  let warningOnly = false;
+  for (const assign of existingAssignments) {
+    if (excludeAssignmentId && assign.id === excludeAssignmentId) continue;
+    const resolved = await resolveTrainingSchedule(assign.id);
+    if (!resolved || !resolved.startDateStr) continue;
+    const existingStart = resolved.startDateStr;
+    const existingEnd = resolved.endDateStr || existingStart;
+    const datesOverlap = startDateStr <= existingEnd && normEnd >= existingStart;
+    if (!datesOverlap) continue;
+    const hasTimes = Boolean(startTime && endTime && resolved.startTime && resolved.endTime);
+    if (hasTimes) {
+      const t1Start = startTime;
+      const t1End = endTime;
+      const t2Start = resolved.startTime;
+      const t2End = resolved.endTime;
+      const timesOverlap = t1Start < t2End && t2Start < t1End;
+      if (timesOverlap) {
+        conflicts.push({
+          id: resolved.assignmentId,
+          trainingName: resolved.trainingName,
+          dateStr: `${existingStart}${existingEnd !== existingStart ? ` to ${existingEnd}` : ""}`,
+          timeStr: `${t2Start} - ${t2End}`,
+          reason: `Exact time overlap with ${resolved.trainingName} (${t2Start} - ${t2End})`
+        });
+      }
+    } else {
+      warningOnly = true;
+      conflicts.push({
+        id: resolved.assignmentId,
+        trainingName: resolved.trainingName,
+        dateStr: `${existingStart}${existingEnd !== existingStart ? ` to ${existingEnd}` : ""}`,
+        timeStr: resolved.startTime ? `${resolved.startTime}${resolved.endTime ? ` - ${resolved.endTime}` : ""}` : "Unspecified time",
+        reason: `Potential same-day overlap with ${resolved.trainingName}`
+      });
+    }
+  }
+  return {
+    hasConflict: conflicts.length > 0,
+    warningOnly: conflicts.length > 0 && warningOnly && !conflicts.some((c) => c.reason.includes("Exact time overlap")),
+    conflicts
+  };
+}
+async function enqueueTrainingNotice(opts) {
+  const db = await getDb();
+  const today = getManilaTodayKey();
+  if (db) {
+    const [item] = await db.insert(trainingOutbox).values({
+      assignmentId: opts.assignmentId,
+      scheduleVersion: opts.scheduleVersion,
+      noticeKind: opts.noticeKind,
+      thresholdDays: null,
+      dueDate: null,
+      recipientNurseId: opts.recipientNurseId,
+      status: "pending",
+      attempts: 0
+    }).onConflictDoNothing().returning();
+    const resolved2 = await resolveTrainingSchedule(opts.assignmentId);
+    const title2 = opts.noticeKind === "rescheduled" ? `Schedule Change: ${resolved2?.trainingName || "Training"}` : opts.noticeKind === "cancelled" ? `Training Cancelled: ${resolved2?.trainingName || "Training"}` : `New Training Assignment: ${resolved2?.trainingName || "Training"}`;
+    const message2 = opts.noticeKind === "cancelled" ? `The training assignment for ${resolved2?.trainingName} has been cancelled. Attendance is no longer required.` : opts.noticeKind === "rescheduled" ? `The schedule for ${resolved2?.trainingName} was updated to ${resolved2?.startDateStr}${resolved2?.startTime ? ` at ${resolved2?.startTime}` : ""}. Please confirm your attendance.` : `You have been assigned to ${resolved2?.trainingName} on ${resolved2?.startDateStr}${resolved2?.startTime ? ` at ${resolved2?.startTime}` : ""}.`;
+    await db.insert(trainingActivity).values({
+      nurseId: opts.recipientNurseId,
+      assignmentId: opts.assignmentId,
+      activityType: opts.noticeKind,
+      title: title2,
+      message: message2
+    });
+    return item;
+  }
+  const sqlite = getSqliteDb();
+  sqlite.prepare(
+    `INSERT OR IGNORE INTO trainingOutbox
+       (assignmentId, scheduleVersion, noticeKind, thresholdDays, dueDate, recipientNurseId, status, attempts)
+       VALUES (?, ?, ?, NULL, NULL, ?, 'pending', 0)`
+  ).run(opts.assignmentId, opts.scheduleVersion, opts.noticeKind, opts.recipientNurseId);
+  const resolved = await resolveTrainingSchedule(opts.assignmentId);
+  const title = opts.noticeKind === "rescheduled" ? `Schedule Change: ${resolved?.trainingName || "Training"}` : opts.noticeKind === "cancelled" ? `Training Cancelled: ${resolved?.trainingName || "Training"}` : `New Training Assignment: ${resolved?.trainingName || "Training"}`;
+  const message = opts.noticeKind === "cancelled" ? `The training assignment for ${resolved?.trainingName} has been cancelled. Attendance is no longer required.` : opts.noticeKind === "rescheduled" ? `The schedule for ${resolved?.trainingName} was updated to ${resolved?.startDateStr}${resolved?.startTime ? ` at ${resolved?.startTime}` : ""}. Please confirm your attendance.` : `You have been assigned to ${resolved?.trainingName} on ${resolved?.startDateStr}${resolved?.startTime ? ` at ${resolved?.startTime}` : ""}.`;
+  sqlite.prepare(
+    `INSERT INTO trainingActivity (nurseId, assignmentId, activityType, title, message)
+       VALUES (?, ?, ?, ?, ?)`
+  ).run(opts.recipientNurseId, opts.assignmentId, opts.noticeKind, title, message);
+  return sqlite.prepare("SELECT * FROM trainingOutbox WHERE assignmentId = ? AND scheduleVersion = ? AND noticeKind = ?").get(opts.assignmentId, opts.scheduleVersion, opts.noticeKind);
+}
+async function createMilestonesForAssignment(opts) {
+  const today = getManilaTodayKey();
+  const thresholds = [14, 7, 1];
+  const db = await getDb();
+  const sqlite = db ? null : getSqliteDb();
+  for (const t2 of thresholds) {
+    const dueDate = addCalendarDays(opts.startDateStr, -t2);
+    if (dueDate < today) {
+      continue;
+    }
+    const noticeKind = `reminder_${t2}d`;
+    if (db) {
+      await db.insert(trainingOutbox).values({
+        assignmentId: opts.assignmentId,
+        scheduleVersion: opts.scheduleVersion,
+        noticeKind,
+        thresholdDays: t2,
+        dueDate: parseDateKey(dueDate),
+        recipientNurseId: opts.recipientNurseId,
+        status: "pending",
+        attempts: 0
+      }).onConflictDoNothing();
+    } else if (sqlite) {
+      sqlite.prepare(
+        `INSERT OR IGNORE INTO trainingOutbox
+           (assignmentId, scheduleVersion, noticeKind, thresholdDays, dueDate, recipientNurseId, status, attempts)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', 0)`
+      ).run(opts.assignmentId, opts.scheduleVersion, noticeKind, t2, dueDate, opts.recipientNurseId);
+    }
+  }
+}
+async function invalidatePendingOutboxJobs(assignmentId, currentScheduleVersion) {
+  const db = await getDb();
+  if (db) {
+    if (currentScheduleVersion != null) {
+      await db.update(trainingOutbox).set({ status: "superseded", updatedAt: /* @__PURE__ */ new Date() }).where(
+        and2(
+          eq2(trainingOutbox.assignmentId, assignmentId),
+          sql3`${trainingOutbox.scheduleVersion} < ${currentScheduleVersion}`,
+          eq2(trainingOutbox.status, "pending")
+        )
+      );
+    } else {
+      await db.update(trainingOutbox).set({ status: "superseded", updatedAt: /* @__PURE__ */ new Date() }).where(and2(eq2(trainingOutbox.assignmentId, assignmentId), eq2(trainingOutbox.status, "pending")));
+    }
+    return;
+  }
+  const sqlite = getSqliteDb();
+  if (currentScheduleVersion != null) {
+    sqlite.prepare("UPDATE trainingOutbox SET status = 'superseded', updatedAt = CURRENT_TIMESTAMP WHERE assignmentId = ? AND scheduleVersion < ? AND status = 'pending'").run(assignmentId, currentScheduleVersion);
+  } else {
+    sqlite.prepare("UPDATE trainingOutbox SET status = 'superseded', updatedAt = CURRENT_TIMESTAMP WHERE assignmentId = ? AND status = 'pending'").run(assignmentId);
+  }
+}
+async function dispatchSingleOutboxItem(itemId) {
+  const db = await getDb();
+  let item = null;
+  if (db) {
+    const rows = await db.select().from(trainingOutbox).where(eq2(trainingOutbox.id, itemId)).limit(1);
+    if (rows.length > 0) item = rows[0];
+  } else {
+    const sqlite = getSqliteDb();
+    item = sqlite.prepare("SELECT * FROM trainingOutbox WHERE id = ?").get(itemId);
+  }
+  if (!item || item.status !== "pending") {
+    return { ok: false, status: item?.status || "not_found" };
+  }
+  return processOutboxItem(item);
+}
+async function drainTrainingOutbox(limit = 25) {
+  const today = getManilaTodayKey();
+  const db = await getDb();
+  let itemsToProcess = [];
+  if (db) {
+    const rows = await db.select().from(trainingOutbox).where(
+      and2(
+        eq2(trainingOutbox.status, "pending"),
+        or2(isNull2(trainingOutbox.dueDate), lte2(trainingOutbox.dueDate, parseDateKey(today)))
+      )
+    ).limit(limit);
+    if (rows.length === 0) {
+      return { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0, superseded: 0 };
+    }
+    const itemIds = rows.map((r) => r.id);
+    await db.update(trainingOutbox).set({ status: "claimed", claimedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(inArray2(trainingOutbox.id, itemIds));
+    itemsToProcess = rows;
+  } else {
+    const sqlite = getSqliteDb();
+    const rows = sqlite.prepare(
+      `SELECT * FROM trainingOutbox
+         WHERE status = 'pending' AND (dueDate IS NULL OR dueDate <= ?)
+         LIMIT ?`
+    ).all(today, limit);
+    if (rows.length === 0) {
+      return { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0, superseded: 0 };
+    }
+    const claimStmt = sqlite.prepare("UPDATE trainingOutbox SET status = 'claimed', claimedAt = CURRENT_TIMESTAMP WHERE id = ?");
+    for (const r of rows) {
+      claimStmt.run(r.id);
+    }
+    itemsToProcess = rows;
+  }
+  let processed = 0;
+  let sent = 0;
+  let mockSent = 0;
+  let failed = 0;
+  let skipped = 0;
+  let superseded = 0;
+  for (const item of itemsToProcess) {
+    processed++;
+    const res = await processOutboxItem(item);
+    if (res.status === "sent") sent++;
+    else if (res.status === "mock_sent") mockSent++;
+    else if (res.status === "failed") failed++;
+    else if (res.status === "skipped") skipped++;
+    else if (res.status === "superseded") superseded++;
+  }
+  return { processed, sent, mockSent, failed, skipped, superseded };
+}
+async function processOutboxItem(item) {
+  const db = await getDb();
+  const sqlite = db ? null : getSqliteDb();
+  const updateOutbox = async (status, providerMsgId, errorDetail) => {
+    if (db) {
+      await db.update(trainingOutbox).set({
+        status,
+        providerMessageId: providerMsgId ?? null,
+        errorDetail: errorDetail ?? null,
+        lastAttemptAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq2(trainingOutbox.id, item.id));
+    } else if (sqlite) {
+      sqlite.prepare(
+        `UPDATE trainingOutbox
+           SET status = ?, providerMessageId = ?, errorDetail = ?, lastAttemptAt = CURRENT_TIMESTAMP, updatedAt = CURRENT_TIMESTAMP
+           WHERE id = ?`
+      ).run(status, providerMsgId ?? null, errorDetail ?? null, item.id);
+    }
+  };
+  const resolved = await resolveTrainingSchedule(item.assignmentId);
+  if (!resolved) {
+    await updateOutbox("superseded", null, "Assignment no longer exists");
+    return { ok: false, status: "superseded" };
+  }
+  if (resolved.scheduleVersion !== item.scheduleVersion) {
+    await updateOutbox("superseded", null, `Assignment moved to version ${resolved.scheduleVersion}`);
+    return { ok: false, status: "superseded" };
+  }
+  if (resolved.status !== "Scheduled" && item.noticeKind.startsWith("reminder_")) {
+    await updateOutbox("superseded", null, `Training status is ${resolved.status}`);
+    return { ok: false, status: "superseded" };
+  }
+  let nurseRow = null;
+  if (db) {
+    const rows = await db.select().from(nurses).where(eq2(nurses.id, item.recipientNurseId)).limit(1);
+    if (rows.length > 0) nurseRow = rows[0];
+  } else if (sqlite) {
+    nurseRow = sqlite.prepare("SELECT * FROM nurses WHERE id = ?").get(item.recipientNurseId);
+  }
+  if (!nurseRow || nurseRow.archivedAt) {
+    await updateOutbox("skipped", null, "Nurse profile not found or archived");
+    return { ok: false, status: "skipped", error: "Nurse archived" };
+  }
+  const recipientEmail = nurseRow.accountEmail;
+  if (!recipientEmail) {
+    await updateOutbox("skipped", null, "Missing saved account email");
+    return { ok: false, status: "skipped", error: "Missing email" };
+  }
+  const fullName = nurseFullName(nurseRow);
+  const actionUrl = `${APP_URL}/me/calendar`;
+  const dateRangeStr = resolved.startDateStr === resolved.endDateStr || !resolved.endDateStr ? resolved.startDateStr : `${resolved.startDateStr} to ${resolved.endDateStr}`;
+  let subject = "";
+  let html = "";
+  if (item.noticeKind === "assigned" || item.noticeKind === "rescheduled" || item.noticeKind === "cancelled") {
+    const kind = item.noticeKind;
+    subject = kind === "rescheduled" ? `Schedule Change: ${resolved.trainingName}` : kind === "cancelled" ? `Training Cancelled: ${resolved.trainingName}` : `Training Assignment: ${resolved.trainingName}`;
+    html = renderTrainingNoticeEmail({
+      nurseName: fullName,
+      noticeKind: kind,
+      trainingTitle: resolved.trainingName,
+      dateRangeStr,
+      timeStr: resolved.startTime ? `${resolved.startTime}${resolved.endTime ? ` - ${resolved.endTime}` : ""}` : null,
+      venue: resolved.venue,
+      instructions: resolved.remarks,
+      actionUrl
+    });
+  } else {
+    const today = getManilaTodayKey();
+    const daysRemaining = diffCalendarDays(resolved.startDateStr, today);
+    const isTodayOrTomorrow = daysRemaining <= 0 ? "today" : daysRemaining === 1 ? "tomorrow" : null;
+    subject = `Reminder: ${resolved.trainingName} (${daysRemaining <= 0 ? "Today" : daysRemaining === 1 ? "Tomorrow" : `in ${daysRemaining} days`})`;
+    html = renderTrainingMilestoneEmail({
+      nurseName: fullName,
+      trainingTitle: resolved.trainingName,
+      dateRangeStr,
+      timeStr: resolved.startTime ? `${resolved.startTime}${resolved.endTime ? ` - ${resolved.endTime}` : ""}` : null,
+      venue: resolved.venue,
+      instructions: resolved.remarks,
+      daysRemaining,
+      isTodayOrTomorrow,
+      actionUrl
+    });
+    const actTitle = `Upcoming Training: ${resolved.trainingName}`;
+    const actMessage = `Reminder: ${resolved.trainingName} is scheduled on ${dateRangeStr}${resolved.startTime ? ` at ${resolved.startTime}` : ""}.`;
+    if (db) {
+      await db.insert(trainingActivity).values({
+        nurseId: item.recipientNurseId,
+        assignmentId: item.assignmentId,
+        activityType: item.noticeKind,
+        title: actTitle,
+        message: actMessage
+      });
+    } else if (sqlite) {
+      sqlite.prepare("INSERT INTO trainingActivity (nurseId, assignmentId, activityType, title, message) VALUES (?, ?, ?, ?, ?)").run(item.recipientNurseId, item.assignmentId, item.noticeKind, actTitle, actMessage);
+    }
+  }
+  const sendRes = await sendEmail({
+    to: recipientEmail,
+    subject,
+    html,
+    nurseId: item.recipientNurseId,
+    emailType: "training_reminder",
+    referenceId: item.assignmentId,
+    thresholdKey: item.noticeKind
+  });
+  if (sendRes.status === "sent" || sendRes.status === "mock_sent") {
+    await updateOutbox(sendRes.status, sendRes.messageId || null, null);
+    return { ok: true, status: sendRes.status };
+  } else {
+    const newAttempts = (item.attempts ?? 0) + 1;
+    const finalStatus = newAttempts >= 3 ? "failed" : "pending";
+    if (db) {
+      await db.update(trainingOutbox).set({
+        status: finalStatus,
+        attempts: newAttempts,
+        lastAttemptAt: /* @__PURE__ */ new Date(),
+        errorDetail: sendRes.error || "Email delivery failed",
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq2(trainingOutbox.id, item.id));
+    } else if (sqlite) {
+      sqlite.prepare(
+        `UPDATE trainingOutbox
+           SET status = ?, attempts = ?, lastAttemptAt = CURRENT_TIMESTAMP, errorDetail = ?, updatedAt = CURRENT_TIMESTAMP
+           WHERE id = ?`
+      ).run(finalStatus, newAttempts, sendRes.error || "Email delivery failed", item.id);
+    }
+    return { ok: false, status: finalStatus, error: sendRes.error };
+  }
+}
+async function retryFailedOutboxItem(itemId) {
+  const db = await getDb();
+  let item = null;
+  if (db) {
+    const rows = await db.select().from(trainingOutbox).where(eq2(trainingOutbox.id, itemId)).limit(1);
+    if (rows.length > 0) item = rows[0];
+  } else {
+    const sqlite = getSqliteDb();
+    item = sqlite.prepare("SELECT * FROM trainingOutbox WHERE id = ?").get(itemId);
+  }
+  if (!item) throw new Error("Outbox item not found");
+  if (item.status !== "failed" && item.status !== "skipped") {
+    throw new Error(`Cannot retry item with status ${item.status}`);
+  }
+  if (db) {
+    await db.update(trainingOutbox).set({ status: "pending", attempts: 0, errorDetail: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq2(trainingOutbox.id, itemId));
+  } else {
+    const sqlite = getSqliteDb();
+    sqlite.prepare("UPDATE trainingOutbox SET status = 'pending', attempts = 0, errorDetail = NULL, updatedAt = CURRENT_TIMESTAMP WHERE id = ?").run(itemId);
+  }
+  return dispatchSingleOutboxItem(itemId);
+}
+var APP_URL;
+var init_trainingReminders = __esm({
+  "server/trainingReminders.ts"() {
+    "use strict";
+    init_db();
+    init_localDb();
+    init_schema();
+    init_nursetrack();
+    init_service();
+    init_templates();
+    APP_URL = process.env.APP_URL || "http://localhost:3000";
+  }
+});
+
 // server/reminders.ts
-import { eq as eq5, isNull as isNull5, sql as sql6 } from "drizzle-orm";
+import { eq as eq6, isNull as isNull6, sql as sql7 } from "drizzle-orm";
 async function fetchActiveCredentials() {
   const db = await getDb();
   if (!db) return [];
@@ -2880,7 +3765,7 @@ async function fetchActiveCredentials() {
     suffix: nurses.suffix,
     archivedAt: nurses.archivedAt,
     currentAreaId: nurses.currentAreaId
-  }).from(nurseCredentials).innerJoin(nurses, eq5(nurses.id, nurseCredentials.nurseId)).where(isNull5(nurses.archivedAt));
+  }).from(nurseCredentials).innerJoin(nurses, eq6(nurses.id, nurseCredentials.nurseId)).where(isNull6(nurses.archivedAt));
   return rows.map((r) => ({
     id: Number(r.id),
     nurseId: Number(r.nurseId),
@@ -2949,7 +3834,7 @@ async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
   if (expiredIds.length > 0) {
     const db2 = await getDb();
     if (db2) {
-      await db2.update(licenseReminders).set({ status: "expired" }).where(sql6`${licenseReminders.credentialId} IN (${sql6.join(expiredIds.map((i) => sql6`${i}`), sql6`, `)})`);
+      await db2.update(licenseReminders).set({ status: "expired" }).where(sql7`${licenseReminders.credentialId} IN (${sql7.join(expiredIds.map((i) => sql7`${i}`), sql7`, `)})`);
     }
   }
   const existingNotifications = await listNotifications(500);
@@ -3014,7 +3899,7 @@ __export(dispatcher_exports, {
   runLicenseExpiryEmailPass: () => runLicenseExpiryEmailPass,
   runUpcomingSeminarEmailPass: () => runUpcomingSeminarEmailPass
 });
-import { eq as eq8, and as and6, isNull as isNull6, isNotNull as isNotNull2, gte as gte2, lte as lte2, sql as sql8 } from "drizzle-orm";
+import { eq as eq9, and as and7, isNull as isNull7, isNotNull as isNotNull2, gte as gte2, lte as lte3, sql as sql9 } from "drizzle-orm";
 async function fetchLinkedNursesWithExpiringCredentials() {
   const db = await getDb();
   if (db) {
@@ -3031,9 +3916,9 @@ async function fetchLinkedNursesWithExpiringCredentials() {
       expiryDate: nurseCredentials.expiryDate,
       renewalCycleKey: nurseCredentials.renewalCycleKey,
       typeName: credentialTypes.name
-    }).from(nurses).innerJoin(nurseCredentials, eq8(nurseCredentials.nurseId, nurses.id)).leftJoin(credentialTypes, eq8(credentialTypes.id, nurseCredentials.credentialTypeId)).where(
-      and6(
-        isNull6(nurses.archivedAt),
+    }).from(nurses).innerJoin(nurseCredentials, eq9(nurseCredentials.nurseId, nurses.id)).leftJoin(credentialTypes, eq9(credentialTypes.id, nurseCredentials.credentialTypeId)).where(
+      and7(
+        isNull7(nurses.archivedAt),
         isNotNull2(nurses.linkedUserId),
         isNotNull2(nurses.accountEmail)
       )
@@ -3107,7 +3992,7 @@ async function runLicenseExpiryEmailPass(today = todayDate()) {
         expiryDateStr: record.expiryDate,
         daysRemaining: daysLeft,
         thresholdKey: thresh.key,
-        actionUrl: `${APP_URL}/me`
+        actionUrl: `${APP_URL2}/me`
       });
       const subject = daysLeft <= 0 ? `[URGENT] License Expired: ${record.typeName} (${record.licenseNumber})` : daysLeft <= 30 ? `[Action Required] ${record.typeName} expires in ${daysLeft} days` : daysLeft <= 90 ? `Renewal Notice: ${record.typeName} expires in ${daysLeft} days` : daysLeft <= 180 ? `6-Month Renewal Notice: ${record.typeName} expires in ${daysLeft} days` : `1-Year Renewal Notice: ${record.typeName} expires in ${daysLeft} days`;
       const res = await sendEmail({
@@ -3143,7 +4028,7 @@ async function runUpcomingSeminarEmailPass() {
       startTime: trainingEvents.startTime,
       venue: trainingEvents.venue,
       trainingName: trainingCatalog.name
-    }).from(trainingEvents).innerJoin(trainingCatalog, eq8(trainingCatalog.id, trainingEvents.trainingId)).where(and6(gte2(trainingEvents.startDate, sql8`${in1Day}::date`), lte2(trainingEvents.startDate, sql8`${in3Days}::date`)));
+    }).from(trainingEvents).innerJoin(trainingCatalog, eq9(trainingCatalog.id, trainingEvents.trainingId)).where(and7(gte2(trainingEvents.startDate, sql9`${in1Day}::date`), lte3(trainingEvents.startDate, sql9`${in3Days}::date`)));
     upcomingEvents = events.map((e) => ({
       id: e.id,
       startDate: dateKey(e.startDate),
@@ -3175,10 +4060,10 @@ async function runUpcomingSeminarEmailPass() {
         lastName: nurses.lastName,
         suffix: nurses.suffix,
         accountEmail: nurses.accountEmail
-      }).from(nurseTrainings).innerJoin(nurses, eq8(nurses.id, nurseTrainings.nurseId)).where(
-        and6(
-          eq8(nurseTrainings.eventId, ev.id),
-          isNull6(nurses.archivedAt),
+      }).from(nurseTrainings).innerJoin(nurses, eq9(nurses.id, nurseTrainings.nurseId)).where(
+        and7(
+          eq9(nurseTrainings.eventId, ev.id),
+          isNull7(nurses.archivedAt),
           isNotNull2(nurses.linkedUserId),
           isNotNull2(nurses.accountEmail)
         )
@@ -3210,7 +4095,7 @@ async function runUpcomingSeminarEmailPass() {
         seminarTitle: ev.trainingName,
         scheduledDateStr: `${ev.startDate}${ev.startTime ? ` at ${ev.startTime}` : ""}`,
         venue: ev.venue,
-        actionUrl: `${APP_URL}/me`
+        actionUrl: `${APP_URL2}/me`
       });
       const res = await sendEmail({
         to: att.accountEmail,
@@ -3232,7 +4117,7 @@ async function runUpcomingSeminarEmailPass() {
   }
   return { processed, sent, mockSent, failed, skipped };
 }
-var EXPIRY_THRESHOLDS, APP_URL;
+var EXPIRY_THRESHOLDS, APP_URL2;
 var init_dispatcher = __esm({
   "server/email/dispatcher.ts"() {
     "use strict";
@@ -3251,7 +4136,7 @@ var init_dispatcher = __esm({
       { days: 7, key: "7d" },
       { days: 0, key: "expired" }
     ];
-    APP_URL = process.env.APP_URL || "http://localhost:3000";
+    APP_URL2 = process.env.APP_URL || "http://localhost:3000";
   }
 });
 
@@ -3276,18 +4161,21 @@ async function runDailyReminderJob(dateKey2 = getManilaDateKey()) {
       message: "Reminder job is already running or locked",
       notifications: { created: 0, skippedExisting: 0, expiredCredentials: 0, archivedSkipped: 0 },
       expiryEmails: { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 },
+      trainingOutbox: { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0, superseded: 0 },
       seminarEmails: { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 }
     };
   }
   try {
     const notifications2 = await runDailyReminders(dateKey2);
     const expiryEmails = await runLicenseExpiryEmailPass(dateKey2);
-    const seminarEmails = await runUpcomingSeminarEmailPass();
+    const outboxResult = await drainTrainingOutbox();
+    const seminarEmails = { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 };
     return {
       ok: true,
       dateKey: dateKey2,
       notifications: notifications2,
       expiryEmails,
+      trainingOutbox: outboxResult,
       seminarEmails
     };
   } finally {
@@ -3318,6 +4206,7 @@ var init_scheduled = __esm({
     init_reminders();
     init_dispatcher();
     init_db();
+    init_trainingReminders();
     DAILY_RUN_HOUR = 8;
   }
 });
@@ -4545,6 +5434,7 @@ import { z as z4 } from "zod";
 import { TRPCError as TRPCError4 } from "@trpc/server";
 init_db();
 init_nursetrack();
+init_trainingReminders();
 var nullableDateInput3 = z4.union([z4.date(), z4.string().datetime(), z4.null()]).transform((d) => d === null ? null : d instanceof Date ? d : new Date(d)).optional();
 var trainingsRouter = router({
   // Single round-trip initial load: catalog + records in one call (same enriched shape as listRecords).
@@ -4635,6 +5525,25 @@ var trainingsRouter = router({
     const catById = new Map(catalog.map((t2) => [t2.id, t2]));
     return rows.map((r) => ({ ...r, trainingName: catById.get(r.trainingId)?.name ?? "Unknown" }));
   }),
+  checkConflict: adminProcedure.input(
+    z4.object({
+      nurseId: z4.number(),
+      startDate: z4.string(),
+      endDate: z4.string().optional().nullable(),
+      startTime: z4.string().optional().nullable(),
+      endTime: z4.string().optional().nullable(),
+      excludeAssignmentId: z4.number().optional().nullable()
+    })
+  ).query(async ({ input }) => {
+    return checkTrainingConflicts(
+      input.nurseId,
+      input.startDate,
+      input.endDate,
+      input.startTime,
+      input.endTime,
+      input.excludeAssignmentId
+    );
+  }),
   createRecord: adminProcedure.input(
     z4.object({
       nurseId: z4.number(),
@@ -4650,14 +5559,33 @@ var trainingsRouter = router({
       cpdUnits: z4.number().int().positive().optional(),
       certificateNumber: z4.string().max(64).optional(),
       certificateKey: z4.string().optional(),
-      remarks: z4.string().max(2e3).optional()
+      remarks: z4.string().max(2e3).optional(),
+      conflictOverrideReason: z4.string().max(1e3).optional()
     })
   ).mutation(async ({ ctx, input }) => {
     const nurse = await getNurseById(input.nurseId);
     if (!nurse) throw new TRPCError4({ code: "NOT_FOUND", message: "Nurse not found" });
+    const status = input.status ?? "Scheduled";
+    const scheduledDateStr = input.scheduledDate ? input.scheduledDate.toISOString().slice(0, 10) : null;
+    if (status === "Scheduled" && scheduledDateStr) {
+      const conflictRes = await checkTrainingConflicts(input.nurseId, scheduledDateStr);
+      if (conflictRes.hasConflict && !conflictRes.warningOnly) {
+        if (!input.conflictOverrideReason || input.conflictOverrideReason.trim().length === 0) {
+          throw new TRPCError4({
+            code: "CONFLICT",
+            message: `Scheduling conflict detected with: ${conflictRes.conflicts.map((c) => c.trainingName).join(", ")}. Override reason is required to proceed.`
+          });
+        }
+      }
+    }
     const id = await createNurseTraining({
       ...input,
-      status: input.status ?? "Scheduled"
+      status,
+      scheduleVersion: 1,
+      staffResponse: "Pending",
+      evidenceRequired: true,
+      conflictOverrideReason: input.conflictOverrideReason ?? null,
+      conflictOverrideBy: input.conflictOverrideReason ? ctx.user.id : null
     });
     await logActivity({
       supervisorId: ctx.user.id,
@@ -4667,6 +5595,29 @@ var trainingsRouter = router({
       entityId: id,
       summary: `Training record added for ${nurseFullName(nurse)}`
     });
+    if (status === "Scheduled" && scheduledDateStr) {
+      try {
+        const noticeItem = await enqueueTrainingNotice({
+          assignmentId: id,
+          scheduleVersion: 1,
+          noticeKind: "assigned",
+          recipientNurseId: input.nurseId,
+          actorUserId: ctx.user.id
+        });
+        await createMilestonesForAssignment({
+          assignmentId: id,
+          scheduleVersion: 1,
+          startDateStr: scheduledDateStr,
+          recipientNurseId: input.nurseId
+        });
+        if (noticeItem?.id) {
+          await dispatchSingleOutboxItem(noticeItem.id).catch(() => {
+          });
+        }
+      } catch (noticeErr) {
+        console.warn("[Trainings] Failed to enqueue training notice:", noticeErr);
+      }
+    }
     return { id };
   }),
   updateRecord: adminProcedure.input(
@@ -4681,23 +5632,227 @@ var trainingsRouter = router({
       trainingHours: z4.number().int().positive().optional(),
       cpdUnits: z4.number().int().positive().optional(),
       certificateNumber: z4.string().max(64).optional(),
-      remarks: z4.string().max(2e3).optional()
+      remarks: z4.string().max(2e3).optional(),
+      conflictOverrideReason: z4.string().max(1e3).optional()
     })
   ).mutation(async ({ ctx, input }) => {
     const { id, ...rest } = input;
     const rows = await listNurseTrainings();
     const record = rows.find((r) => r.id === id);
     if (!record) throw new TRPCError4({ code: "NOT_FOUND", message: "Training record not found" });
-    await updateNurseTraining(id, { ...rest });
+    const oldDateStr = record.scheduledDate ? new Date(record.scheduledDate).toISOString().slice(0, 10) : null;
+    const newDateStr = rest.scheduledDate ? rest.scheduledDate.toISOString().slice(0, 10) : oldDateStr;
+    const isReschedule = Boolean(oldDateStr && newDateStr && oldDateStr !== newDateStr);
+    const isCancellation = Boolean(rest.status === "Cancelled" && record.status !== "Cancelled");
+    let newScheduleVersion = record.scheduleVersion ?? 1;
+    const updatePayload = { ...rest };
+    if (isReschedule) {
+      newScheduleVersion += 1;
+      updatePayload.scheduleVersion = newScheduleVersion;
+      updatePayload.staffResponse = "Pending";
+      updatePayload.staffResponseReason = null;
+      updatePayload.staffRespondedAt = null;
+      updatePayload.staffResponseVersion = null;
+    }
+    if (rest.conflictOverrideReason) {
+      updatePayload.conflictOverrideReason = rest.conflictOverrideReason;
+      updatePayload.conflictOverrideBy = ctx.user.id;
+    }
+    await updateNurseTraining(id, updatePayload);
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: record.nurseId,
       actionType: "training.updated",
       entityType: "nurseTraining",
       entityId: id,
-      summary: `Training record #${id} updated`
+      summary: `Training record #${id} updated${isReschedule ? " (rescheduled)" : isCancellation ? " (cancelled)" : ""}`
     });
+    if (isReschedule && newDateStr) {
+      try {
+        await invalidatePendingOutboxJobs(id, newScheduleVersion);
+        const notice = await enqueueTrainingNotice({
+          assignmentId: id,
+          scheduleVersion: newScheduleVersion,
+          noticeKind: "rescheduled",
+          recipientNurseId: record.nurseId,
+          actorUserId: ctx.user.id
+        });
+        await createMilestonesForAssignment({
+          assignmentId: id,
+          scheduleVersion: newScheduleVersion,
+          startDateStr: newDateStr,
+          recipientNurseId: record.nurseId
+        });
+        if (notice?.id) {
+          await dispatchSingleOutboxItem(notice.id).catch(() => {
+          });
+        }
+      } catch (err) {
+        console.warn("[Trainings] Reschedule outbox notice failed:", err);
+      }
+    } else if (isCancellation) {
+      try {
+        await invalidatePendingOutboxJobs(id);
+        const cancelNotice = await enqueueTrainingNotice({
+          assignmentId: id,
+          scheduleVersion: record.scheduleVersion ?? 1,
+          noticeKind: "cancelled",
+          recipientNurseId: record.nurseId,
+          actorUserId: ctx.user.id
+        });
+        if (cancelNotice?.id) {
+          await dispatchSingleOutboxItem(cancelNotice.id).catch(() => {
+          });
+        }
+      } catch (err) {
+        console.warn("[Trainings] Cancellation outbox notice failed:", err);
+      }
+    }
     return { success: true };
+  }),
+  recordAttendance: adminProcedure.input(
+    z4.object({
+      assignmentId: z4.number().int().positive(),
+      attendanceOutcome: z4.enum(["not_recorded", "attended", "missed", "excused"]),
+      attendanceNote: z4.string().max(1e3).optional(),
+      autoComplete: z4.boolean().optional()
+    })
+  ).mutation(async ({ ctx, input }) => {
+    const rows = await listNurseTrainings();
+    const record = rows.find((r) => r.id === input.assignmentId);
+    if (!record) throw new TRPCError4({ code: "NOT_FOUND", message: "Training record not found" });
+    const updateData = {
+      attendanceOutcome: input.attendanceOutcome,
+      attendanceRecordedAt: /* @__PURE__ */ new Date(),
+      attendanceRecordedBy: ctx.user.id,
+      attendanceNote: input.attendanceNote ?? null
+    };
+    if (input.autoComplete && input.attendanceOutcome === "attended") {
+      updateData.status = "Completed";
+      if (!record.completionDate) {
+        updateData.completionDate = record.scheduledDate ?? /* @__PURE__ */ new Date();
+      }
+    }
+    await updateNurseTraining(input.assignmentId, updateData);
+    await logActivity({
+      supervisorId: ctx.user.id,
+      nurseId: record.nurseId,
+      actionType: "training.attendance.recorded",
+      entityType: "nurseTraining",
+      entityId: input.assignmentId,
+      summary: `Attendance recorded as ${input.attendanceOutcome} for training record #${input.assignmentId}`
+    });
+    return { ok: true };
+  }),
+  reviewEvidence: adminProcedure.input(
+    z4.object({
+      assignmentId: z4.number().int().positive(),
+      decision: z4.enum(["verified", "rejected"]),
+      note: z4.string().max(1e3).optional(),
+      autoComplete: z4.boolean().optional()
+    })
+  ).mutation(async ({ ctx, input }) => {
+    const rows = await listNurseTrainings();
+    const record = rows.find((r) => r.id === input.assignmentId);
+    if (!record) throw new TRPCError4({ code: "NOT_FOUND", message: "Training record not found" });
+    if (input.decision === "rejected" && (!input.note || input.note.trim().length === 0)) {
+      throw new TRPCError4({ code: "BAD_REQUEST", message: "A reason is required when rejecting evidence." });
+    }
+    const updateData = {
+      evidenceStatus: input.decision === "verified" ? "Verified" : "Rejected",
+      evidenceReviewedAt: /* @__PURE__ */ new Date(),
+      evidenceReviewedBy: ctx.user.id,
+      evidenceReviewNote: input.note ?? null
+    };
+    if (input.decision === "verified" && input.autoComplete) {
+      updateData.status = "Completed";
+      if (!record.completionDate) {
+        updateData.completionDate = record.scheduledDate ?? /* @__PURE__ */ new Date();
+      }
+    }
+    await updateNurseTraining(input.assignmentId, updateData);
+    await logActivity({
+      supervisorId: ctx.user.id,
+      nurseId: record.nurseId,
+      actionType: "training.evidence.reviewed",
+      entityType: "nurseTraining",
+      entityId: input.assignmentId,
+      summary: `Training evidence ${input.decision} for training record #${input.assignmentId}`
+    });
+    return { ok: true };
+  }),
+  followUpList: adminProcedure.input(
+    z4.object({
+      trainingId: z4.number().optional(),
+      filter: z4.enum([
+        "all",
+        "pending_response",
+        "cannot_attend",
+        "missing_email",
+        "delivery_failed",
+        "evidence_review",
+        "missed"
+      ]).optional()
+    }).optional()
+  ).query(async ({ input }) => {
+    const [rows, allNurses, catalog] = await Promise.all([
+      listNurseTrainings(),
+      listNurses(),
+      listTrainingCatalog(true)
+    ]);
+    const nurseById = new Map(allNurses.map((n) => [n.id, n]));
+    const catById = new Map(catalog.map((c) => [c.id, c]));
+    let assignments = rows.filter((r) => r.status !== "Cancelled");
+    if (input?.trainingId) {
+      assignments = assignments.filter((r) => r.trainingId === input.trainingId);
+    }
+    const items = [];
+    for (const a of assignments) {
+      const nurse = nurseById.get(a.nurseId);
+      if (!nurse) continue;
+      const resolved = await resolveTrainingSchedule(a.id);
+      if (!resolved) continue;
+      const trainingName = catById.get(a.trainingId)?.name || resolved.trainingName;
+      const hasEmail = Boolean(nurse.accountEmail);
+      const item = {
+        assignmentId: a.id,
+        nurseId: a.nurseId,
+        nurseName: nurseFullName(nurse),
+        employeeId: nurse.employeeId,
+        accountEmail: nurse.accountEmail,
+        hasEmail,
+        trainingId: a.trainingId,
+        trainingName,
+        startDateStr: resolved.startDateStr,
+        endDateStr: resolved.endDateStr,
+        startTime: resolved.startTime,
+        venue: resolved.venue,
+        status: a.status,
+        scheduleVersion: a.scheduleVersion ?? 1,
+        staffResponse: a.staffResponse || "Pending",
+        staffResponseReason: a.staffResponseReason,
+        attendanceOutcome: a.attendanceOutcome || "not_recorded",
+        evidenceRequired: Boolean(a.evidenceRequired),
+        evidenceStatus: a.evidenceStatus || "None",
+        certificateKey: a.certificateKey
+      };
+      const filter = input?.filter || "all";
+      if (filter === "pending_response" && item.staffResponse !== "Pending") continue;
+      if (filter === "cannot_attend" && item.staffResponse !== "Cannot attend") continue;
+      if (filter === "missing_email" && item.hasEmail) continue;
+      if (filter === "evidence_review" && item.evidenceStatus !== "Submitted") continue;
+      if (filter === "missed" && item.attendanceOutcome !== "missed") continue;
+      items.push(item);
+    }
+    const counts = {
+      total: assignments.length,
+      pendingResponse: assignments.filter((a) => (a.staffResponse || "Pending") === "Pending").length,
+      cannotAttend: assignments.filter((a) => a.staffResponse === "Cannot attend").length,
+      missingEmail: assignments.filter((a) => !nurseById.get(a.nurseId)?.accountEmail).length,
+      evidenceReview: assignments.filter((a) => a.evidenceStatus === "Submitted").length,
+      missed: assignments.filter((a) => a.attendanceOutcome === "missed").length
+    };
+    return { items, counts };
   }),
   deleteRecord: adminProcedure.input(z4.object({ id: z4.number().int().positive() })).mutation(async ({ ctx, input }) => {
     const record = await deleteNurseTraining(input.id);
@@ -5017,7 +6172,7 @@ var notificationsRouter = router({
 });
 
 // server/routers/dashboard.ts
-import { asc as asc2, and as and2, desc as desc2, eq as eq2, isNull as isNull2, sql as sql3 } from "drizzle-orm";
+import { asc as asc2, and as and3, desc as desc3, eq as eq3, isNull as isNull3, sql as sql4 } from "drizzle-orm";
 import { z as z7 } from "zod";
 init_db();
 init_schema();
@@ -5136,13 +6291,13 @@ function getLocalDashboardInitial() {
 }
 function getLocalSeminarsList(input) {
   const sqlite = getSqliteDb();
-  let sql10 = `
+  let sql12 = `
     SELECT e.*, c.id as c_id, c.name as c_name, c.category as c_category, c.kind as c_kind
     FROM trainingEvents e
     INNER JOIN trainingCatalog c ON c.id = e.trainingId
     ORDER BY date(e.startDate) DESC, c.name ASC
   `;
-  const rows = sqlite.prepare(sql10).all();
+  const rows = sqlite.prepare(sql12).all();
   const records = sqlite.prepare("SELECT eventId, status FROM nurseTrainings WHERE eventId IS NOT NULL").all();
   const counts = /* @__PURE__ */ new Map();
   for (const record of records) {
@@ -5679,12 +6834,12 @@ var dashboardRouter = router({
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
     const today = todayDate();
-    const [activeRow] = await db.select({ count: sql3`count(*)` }).from(nurses).where(activeNurseCondition());
+    const [activeRow] = await db.select({ count: sql4`count(*)` }).from(nurses).where(activeNurseCondition());
     const activeNurses = Number(activeRow?.count ?? 0);
     const creds = await db.select({
       expiryDate: nurseCredentials.expiryDate,
       archivedAt: nurses.archivedAt
-    }).from(nurseCredentials).innerJoin(nurses, eq2(nurses.id, nurseCredentials.nurseId));
+    }).from(nurseCredentials).innerJoin(nurses, eq3(nurses.id, nurseCredentials.nurseId));
     let within1Year = 0;
     let within6Months = 0;
     let expired = 0;
@@ -5700,7 +6855,7 @@ var dashboardRouter = router({
       scheduledDate: nurseTrainings.scheduledDate,
       expiryDate: nurseTrainings.expiryDate,
       archivedAt: nurses.archivedAt
-    }).from(nurseTrainings).innerJoin(nurses, eq2(nurses.id, nurseTrainings.nurseId));
+    }).from(nurseTrainings).innerJoin(nurses, eq3(nurses.id, nurseTrainings.nurseId));
     let trainingsAttention = 0;
     for (const t2 of trainings) {
       if (t2.archivedAt) continue;
@@ -5721,10 +6876,10 @@ var dashboardRouter = router({
     const today = todayDate();
     const areaRows = await db.select().from(areas).orderBy(areas.sortOrder);
     const activeNurseCond = activeNurseCondition();
-    const nurseCounts = await db.select({ areaId: nurses.currentAreaId, count: sql3`count(*)` }).from(nurses).where(activeNurseCond).groupBy(nurses.currentAreaId);
+    const nurseCounts = await db.select({ areaId: nurses.currentAreaId, count: sql4`count(*)` }).from(nurses).where(activeNurseCond).groupBy(nurses.currentAreaId);
     const countByArea = new Map(nurseCounts.map((r) => [r.areaId ?? 0, Number(r.count)]));
     const photoNurses = await db.select({ currentAreaId: nurses.currentAreaId, id: nurses.id, profilePhotoKey: nurses.profilePhotoKey }).from(nurses).where(activeNurseCond).limit(300);
-    const creds = await db.select({ areaId: nurses.currentAreaId, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).innerJoin(nurses, eq2(nurses.id, nurseCredentials.nurseId)).where(isNull2(nurses.archivedAt));
+    const creds = await db.select({ areaId: nurses.currentAreaId, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).innerJoin(nurses, eq3(nurses.id, nurseCredentials.nurseId)).where(isNull3(nurses.archivedAt));
     const attentionByArea = /* @__PURE__ */ new Map();
     for (const c of creds) {
       const status = deriveLicenseStatus(dateKey(c.expiryDate), today);
@@ -5737,7 +6892,7 @@ var dashboardRouter = router({
       status: nurseTrainings.status,
       scheduledDate: nurseTrainings.scheduledDate,
       expiryDate: nurseTrainings.expiryDate
-    }).from(nurseTrainings).innerJoin(nurses, eq2(nurses.id, nurseTrainings.nurseId)).where(isNull2(nurses.archivedAt));
+    }).from(nurseTrainings).innerJoin(nurses, eq3(nurses.id, nurseTrainings.nurseId)).where(isNull3(nurses.archivedAt));
     const trainingAttentionByArea = /* @__PURE__ */ new Map();
     for (const t2 of trainings) {
       let needsAttention = false;
@@ -5767,7 +6922,7 @@ var dashboardRouter = router({
     if (!db) throw new Error("Database unavailable");
     const today = todayDate();
     const items = [];
-    const nurseRows = await db.select({ id: nurses.id, firstName: nurses.firstName, lastName: nurses.lastName }).from(nurses).where(isNull2(nurses.archivedAt));
+    const nurseRows = await db.select({ id: nurses.id, firstName: nurses.firstName, lastName: nurses.lastName }).from(nurses).where(isNull3(nurses.archivedAt));
     const nurseById = new Map(nurseRows.map((n) => [n.id, n]));
     const creds = await db.select({
       id: nurseCredentials.id,
@@ -5777,7 +6932,7 @@ var dashboardRouter = router({
       archivedAt: nurses.archivedAt,
       firstName: nurses.firstName,
       lastName: nurses.lastName
-    }).from(nurseCredentials).innerJoin(nurses, eq2(nurses.id, nurseCredentials.nurseId));
+    }).from(nurseCredentials).innerJoin(nurses, eq3(nurses.id, nurseCredentials.nurseId));
     for (const c of creds) {
       if (c.archivedAt) continue;
       const status = deriveLicenseStatus(dateKey(c.expiryDate), today);
@@ -5802,7 +6957,7 @@ var dashboardRouter = router({
       archivedAt: nurses.archivedAt,
       firstName: nurses.firstName,
       lastName: nurses.lastName
-    }).from(nurseTrainings).innerJoin(nurses, eq2(nurses.id, nurseTrainings.nurseId));
+    }).from(nurseTrainings).innerJoin(nurses, eq3(nurses.id, nurseTrainings.nurseId));
     for (const t2 of trainings) {
       if (t2.archivedAt) continue;
       if (t2.status === "Scheduled" && t2.scheduledDate && dateKey(t2.scheduledDate) <= today) {
@@ -5839,7 +6994,7 @@ var dashboardRouter = router({
       archivedAt: nurses.archivedAt,
       firstName: nurses.firstName,
       lastName: nurses.lastName
-    }).from(areaAssignments).innerJoin(nurses, eq2(nurses.id, areaAssignments.nurseId)).where(and2(isNull2(nurses.archivedAt), isNull2(areaAssignments.endDate)));
+    }).from(areaAssignments).innerJoin(nurses, eq3(nurses.id, areaAssignments.nurseId)).where(and3(isNull3(nurses.archivedAt), isNull3(areaAssignments.endDate)));
     const areaRows = await db.select().from(areas);
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     for (const a of assignments) {
@@ -5875,7 +7030,7 @@ var dashboardRouter = router({
   activityFeed: adminProcedure.input(z7.object({ limit: z7.number().min(1).max(100).optional() })).query(async ({ input }) => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const rows = await db.select().from(activityLog).orderBy(desc2(activityLog.createdAt)).limit(input.limit ?? 50);
+    const rows = await db.select().from(activityLog).orderBy(desc3(activityLog.createdAt)).limit(input.limit ?? 50);
     const nurseRows = await db.select({ id: nurses.id, firstName: nurses.firstName, lastName: nurses.lastName }).from(nurses);
     const nurseById = new Map(nurseRows.map((n) => [n.id, n]));
     return rows.map((r) => ({
@@ -5893,16 +7048,16 @@ var dashboardRouter = router({
       eventDate: customCalendarEvents.eventDate,
       nurseId: customCalendarEvents.nurseId,
       areaId: customCalendarEvents.areaId,
-      nurseName: sql3`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
+      nurseName: sql4`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
       areaName: areas.name
-    }).from(customCalendarEvents).leftJoin(nurses, eq2(nurses.id, customCalendarEvents.nurseId)).leftJoin(areas, eq2(areas.id, customCalendarEvents.areaId)).where(sql3`${customCalendarEvents.eventDate} >= ${today}`).orderBy(asc2(customCalendarEvents.eventDate)).limit(10);
+    }).from(customCalendarEvents).leftJoin(nurses, eq3(nurses.id, customCalendarEvents.nurseId)).leftJoin(areas, eq3(areas.id, customCalendarEvents.areaId)).where(sql4`${customCalendarEvents.eventDate} >= ${today}`).orderBy(asc2(customCalendarEvents.eventDate)).limit(10);
     const upcomingLicenses = await db.select({
       id: nurseCredentials.id,
       nurseId: nurseCredentials.nurseId,
       expiryDate: nurseCredentials.expiryDate,
-      nurseName: sql3`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
-      daysRemaining: sql3`(${nurseCredentials.expiryDate} - CURRENT_DATE)`
-    }).from(nurseCredentials).innerJoin(nurses, eq2(nurses.id, nurseCredentials.nurseId)).where(and2(isNull2(nurses.archivedAt), sql3`${nurseCredentials.expiryDate} >= CURRENT_DATE`)).orderBy(asc2(nurseCredentials.expiryDate)).limit(10);
+      nurseName: sql4`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
+      daysRemaining: sql4`(${nurseCredentials.expiryDate} - CURRENT_DATE)`
+    }).from(nurseCredentials).innerJoin(nurses, eq3(nurses.id, nurseCredentials.nurseId)).where(and3(isNull3(nurses.archivedAt), sql4`${nurseCredentials.expiryDate} >= CURRENT_DATE`)).orderBy(asc2(nurseCredentials.expiryDate)).limit(10);
     return {
       upcomingCustoms: upcomingCustoms.map((r) => ({
         ...r,
@@ -5922,7 +7077,7 @@ var dashboardRouter = router({
 // server/routers/areas.ts
 import { z as z8 } from "zod";
 import { TRPCError as TRPCError5 } from "@trpc/server";
-import { and as and3, eq as eq3, isNull as isNull3, sql as sql4 } from "drizzle-orm";
+import { and as and4, eq as eq4, isNull as isNull4, sql as sql5 } from "drizzle-orm";
 init_db();
 init_schema();
 init_schema();
@@ -6001,7 +7156,7 @@ var areasRouter = router({
     let licenseAttention = 0;
     let expired = 0;
     if (nurseIds.length > 0) {
-      const creds = await db.select({ expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).where(sql4`${nurseCredentials.nurseId} IN (${sql4.join(nurseIds, sql4`, `)})`);
+      const creds = await db.select({ expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).where(sql5`${nurseCredentials.nurseId} IN (${sql5.join(nurseIds, sql5`, `)})`);
       for (const c of creds) {
         const status = deriveLicenseStatus(dateKey(c.expiryDate), today);
         if (status === "Expired") expired++;
@@ -6010,7 +7165,7 @@ var areasRouter = router({
     }
     let trainingAttention = 0;
     if (nurseIds.length > 0) {
-      const trainings = await db.select({ status: nurseTrainings.status, scheduledDate: nurseTrainings.scheduledDate, expiryDate: nurseTrainings.expiryDate }).from(nurseTrainings).where(sql4`${nurseTrainings.nurseId} IN (${sql4.join(nurseIds, sql4`, `)})`);
+      const trainings = await db.select({ status: nurseTrainings.status, scheduledDate: nurseTrainings.scheduledDate, expiryDate: nurseTrainings.expiryDate }).from(nurseTrainings).where(sql5`${nurseTrainings.nurseId} IN (${sql5.join(nurseIds, sql5`, `)})`);
       for (const t2 of trainings) {
         if (t2.status === "Scheduled" && t2.scheduledDate && dateKey(t2.scheduledDate) <= today) trainingAttention++;
         if (t2.status === "Completed" && t2.expiryDate && daysUntilExpiry(dateKey(t2.expiryDate), today) <= 0) trainingAttention++;
@@ -6020,7 +7175,7 @@ var areasRouter = router({
       nurse: { id: nurses.id, firstName: nurses.firstName, lastName: nurses.lastName },
       startDate: areaAssignments.startDate,
       assignmentType: areaAssignments.assignmentType
-    }).from(areaAssignments).innerJoin(nurses, eq3(nurses.id, areaAssignments.nurseId)).where(and3(eq3(areaAssignments.areaId, input.id), isNull3(areaAssignments.endDate), sql4`${areaAssignments.startDate} > ${today}`)).orderBy(sql4`${areaAssignments.startDate} ASC`).limit(10);
+    }).from(areaAssignments).innerJoin(nurses, eq4(nurses.id, areaAssignments.nurseId)).where(and4(eq4(areaAssignments.areaId, input.id), isNull4(areaAssignments.endDate), sql5`${areaAssignments.startDate} > ${today}`)).orderBy(sql5`${areaAssignments.startDate} ASC`).limit(10);
     const durations = staff.filter((s) => s.assignment.startDate).map((s) => daysBetween(dateKey(s.assignment.startDate), today));
     return {
       area,
@@ -6067,9 +7222,9 @@ async function listAreasWithCounts() {
   }
   const today = todayDate();
   const areaRows = await db.select().from(areas).orderBy(areas.sortOrder);
-  const nurseCounts = await db.select({ areaId: nurses.currentAreaId, count: sql4`count(*)` }).from(nurses).where(activeNurseCondition()).groupBy(nurses.currentAreaId);
+  const nurseCounts = await db.select({ areaId: nurses.currentAreaId, count: sql5`count(*)` }).from(nurses).where(activeNurseCondition()).groupBy(nurses.currentAreaId);
   const countByArea = new Map(nurseCounts.map((r) => [r.areaId ?? 0, Number(r.count)]));
-  const creds = await db.select({ areaId: nurses.currentAreaId, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).innerJoin(nurses, eq3(nurses.id, nurseCredentials.nurseId)).where(isNull3(nurses.archivedAt));
+  const creds = await db.select({ areaId: nurses.currentAreaId, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).innerJoin(nurses, eq4(nurses.id, nurseCredentials.nurseId)).where(isNull4(nurses.archivedAt));
   const attentionByArea = /* @__PURE__ */ new Map();
   for (const c of creds) {
     if (deriveLicenseStatus(dateKey(c.expiryDate), today) !== "Valid" && c.areaId) {
@@ -6085,7 +7240,7 @@ async function listAreasWithCounts() {
 
 // server/routers/reports.ts
 init_nursetrack();
-import { and as and4, asc as asc3, desc as desc3, eq as eq4, isNull as isNull4, sql as sql5 } from "drizzle-orm";
+import { and as and5, asc as asc3, desc as desc4, eq as eq5, isNull as isNull5, sql as sql6 } from "drizzle-orm";
 import { z as z9 } from "zod";
 init_db();
 init_schema();
@@ -6107,9 +7262,9 @@ var reportsRouter = router({
     }
     const today = todayDate();
     const activeNurseCond = activeNurseCondition();
-    const [activeRow] = await db.select({ count: sql5`count(*)` }).from(nurses).where(activeNurseCond);
-    const areaCount = (await db.select().from(areas).where(eq4(areas.active, true))).length;
-    const expiredCount = (await db.select({ count: sql5`count(*)` }).from(nurseCredentials).innerJoin(nurses, eq4(nurses.id, nurseCredentials.nurseId)).where(isNull4(nurses.archivedAt))).length;
+    const [activeRow] = await db.select({ count: sql6`count(*)` }).from(nurses).where(activeNurseCond);
+    const areaCount = (await db.select().from(areas).where(eq5(areas.active, true))).length;
+    const expiredCount = (await db.select({ count: sql6`count(*)` }).from(nurseCredentials).innerJoin(nurses, eq5(nurses.id, nurseCredentials.nurseId)).where(isNull5(nurses.archivedAt))).length;
     return [
       { type: "licenseStatus", label: "License Status Overview", description: "Active license status of all nurses by area", rowHint: activeRow?.count ?? 0 },
       { type: "licenseDue", label: "Licenses Due for Renewal", description: "Licenses expiring within 1 year, sorted by urgency", rowHint: null },
@@ -6141,7 +7296,7 @@ var reportsRouter = router({
         renewalStatus: nurseCredentials.renewalStatus,
         verificationStatus: nurseCredentials.verificationStatus,
         archivedAt: nurses.archivedAt
-      }).from(nurseCredentials).innerJoin(nurses, eq4(nurses.id, nurseCredentials.nurseId)).innerJoin(credentialTypes, eq4(credentialTypes.id, nurseCredentials.credentialTypeId)).orderBy(asc3(nurses.lastName), asc3(nurses.firstName));
+      }).from(nurseCredentials).innerJoin(nurses, eq5(nurses.id, nurseCredentials.nurseId)).innerJoin(credentialTypes, eq5(credentialTypes.id, nurseCredentials.credentialTypeId)).orderBy(asc3(nurses.lastName), asc3(nurses.firstName));
       const areaRows = await db.select().from(areas);
       const areaById = new Map(areaRows.map((a) => [a.id, a]));
       return rows2.filter((r) => !r.archivedAt).map((r) => ({
@@ -6172,7 +7327,7 @@ var reportsRouter = router({
         expiryDate: nurseCredentials.expiryDate,
         renewalStatus: nurseCredentials.renewalStatus,
         archivedAt: nurses.archivedAt
-      }).from(nurseCredentials).innerJoin(nurses, eq4(nurses.id, nurseCredentials.nurseId)).innerJoin(credentialTypes, eq4(credentialTypes.id, nurseCredentials.credentialTypeId)).where(sql5`(${nurseCredentials.expiryDate} - CURRENT_DATE) <= 365`).orderBy(sql5`(${nurseCredentials.expiryDate} - CURRENT_DATE) ASC`).limit(300);
+      }).from(nurseCredentials).innerJoin(nurses, eq5(nurses.id, nurseCredentials.nurseId)).innerJoin(credentialTypes, eq5(credentialTypes.id, nurseCredentials.credentialTypeId)).where(sql6`(${nurseCredentials.expiryDate} - CURRENT_DATE) <= 365`).orderBy(sql6`(${nurseCredentials.expiryDate} - CURRENT_DATE) ASC`).limit(300);
       const areaRows = await db.select().from(areas);
       const areaById = new Map(areaRows.map((a) => [a.id, a]));
       return rows2.filter((r) => !r.archivedAt).map((r) => ({
@@ -6192,15 +7347,15 @@ var reportsRouter = router({
       const areaRows = await db.select().from(areas);
       const result = [];
       for (const area of areaRows) {
-        const requiredIds = await db.select({ trainingId: areaTrainingRequirements.trainingId }).from(areaTrainingRequirements).where(and4(eq4(areaTrainingRequirements.areaId, area.id), eq4(areaTrainingRequirements.required, true)));
+        const requiredIds = await db.select({ trainingId: areaTrainingRequirements.trainingId }).from(areaTrainingRequirements).where(and5(eq5(areaTrainingRequirements.areaId, area.id), eq5(areaTrainingRequirements.required, true)));
         const required = requiredIds.map((r) => r.trainingId);
-        const staff = await db.select({ id: nurses.id, firstName: nurses.firstName, middleName: nurses.middleName, lastName: nurses.lastName }).from(nurses).where(and4(eq4(nurses.currentAreaId, area.id), isNull4(nurses.archivedAt)));
+        const staff = await db.select({ id: nurses.id, firstName: nurses.firstName, middleName: nurses.middleName, lastName: nurses.lastName }).from(nurses).where(and5(eq5(nurses.currentAreaId, area.id), isNull5(nurses.archivedAt)));
         let compliant = 0;
         let total = 0;
         for (const n of staff) {
           total += required.length;
           for (const tid of required) {
-            const records = await db.select({ status: nurseTrainings.status, expiryDate: nurseTrainings.expiryDate }).from(nurseTrainings).where(and4(eq4(nurseTrainings.nurseId, n.id), eq4(nurseTrainings.trainingId, tid), eq4(nurseTrainings.status, "Completed")));
+            const records = await db.select({ status: nurseTrainings.status, expiryDate: nurseTrainings.expiryDate }).from(nurseTrainings).where(and5(eq5(nurseTrainings.nurseId, n.id), eq5(nurseTrainings.trainingId, tid), eq5(nurseTrainings.status, "Completed")));
             if (records.some((r) => !r.expiryDate || new Date(r.expiryDate) > /* @__PURE__ */ new Date(`${today}T00:00:00`))) compliant++;
           }
         }
@@ -6228,7 +7383,7 @@ var reportsRouter = router({
         endDate: areaAssignments.endDate,
         assignmentType: areaAssignments.assignmentType,
         archivedAt: nurses.archivedAt
-      }).from(areaAssignments).innerJoin(nurses, eq4(nurses.id, areaAssignments.nurseId)).innerJoin(areas, eq4(areas.id, areaAssignments.areaId)).where(isNull4(nurses.archivedAt)).orderBy(asc3(nurses.lastName), asc3(nurses.firstName), asc3(areaAssignments.startDate));
+      }).from(areaAssignments).innerJoin(nurses, eq5(nurses.id, areaAssignments.nurseId)).innerJoin(areas, eq5(areas.id, areaAssignments.areaId)).where(isNull5(nurses.archivedAt)).orderBy(asc3(nurses.lastName), asc3(nurses.firstName), asc3(areaAssignments.startDate));
       const licenseByNurse2 = await latestLicenseNumbersByNurse(db, rows2.map((r) => r.nurseId));
       return rows2.map((r) => ({
         nurse: nurseFullName(r),
@@ -6258,7 +7413,7 @@ var reportsRouter = router({
         cpdUnits: nurseTrainings.cpdUnits,
         provider: nurseTrainings.provider,
         archivedAt: nurses.archivedAt
-      }).from(nurseTrainings).innerJoin(trainingCatalog, eq4(trainingCatalog.id, nurseTrainings.trainingId)).innerJoin(nurses, eq4(nurses.id, nurseTrainings.nurseId)).orderBy(asc3(trainingCatalog.name), desc3(nurseTrainings.scheduledDate));
+      }).from(nurseTrainings).innerJoin(trainingCatalog, eq5(trainingCatalog.id, nurseTrainings.trainingId)).innerJoin(nurses, eq5(nurses.id, nurseTrainings.nurseId)).orderBy(asc3(trainingCatalog.name), desc4(nurseTrainings.scheduledDate));
       return rows2.filter((r) => !r.archivedAt).map((r) => ({
         nurse: nurseFullName(r),
         trainingName: r.trainingName,
@@ -6286,7 +7441,7 @@ var reportsRouter = router({
       assignmentType: areaAssignments.assignmentType,
       remarks: areaAssignments.remarks,
       archivedAt: nurses.archivedAt
-    }).from(areaAssignments).innerJoin(nurses, eq4(nurses.id, areaAssignments.nurseId)).innerJoin(areas, eq4(areas.id, areaAssignments.areaId)).orderBy(asc3(areaAssignments.startDate), asc3(nurses.lastName));
+    }).from(areaAssignments).innerJoin(nurses, eq5(nurses.id, areaAssignments.nurseId)).innerJoin(areas, eq5(areas.id, areaAssignments.areaId)).orderBy(asc3(areaAssignments.startDate), asc3(nurses.lastName));
     const licenseByNurse = await latestLicenseNumbersByNurse(db, rows.map((r) => r.nurseId));
     return rows.map((r) => ({
       nurse: nurseFullName(r),
@@ -6302,7 +7457,7 @@ var reportsRouter = router({
 async function latestLicenseNumbersByNurse(db, nurseIds) {
   const uniqueIds = Array.from(new Set(nurseIds));
   if (uniqueIds.length === 0) return /* @__PURE__ */ new Map();
-  const rows = await db.select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).where(sql5`${nurseCredentials.nurseId} IN (${sql5.join(uniqueIds.map((id) => sql5`${id}`), sql5`, `)})`);
+  const rows = await db.select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber, expiryDate: nurseCredentials.expiryDate }).from(nurseCredentials).where(sql6`${nurseCredentials.nurseId} IN (${sql6.join(uniqueIds.map((id) => sql6`${id}`), sql6`, `)})`);
   const latestByNurse = /* @__PURE__ */ new Map();
   for (const r of rows) {
     const existing = latestByNurse.get(r.nurseId);
@@ -6323,7 +7478,7 @@ function daysBetween2(start, end, today = todayDate()) {
 // server/routers/settings.ts
 import { z as z10 } from "zod";
 import { TRPCError as TRPCError6 } from "@trpc/server";
-import { eq as eq9 } from "drizzle-orm";
+import { eq as eq10 } from "drizzle-orm";
 init_db();
 init_localDb();
 init_schema();
@@ -6337,7 +7492,7 @@ init_schema();
 import fs2 from "fs";
 import path2 from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
-import { eq as eq6, and as and5 } from "drizzle-orm";
+import { eq as eq7, and as and6 } from "drizzle-orm";
 var __filename2 = fileURLToPath2(import.meta.url);
 var __dirname2 = path2.dirname(__filename2);
 function parseSafeDate(raw) {
@@ -6442,7 +7597,7 @@ async function seedExcelDatabase(dataFilePath) {
   for (const person of data.staff) {
     const area = areaByCode.get(person.currentAreaCode) ?? allAreas[0];
     const nameKey = `${person.nameInfo.lastName.trim()} ${person.nameInfo.firstName.trim()}`.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const existing = (await db.select().from(nurses).where(eq6(nurses.employeeId, person.employeeId)).limit(1))[0] ?? nurseByName.get(nameKey);
+    const existing = (await db.select().from(nurses).where(eq7(nurses.employeeId, person.employeeId)).limit(1))[0] ?? nurseByName.get(nameKey);
     let nurseId;
     if (existing) {
       nurseId = existing.id;
@@ -6455,7 +7610,7 @@ async function seedExcelDatabase(dataFilePath) {
         staffType: person.staffType,
         employmentStatus: person.employmentStatus,
         currentAreaId: area.id
-      }).where(eq6(nurses.id, nurseId));
+      }).where(eq7(nurses.id, nurseId));
     } else {
       const res = await db.insert(nurses).values({
         employeeId: person.employeeId,
@@ -6474,7 +7629,7 @@ async function seedExcelDatabase(dataFilePath) {
     nurseIdByEmployeeId.set(person.employeeId, nurseId);
     nurseIdByNormName.set(normKey, nurseId);
     nurseIdByNormName.set(person.nameInfo.lastName.toUpperCase(), nurseId);
-    const asgns = await db.select().from(areaAssignments).where(eq6(areaAssignments.nurseId, nurseId)).limit(1);
+    const asgns = await db.select().from(areaAssignments).where(eq7(areaAssignments.nurseId, nurseId)).limit(1);
     if (asgns.length === 0) {
       await db.insert(areaAssignments).values({
         nurseId,
@@ -6490,7 +7645,7 @@ async function seedExcelDatabase(dataFilePath) {
       const credTypeId = person.staffType === "Registered Nurse" ? rnCredTypeId : naCredTypeId;
       const cycleKey = `${nurseId}-${expiry.toISOString().slice(0, 10)}`;
       const existingCred = await db.select().from(nurseCredentials).where(
-        and5(eq6(nurseCredentials.nurseId, nurseId), eq6(nurseCredentials.credentialTypeId, credTypeId))
+        and6(eq7(nurseCredentials.nurseId, nurseId), eq7(nurseCredentials.credentialTypeId, credTypeId))
       ).limit(1);
       if (existingCred.length === 0) {
         await db.insert(nurseCredentials).values({
@@ -6510,7 +7665,7 @@ async function seedExcelDatabase(dataFilePath) {
           licenseNumber: person.licenseNumber ?? existingCred[0].licenseNumber,
           expiryDate: expiry,
           renewalCycleKey: cycleKey
-        }).where(eq6(nurseCredentials.id, existingCred[0].id));
+        }).where(eq7(nurseCredentials.id, existingCred[0].id));
       }
     }
   }
@@ -6522,9 +7677,9 @@ async function seedExcelDatabase(dataFilePath) {
     const startDate = parseSafeDate(ev.startDate) || /* @__PURE__ */ new Date("2026-03-15T00:00:00");
     const endDate = parseSafeDate(ev.endDate) || startDate;
     const existingEvents = await db.select().from(trainingEvents).where(
-      and5(
-        eq6(trainingEvents.trainingId, catalogItem.id),
-        eq6(trainingEvents.startDate, startDate)
+      and6(
+        eq7(trainingEvents.trainingId, catalogItem.id),
+        eq7(trainingEvents.startDate, startDate)
       )
     ).limit(1);
     let eventId;
@@ -6551,10 +7706,10 @@ async function seedExcelDatabase(dataFilePath) {
       if (!nurseId) continue;
       const completionDate = parseSafeDate(att.completionDate) || startDate;
       const existingTrainings = await db.select().from(nurseTrainings).where(
-        and5(
-          eq6(nurseTrainings.nurseId, nurseId),
-          eq6(nurseTrainings.trainingId, catalogItem.id),
-          eq6(nurseTrainings.completionDate, completionDate)
+        and6(
+          eq7(nurseTrainings.nurseId, nurseId),
+          eq7(nurseTrainings.trainingId, catalogItem.id),
+          eq7(nurseTrainings.completionDate, completionDate)
         )
       ).limit(1);
       if (existingTrainings.length === 0) {
@@ -6589,9 +7744,9 @@ async function seedExcelDatabase(dataFilePath) {
     if (!nurseId) continue;
     const completionDate = parseSafeDate(mc.completionDate) || /* @__PURE__ */ new Date("2026-01-15T00:00:00");
     const existing = await db.select().from(nurseTrainings).where(
-      and5(
-        eq6(nurseTrainings.nurseId, nurseId),
-        eq6(nurseTrainings.trainingId, catItem.id)
+      and6(
+        eq7(nurseTrainings.nurseId, nurseId),
+        eq7(nurseTrainings.trainingId, catItem.id)
       )
     ).limit(1);
     if (existing.length === 0) {
@@ -6639,7 +7794,7 @@ if (isDirectCliInvocation) {
 init_db();
 init_localDb();
 init_schema();
-import { eq as eq7 } from "drizzle-orm";
+import { eq as eq8 } from "drizzle-orm";
 var CANONICAL_AREAS = [
   { code: "NEPHRO-OFFICE", name: "Nephrology Office", description: "Nephrology Nursing Office & Administrative Center", sortOrder: 1 },
   { code: "PD", name: "Peritoneal Dialysis", description: "Peritoneal Dialysis Unit & Outpatient CAPD/APD", sortOrder: 2 },
@@ -6744,8 +7899,8 @@ async function deduplicateDatabase() {
       const legacy = credTypeByName.get(legacyName);
       const canonical = credTypeByName.get(canonicalName);
       if (legacy && canonical && legacy.id !== canonical.id) {
-        await db.update(nurseCredentials).set({ credentialTypeId: canonical.id }).where(eq7(nurseCredentials.credentialTypeId, legacy.id));
-        await db.delete(credentialTypes).where(eq7(credentialTypes.id, legacy.id));
+        await db.update(nurseCredentials).set({ credentialTypeId: canonical.id }).where(eq8(nurseCredentials.credentialTypeId, legacy.id));
+        await db.delete(credentialTypes).where(eq8(credentialTypes.id, legacy.id));
         mergedCredentialTypesCount++;
       }
     }
@@ -6778,13 +7933,13 @@ async function deduplicateDatabase() {
       if (canonicalMatch) {
         const canonicalArea = canonicalByCode.get(canonicalMatch.code) ?? canonicalByName.get(canonicalMatch.name.toLowerCase());
         if (canonicalArea && canonicalArea.id !== a.id) {
-          await db.update(nurses).set({ currentAreaId: canonicalArea.id }).where(eq7(nurses.currentAreaId, a.id));
-          await db.update(areaAssignments).set({ areaId: canonicalArea.id }).where(eq7(areaAssignments.areaId, a.id));
+          await db.update(nurses).set({ currentAreaId: canonicalArea.id }).where(eq8(nurses.currentAreaId, a.id));
+          await db.update(areaAssignments).set({ areaId: canonicalArea.id }).where(eq8(areaAssignments.areaId, a.id));
           try {
-            await db.update(areaTrainingRequirements).set({ areaId: canonicalArea.id }).where(eq7(areaTrainingRequirements.areaId, a.id));
+            await db.update(areaTrainingRequirements).set({ areaId: canonicalArea.id }).where(eq8(areaTrainingRequirements.areaId, a.id));
           } catch {
           }
-          await db.delete(areas).where(eq7(areas.id, a.id));
+          await db.delete(areas).where(eq8(areas.id, a.id));
           cleanedAreasCount++;
         }
       }
@@ -6893,15 +8048,15 @@ async function deduplicateDatabase() {
         }
         if (Object.keys(updates).length > 0) {
           try {
-            await db.update(nurses).set(updates).where(eq7(nurses.id, primary.id));
+            await db.update(nurses).set(updates).where(eq8(nurses.id, primary.id));
           } catch {
           }
         }
-        await db.update(areaAssignments).set({ nurseId: primary.id }).where(eq7(areaAssignments.nurseId, dup.id));
-        await db.update(customCalendarEvents).set({ nurseId: primary.id }).where(eq7(customCalendarEvents.nurseId, dup.id));
-        await db.update(notifications).set({ nurseId: primary.id }).where(eq7(notifications.nurseId, dup.id));
-        const dupCreds = await db.select().from(nurseCredentials).where(eq7(nurseCredentials.nurseId, dup.id));
-        const primCreds = await db.select().from(nurseCredentials).where(eq7(nurseCredentials.nurseId, primary.id));
+        await db.update(areaAssignments).set({ nurseId: primary.id }).where(eq8(areaAssignments.nurseId, dup.id));
+        await db.update(customCalendarEvents).set({ nurseId: primary.id }).where(eq8(customCalendarEvents.nurseId, dup.id));
+        await db.update(notifications).set({ nurseId: primary.id }).where(eq8(notifications.nurseId, dup.id));
+        const dupCreds = await db.select().from(nurseCredentials).where(eq8(nurseCredentials.nurseId, dup.id));
+        const primCreds = await db.select().from(nurseCredentials).where(eq8(nurseCredentials.nurseId, primary.id));
         for (const dc of dupCreds) {
           const dcLicKey = cleanIdKey(dc.licenseNumber);
           const match = primCreds.find(
@@ -6920,32 +8075,32 @@ async function deduplicateDatabase() {
               credUpdates.licenseNumber = dc.licenseNumber;
             }
             if (Object.keys(credUpdates).length > 0) {
-              await db.update(nurseCredentials).set(credUpdates).where(eq7(nurseCredentials.id, match.id));
+              await db.update(nurseCredentials).set(credUpdates).where(eq8(nurseCredentials.id, match.id));
             }
-            await db.delete(nurseCredentials).where(eq7(nurseCredentials.id, dc.id));
+            await db.delete(nurseCredentials).where(eq8(nurseCredentials.id, dc.id));
             deduplicatedCredentialsCount++;
           } else {
-            await db.update(nurseCredentials).set({ nurseId: primary.id }).where(eq7(nurseCredentials.id, dc.id));
+            await db.update(nurseCredentials).set({ nurseId: primary.id }).where(eq8(nurseCredentials.id, dc.id));
           }
         }
-        const dupTrainings = await db.select().from(nurseTrainings).where(eq7(nurseTrainings.nurseId, dup.id));
-        const primTrainings = await db.select().from(nurseTrainings).where(eq7(nurseTrainings.nurseId, primary.id));
+        const dupTrainings = await db.select().from(nurseTrainings).where(eq8(nurseTrainings.nurseId, dup.id));
+        const primTrainings = await db.select().from(nurseTrainings).where(eq8(nurseTrainings.nurseId, primary.id));
         for (const dt of dupTrainings) {
           const dtDate = String(dt.completionDate ?? dt.scheduledDate ?? "").slice(0, 10);
           const exists = primTrainings.some(
             (pt) => pt.trainingId === dt.trainingId && String(pt.completionDate ?? pt.scheduledDate ?? "").slice(0, 10) === dtDate
           );
           if (exists) {
-            await db.delete(nurseTrainings).where(eq7(nurseTrainings.id, dt.id));
+            await db.delete(nurseTrainings).where(eq8(nurseTrainings.id, dt.id));
             deduplicatedTrainingsCount++;
           } else {
-            await db.update(nurseTrainings).set({ nurseId: primary.id }).where(eq7(nurseTrainings.id, dt.id));
+            await db.update(nurseTrainings).set({ nurseId: primary.id }).where(eq8(nurseTrainings.id, dt.id));
           }
         }
-        await db.delete(nurses).where(eq7(nurses.id, dup.id));
+        await db.delete(nurses).where(eq8(nurses.id, dup.id));
         if (newEmployeeId) {
           try {
-            await db.update(nurses).set({ employeeId: newEmployeeId }).where(eq7(nurses.id, primary.id));
+            await db.update(nurses).set({ employeeId: newEmployeeId }).where(eq8(nurses.id, primary.id));
           } catch {
           }
         }
@@ -6959,7 +8114,7 @@ async function deduplicateDatabase() {
       const dateStr = String(t2.completionDate ?? t2.scheduledDate ?? "").slice(0, 10);
       const key = `${t2.nurseId}-${t2.trainingId}-${dateStr}`;
       if (seenTrainings.has(key)) {
-        await db.delete(nurseTrainings).where(eq7(nurseTrainings.id, t2.id));
+        await db.delete(nurseTrainings).where(eq8(nurseTrainings.id, t2.id));
         deduplicatedTrainingsCount++;
       } else {
         seenTrainings.add(key);
@@ -6984,9 +8139,9 @@ async function deduplicateDatabase() {
         const dups = group.slice(1);
         for (const dc of dups) {
           if (!primaryCred.licenseNumber && dc.licenseNumber) {
-            await db.update(nurseCredentials).set({ licenseNumber: dc.licenseNumber }).where(eq7(nurseCredentials.id, primaryCred.id));
+            await db.update(nurseCredentials).set({ licenseNumber: dc.licenseNumber }).where(eq8(nurseCredentials.id, primaryCred.id));
           }
-          await db.delete(nurseCredentials).where(eq7(nurseCredentials.id, dc.id));
+          await db.delete(nurseCredentials).where(eq8(nurseCredentials.id, dc.id));
           deduplicatedCredentialsCount++;
         }
       }
@@ -7063,7 +8218,7 @@ var settingsRouter = router({
   get: adminProcedure.input(z10.object({ key: settingKey })).query(async ({ input }) => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const rows = await db.select().from(appSettings).where(eq9(appSettings.key, input.key)).limit(1);
+    const rows = await db.select().from(appSettings).where(eq10(appSettings.key, input.key)).limit(1);
     return { key: input.key, value: rows[0]?.value ?? null };
   }),
   getAll: adminProcedure.query(async () => {
@@ -7084,16 +8239,16 @@ var settingsRouter = router({
     if (input.key === "reminderThresholdDays") {
       const nums = input.value ? input.value.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0 && n <= 365) : [];
       if (nums.length === 0) throw new TRPCError6({ code: "BAD_REQUEST", message: "Thresholds must be positive integers up to 365, separated by commas (e.g. 365,180)." });
-      await db.update(appSettings).set({ value: nums.join(",") }).where(eq9(appSettings.key, "reminderThresholdDays"));
+      await db.update(appSettings).set({ value: nums.join(",") }).where(eq10(appSettings.key, "reminderThresholdDays"));
     } else {
-      await db.update(appSettings).set({ value: input.value }).where(eq9(appSettings.key, input.key));
+      await db.update(appSettings).set({ value: input.value }).where(eq10(appSettings.key, input.key));
     }
     return { success: true };
   }),
   runRemindersNow: adminProcedure.mutation(async () => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const rows = await db.select().from(appSettings).where(eq9(appSettings.key, "reminderThresholdDays"));
+    const rows = await db.select().from(appSettings).where(eq10(appSettings.key, "reminderThresholdDays"));
     const raw = rows[0]?.value ?? "365,180";
     const thresholds = raw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
     const results = await runDailyReminders(todayDate(), thresholds.length ? thresholds : [365, 180]);
@@ -7133,7 +8288,7 @@ var settingsRouter = router({
         message: `Missing columns: ${missing.join(", ")}. Required: ${expected.join(", ")}.`
       });
     }
-    const areaRows = await db.select().from(areas).where(eq9(areas.active, true));
+    const areaRows = await db.select().from(areas).where(eq10(areas.active, true));
     const areaByName = new Map(areaRows.map((a) => [a.name.toLowerCase(), a]));
     const issues = [];
     const preview = [];
@@ -7186,7 +8341,7 @@ var settingsRouter = router({
       const idx = header.indexOf(col);
       return idx >= 0 ? (r[idx] ?? "").trim() : "";
     };
-    const areaRows = await db.select().from(areas).where(eq9(areas.active, true));
+    const areaRows = await db.select().from(areas).where(eq10(areas.active, true));
     const areaByName = new Map(areaRows.map((a) => [a.name.toLowerCase(), a]));
     const results = { imported: 0, skipped: 0, errors: [] };
     for (let i = 1; i < rows.length; i++) {
@@ -7360,9 +8515,10 @@ function parseCsv(text2) {
 init_schema();
 init_nursetrack();
 import { TRPCError as TRPCError7 } from "@trpc/server";
-import { and as and7, asc as asc4, desc as desc4, eq as eq10, gte as gte3, isNull as isNull8, lte as lte3, notInArray } from "drizzle-orm";
+import { and as and8, asc as asc4, desc as desc5, eq as eq11, gte as gte3, isNull as isNull9, lte as lte4, notInArray } from "drizzle-orm";
 import { z as z11 } from "zod";
 init_db();
+init_trainingReminders();
 var dateString = z11.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const [year, month, day] = value.split("-").map(Number);
   const parsed = new Date(Date.UTC(year, month - 1, day));
@@ -7396,8 +8552,8 @@ var seminarsRouter = router({
     }
     const conditions = [];
     if (input?.from) conditions.push(gte3(trainingEvents.endDate, input.from));
-    if (input?.to) conditions.push(lte3(trainingEvents.startDate, input.to));
-    const rows = await db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq10(trainingCatalog.id, trainingEvents.trainingId)).where(conditions.length ? and7(...conditions) : void 0).orderBy(desc4(trainingEvents.startDate), asc4(trainingCatalog.name));
+    if (input?.to) conditions.push(lte4(trainingEvents.startDate, input.to));
+    const rows = await db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq11(trainingCatalog.id, trainingEvents.trainingId)).where(conditions.length ? and8(...conditions) : void 0).orderBy(desc5(trainingEvents.startDate), asc4(trainingCatalog.name));
     const records = await db.select({ eventId: nurseTrainings.eventId, status: nurseTrainings.status }).from(nurseTrainings);
     const counts = /* @__PURE__ */ new Map();
     for (const record of records) {
@@ -7426,7 +8582,7 @@ var seminarsRouter = router({
     }
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const [training] = await db.select().from(trainingCatalog).where(eq10(trainingCatalog.id, input.trainingId)).limit(1);
+    const [training] = await db.select().from(trainingCatalog).where(eq11(trainingCatalog.id, input.trainingId)).limit(1);
     if (!training) throw new TRPCError7({ code: "NOT_FOUND", message: "Training catalog item not found." });
     const result = await db.insert(trainingEvents).values({
       ...input,
@@ -7466,14 +8622,14 @@ var seminarsRouter = router({
       if (!detail) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
       return detail;
     }
-    const [selected] = await db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq10(trainingCatalog.id, trainingEvents.trainingId)).where(eq10(trainingEvents.id, input.eventId)).limit(1);
+    const [selected] = await db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq11(trainingCatalog.id, trainingEvents.trainingId)).where(eq11(trainingEvents.id, input.eventId)).limit(1);
     if (!selected) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
     const [records, allTrainingRecords, staff, areaRows, relatedEvents] = await Promise.all([
-      db.select().from(nurseTrainings).where(eq10(nurseTrainings.eventId, input.eventId)).orderBy(desc4(nurseTrainings.completionDate)),
-      db.select().from(nurseTrainings).where(eq10(nurseTrainings.trainingId, selected.training.id)).orderBy(desc4(nurseTrainings.completionDate)),
+      db.select().from(nurseTrainings).where(eq11(nurseTrainings.eventId, input.eventId)).orderBy(desc5(nurseTrainings.completionDate)),
+      db.select().from(nurseTrainings).where(eq11(nurseTrainings.trainingId, selected.training.id)).orderBy(desc5(nurseTrainings.completionDate)),
       db.select().from(nurses).orderBy(asc4(nurses.lastName), asc4(nurses.firstName)),
       db.select().from(areas),
-      db.select().from(trainingEvents).where(eq10(trainingEvents.trainingId, selected.training.id))
+      db.select().from(trainingEvents).where(eq11(trainingEvents.trainingId, selected.training.id))
     ]);
     const staffById = new Map(staff.map((person) => [person.id, person]));
     const areaById = new Map(areaRows.map((area) => [area.id, area]));
@@ -7512,14 +8668,15 @@ var seminarsRouter = router({
   addAttendance: adminProcedure.input(z11.object({
     eventId: z11.number().int().positive(),
     nurseId: z11.number().int().positive(),
-    status: z11.enum(attendanceStatuses).default("Completed"),
+    status: z11.enum(attendanceStatuses).default("Scheduled"),
     completionDate: optionalDateInput,
     participationRole: z11.enum(PARTICIPATION_ROLES).default("Participant"),
     trainingHours: z11.number().int().positive().optional(),
     cpdUnits: z11.number().int().positive().optional(),
     certificateNumber: z11.string().max(64).optional(),
     expiryDate: optionalDateInput,
-    remarks: z11.string().max(2e3).optional()
+    remarks: z11.string().max(2e3).optional(),
+    conflictOverrideReason: z11.string().max(1e3).optional()
   }).superRefine((value, ctx) => {
     if ((value.status === "Completed" || value.status === "Expired") && !value.completionDate) {
       ctx.addIssue({ code: z11.ZodIssueCode.custom, path: ["completionDate"], message: "Completion date is required for completed attendance." });
@@ -7527,9 +8684,9 @@ var seminarsRouter = router({
   })).mutation(async ({ ctx, input }) => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    const [event] = await db.select().from(trainingEvents).where(eq10(trainingEvents.id, input.eventId)).limit(1);
+    const [event] = await db.select().from(trainingEvents).where(eq11(trainingEvents.id, input.eventId)).limit(1);
     if (!event) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
-    const [person] = await db.select().from(nurses).where(eq10(nurses.id, input.nurseId)).limit(1);
+    const [person] = await db.select().from(nurses).where(eq11(nurses.id, input.nurseId)).limit(1);
     if (!person) throw new TRPCError7({ code: "NOT_FOUND", message: "Staff member not found." });
     if (person.archivedAt || inactiveStatuses.includes(person.employmentStatus)) {
       throw new TRPCError7({ code: "BAD_REQUEST", message: "Attendance can only be added for active staff." });
@@ -7543,9 +8700,28 @@ var seminarsRouter = router({
     if (input.completionDate && input.expiryDate && input.expiryDate < input.completionDate) {
       throw new TRPCError7({ code: "BAD_REQUEST", message: "Expiry date cannot be before completion date." });
     }
-    const duplicate = await db.select({ id: nurseTrainings.id }).from(nurseTrainings).where(and7(eq10(nurseTrainings.eventId, input.eventId), eq10(nurseTrainings.nurseId, input.nurseId))).limit(1);
+    const duplicate = await db.select({ id: nurseTrainings.id }).from(nurseTrainings).where(and8(eq11(nurseTrainings.eventId, input.eventId), eq11(nurseTrainings.nurseId, input.nurseId))).limit(1);
     if (duplicate.length) throw new TRPCError7({ code: "CONFLICT", message: "Staff member is already listed for this seminar." });
-    return db.transaction(async (tx) => {
+    const startDateStr = dateKey(event.startDate);
+    const endDateStr = dateKey(event.endDate);
+    if (input.status === "Scheduled") {
+      const conflictRes = await checkTrainingConflicts(
+        input.nurseId,
+        startDateStr,
+        endDateStr,
+        event.startTime,
+        event.endTime
+      );
+      if (conflictRes.hasConflict && !conflictRes.warningOnly) {
+        if (!input.conflictOverrideReason || input.conflictOverrideReason.trim().length === 0) {
+          throw new TRPCError7({
+            code: "CONFLICT",
+            message: `Scheduling conflict detected with: ${conflictRes.conflicts.map((c) => c.trainingName).join(", ")}. Override reason is required to proceed.`
+          });
+        }
+      }
+    }
+    const id = await db.transaction(async (tx) => {
       const result = await tx.insert(nurseTrainings).values({
         nurseId: input.nurseId,
         trainingId: event.trainingId,
@@ -7559,19 +8735,48 @@ var seminarsRouter = router({
         cpdUnits: input.cpdUnits ?? null,
         certificateNumber: input.certificateNumber ?? null,
         expiryDate: input.expiryDate ?? null,
-        remarks: input.remarks ?? null
+        remarks: input.remarks ?? null,
+        scheduleVersion: 1,
+        staffResponse: "Pending",
+        evidenceRequired: true,
+        conflictOverrideReason: input.conflictOverrideReason ?? null,
+        conflictOverrideBy: input.conflictOverrideReason ? ctx.user.id : null
       }).returning({ id: nurseTrainings.id });
-      const id = Number(result[0].id);
+      const newId = Number(result[0].id);
       await tx.insert(activityLog).values({
         supervisorId: ctx.user.id,
         nurseId: input.nurseId,
         actionType: "seminar.attendance.added",
         entityType: "nurseTraining",
-        entityId: id,
+        entityId: newId,
         summary: `Seminar attendance added for ${nurseFullName(person)}`
       });
-      return { id };
+      return newId;
     });
+    if (input.status === "Scheduled") {
+      try {
+        const noticeItem = await enqueueTrainingNotice({
+          assignmentId: id,
+          scheduleVersion: 1,
+          noticeKind: "assigned",
+          recipientNurseId: input.nurseId,
+          actorUserId: ctx.user.id
+        });
+        await createMilestonesForAssignment({
+          assignmentId: id,
+          scheduleVersion: 1,
+          startDateStr,
+          recipientNurseId: input.nurseId
+        });
+        if (noticeItem?.id) {
+          await dispatchSingleOutboxItem(noticeItem.id).catch(() => {
+          });
+        }
+      } catch (noticeErr) {
+        console.warn("[Seminars] Failed to enqueue training notice:", noticeErr);
+      }
+    }
+    return { id };
   }),
   removeAttendance: adminProcedure.input(z11.object({ attendanceId: z11.number().int().positive() })).mutation(async ({ ctx, input }) => {
     const existing = await getNurseTrainingById(input.attendanceId);
@@ -7601,15 +8806,15 @@ var seminarsRouter = router({
     if (!db) {
       return getLocalSeminarMatrix(input);
     }
-    const staffConditions = [isNull8(nurses.archivedAt), notInArray(nurses.employmentStatus, inactiveStatuses)];
-    if (input?.staffType) staffConditions.push(eq10(nurses.staffType, input.staffType));
-    if (input?.areaId) staffConditions.push(eq10(nurses.currentAreaId, input.areaId));
+    const staffConditions = [isNull9(nurses.archivedAt), notInArray(nurses.employmentStatus, inactiveStatuses)];
+    if (input?.staffType) staffConditions.push(eq11(nurses.staffType, input.staffType));
+    if (input?.areaId) staffConditions.push(eq11(nurses.currentAreaId, input.areaId));
     const eventConditions = [];
     if (input?.from) eventConditions.push(gte3(trainingEvents.endDate, input.from));
-    if (input?.to) eventConditions.push(lte3(trainingEvents.startDate, input.to));
+    if (input?.to) eventConditions.push(lte4(trainingEvents.startDate, input.to));
     const [staff, events, records] = await Promise.all([
-      db.select().from(nurses).where(and7(...staffConditions)).orderBy(asc4(nurses.lastName), asc4(nurses.firstName)),
-      db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq10(trainingCatalog.id, trainingEvents.trainingId)).where(eventConditions.length ? and7(...eventConditions) : void 0).orderBy(asc4(trainingEvents.startDate), asc4(trainingCatalog.name)),
+      db.select().from(nurses).where(and8(...staffConditions)).orderBy(asc4(nurses.lastName), asc4(nurses.firstName)),
+      db.select({ event: trainingEvents, training: trainingCatalog }).from(trainingEvents).innerJoin(trainingCatalog, eq11(trainingCatalog.id, trainingEvents.trainingId)).where(eventConditions.length ? and8(...eventConditions) : void 0).orderBy(asc4(trainingEvents.startDate), asc4(trainingCatalog.name)),
       db.select().from(nurseTrainings)
     ]);
     const eventIds = new Set(events.map((item) => item.event.id));
@@ -7626,8 +8831,8 @@ var seminarsRouter = router({
       return getLocalMonthlySummary(input.year);
     }
     const [records, staff] = await Promise.all([
-      db.select().from(nurseTrainings).where(eq10(nurseTrainings.status, "Completed")),
-      db.select().from(nurses).where(and7(isNull8(nurses.archivedAt), notInArray(nurses.employmentStatus, inactiveStatuses))).orderBy(asc4(nurses.lastName), asc4(nurses.firstName))
+      db.select().from(nurseTrainings).where(eq11(nurseTrainings.status, "Completed")),
+      db.select().from(nurses).where(and8(isNull9(nurses.archivedAt), notInArray(nurses.employmentStatus, inactiveStatuses))).orderBy(asc4(nurses.lastName), asc4(nurses.firstName))
     ]);
     return staff.map((person) => {
       const months = Array.from({ length: 12 }, () => 0);
@@ -7647,7 +8852,7 @@ var seminarsRouter = router({
     const startMonth = (input.quarter - 1) * 3;
     const from = new Date(input.year, startMonth, 1);
     const to = new Date(input.year, startMonth + 3, 0);
-    const rows = await db.select({ record: nurseTrainings, person: nurses, event: trainingEvents, training: trainingCatalog }).from(nurseTrainings).innerJoin(nurses, eq10(nurses.id, nurseTrainings.nurseId)).leftJoin(trainingEvents, eq10(trainingEvents.id, nurseTrainings.eventId)).innerJoin(trainingCatalog, eq10(trainingCatalog.id, nurseTrainings.trainingId)).where(and7(eq10(nurseTrainings.status, "Completed"), gte3(nurseTrainings.completionDate, from), lte3(nurseTrainings.completionDate, to))).orderBy(asc4(nurseTrainings.completionDate), asc4(nurses.lastName), asc4(trainingCatalog.name));
+    const rows = await db.select({ record: nurseTrainings, person: nurses, event: trainingEvents, training: trainingCatalog }).from(nurseTrainings).innerJoin(nurses, eq11(nurses.id, nurseTrainings.nurseId)).leftJoin(trainingEvents, eq11(trainingEvents.id, nurseTrainings.eventId)).innerJoin(trainingCatalog, eq11(trainingCatalog.id, nurseTrainings.trainingId)).where(and8(eq11(nurseTrainings.status, "Completed"), gte3(nurseTrainings.completionDate, from), lte4(nurseTrainings.completionDate, to))).orderBy(asc4(nurseTrainings.completionDate), asc4(nurses.lastName), asc4(trainingCatalog.name));
     return rows.map((row) => ({
       recordId: row.record.id,
       nurseId: row.person.id,
@@ -7684,6 +8889,7 @@ function checkRateLimit(key, opts) {
 // server/routers/staffAccount.ts
 init_db();
 init_nursetrack();
+init_trainingReminders();
 var GENERIC_CLAIM_ERROR = "No matching staff record, or this profile already has a sign-in email.";
 var CLAIM_RATE_LIMIT = { max: 10, windowMs: 15 * 60 * 1e3 };
 var staffAccountRouter = router({
@@ -7890,12 +9096,540 @@ var staffAccountRouter = router({
       summary: `Training certificate uploaded by ${nurseFullName(nurse)} (self-service)`
     });
     return { url };
+  }),
+  myTrainingCalendar: staffProcedure.input(
+    z12.object({
+      startDate: z12.string().optional(),
+      endDate: z12.string().optional(),
+      status: z12.string().optional()
+    }).optional()
+  ).query(async ({ ctx, input }) => {
+    const assignments = await listNurseTrainings({ nurseId: ctx.nurseId });
+    const results = [];
+    for (const a of assignments) {
+      if (input?.status && input.status !== "all" && a.status !== input.status) continue;
+      const resolved = await resolveTrainingSchedule(a.id);
+      if (!resolved) continue;
+      if (input?.startDate && resolved.startDateStr && resolved.startDateStr < input.startDate) continue;
+      if (input?.endDate && resolved.startDateStr && resolved.startDateStr > input.endDate) continue;
+      results.push({
+        assignmentId: resolved.assignmentId,
+        trainingId: resolved.trainingId,
+        trainingName: resolved.trainingName,
+        startDateStr: resolved.startDateStr,
+        endDateStr: resolved.endDateStr,
+        startTime: resolved.startTime,
+        endTime: resolved.endTime,
+        venue: resolved.venue,
+        status: resolved.status,
+        scheduleVersion: resolved.scheduleVersion,
+        staffResponse: resolved.staffResponse,
+        staffResponseReason: resolved.staffResponseReason,
+        attendanceOutcome: resolved.attendanceOutcome,
+        evidenceRequired: resolved.evidenceRequired,
+        evidenceStatus: resolved.evidenceStatus,
+        instructions: resolved.remarks
+      });
+    }
+    return results;
+  }),
+  myTrainingDetail: staffProcedure.input(z12.object({ assignmentId: z12.number().int().positive() })).query(async ({ ctx, input }) => {
+    const resolved = await resolveTrainingSchedule(input.assignmentId);
+    if (!resolved || resolved.nurseId !== ctx.nurseId) {
+      throw new TRPCError8({ code: "NOT_FOUND", message: "Training assignment not found on your profile." });
+    }
+    return resolved;
+  }),
+  respondToTraining: staffProcedure.input(
+    z12.object({
+      assignmentId: z12.number().int().positive(),
+      scheduleVersion: z12.number().int().positive(),
+      response: z12.enum(["confirmed", "cannot_attend"]),
+      reason: z12.string().max(1e3).optional()
+    })
+  ).mutation(async ({ ctx, input }) => {
+    const resolved = await resolveTrainingSchedule(input.assignmentId);
+    if (!resolved || resolved.nurseId !== ctx.nurseId) {
+      throw new TRPCError8({ code: "NOT_FOUND", message: "Training assignment not found on your profile." });
+    }
+    if (resolved.scheduleVersion !== input.scheduleVersion) {
+      throw new TRPCError8({
+        code: "CONFLICT",
+        message: "The training schedule was updated by supervisor. Please review the current schedule."
+      });
+    }
+    if (input.response === "cannot_attend" && (!input.reason || input.reason.trim().length === 0)) {
+      throw new TRPCError8({
+        code: "BAD_REQUEST",
+        message: "A reason is required when indicating you cannot attend (1 to 1000 characters)."
+      });
+    }
+    const responseValue = input.response === "cannot_attend" ? "Cannot attend" : "Confirmed";
+    await updateNurseTraining(input.assignmentId, {
+      staffResponse: responseValue,
+      staffResponseReason: input.response === "cannot_attend" ? input.reason.trim() : null,
+      staffRespondedAt: /* @__PURE__ */ new Date(),
+      staffResponseVersion: input.scheduleVersion
+    });
+    await logActivity({
+      supervisorId: null,
+      nurseId: ctx.nurseId,
+      actionType: "training.response",
+      entityType: "nurseTraining",
+      entityId: input.assignmentId,
+      summary: `Staff response: ${responseValue}${input.reason ? ` - ${input.reason.trim()}` : ""}`
+    });
+    return { ok: true };
+  }),
+  submitTrainingEvidence: staffProcedure.input(
+    z12.object({
+      assignmentId: z12.number().int().positive(),
+      fileBase64: z12.string(),
+      fileName: z12.string().max(200),
+      mimeType: z12.string()
+    })
+  ).mutation(async ({ ctx, input }) => {
+    const resolved = await resolveTrainingSchedule(input.assignmentId);
+    if (!resolved || resolved.nurseId !== ctx.nurseId) {
+      throw new TRPCError8({ code: "NOT_FOUND", message: "Training assignment not found on your profile." });
+    }
+    const mimeCheck = validateMime(input.mimeType, "document");
+    if (!mimeCheck.ok) throw new TRPCError8({ code: "BAD_REQUEST", message: mimeCheck.error });
+    const buffer = Buffer.from(input.fileBase64, "base64");
+    if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const key = storageKey("certificates", ctx.nurseId, sanitizeFilename(input.fileName));
+    const { url } = await storagePut(key, buffer, input.mimeType);
+    await updateNurseTraining(input.assignmentId, {
+      certificateKey: key,
+      evidenceStatus: "Submitted",
+      evidenceSubmittedAt: /* @__PURE__ */ new Date()
+    });
+    await logActivity({
+      supervisorId: null,
+      nurseId: ctx.nurseId,
+      actionType: "training.evidence.submitted",
+      entityType: "nurseTraining",
+      entityId: input.assignmentId,
+      summary: `Training completion evidence submitted for ${resolved.trainingName}`
+    });
+    return { ok: true, url };
+  })
+});
+
+// server/routers/staffFeed.ts
+import { z as z13 } from "zod";
+import { TRPCError as TRPCError9 } from "@trpc/server";
+
+// server/staffFeed.ts
+init_db();
+init_localDb();
+init_schema();
+import { eq as eq12, and as and9, desc as desc6, isNull as isNull10, sql as sql11, inArray as inArray4 } from "drizzle-orm";
+async function createStaffMessage(input) {
+  const title = input.title.trim();
+  const body = input.body.trim();
+  if (!title || title.length > 160) throw new Error("Title must be between 1 and 160 characters");
+  if (!body || body.length > 5e3) throw new Error("Body must be between 1 and 5000 characters");
+  const uniqueRecipients = Array.from(new Set(input.recipientNurseIds.filter((id) => typeof id === "number" && id > 0)));
+  if (uniqueRecipients.length === 0) throw new Error("At least one recipient nurse is required");
+  const db = await getDb();
+  if (db) {
+    const [msg] = await db.insert(staffMessages).values({
+      senderUserId: input.senderUserId,
+      title,
+      body,
+      revision: 1
+    }).returning();
+    const recipientRows = uniqueRecipients.map((nurseId) => ({
+      messageId: msg.id,
+      nurseId
+    }));
+    await db.insert(staffMessageRecipients).values(recipientRows);
+    return msg;
+  }
+  const sqlite = getSqliteDb();
+  const res = sqlite.prepare("INSERT INTO staffMessages (senderUserId, title, body, revision) VALUES (?, ?, ?, 1)").run(input.senderUserId, title, body);
+  const msgId = Number(res.lastInsertRowid);
+  const insRecipient = sqlite.prepare("INSERT OR IGNORE INTO staffMessageRecipients (messageId, nurseId) VALUES (?, ?)");
+  const insertMany = sqlite.transaction((rIds) => {
+    for (const rId of rIds) {
+      insRecipient.run(msgId, rId);
+    }
+  });
+  insertMany(uniqueRecipients);
+  return sqlite.prepare("SELECT * FROM staffMessages WHERE id = ?").get(msgId);
+}
+async function listSentStaffMessages(limit = 50) {
+  const db = await getDb();
+  if (db) {
+    const messages = await db.select({
+      id: staffMessages.id,
+      senderUserId: staffMessages.senderUserId,
+      title: staffMessages.title,
+      body: staffMessages.body,
+      revision: staffMessages.revision,
+      archivedAt: staffMessages.archivedAt,
+      createdAt: staffMessages.createdAt,
+      updatedAt: staffMessages.updatedAt,
+      senderName: users.name
+    }).from(staffMessages).leftJoin(users, eq12(users.id, staffMessages.senderUserId)).orderBy(desc6(staffMessages.createdAt)).limit(limit);
+    if (messages.length === 0) return [];
+    const msgIds = messages.map((m) => m.id);
+    const recips = await db.select({
+      messageId: staffMessageRecipients.messageId,
+      nurseId: staffMessageRecipients.nurseId,
+      readAt: staffMessageRecipients.readAt,
+      lastReadRevision: staffMessageRecipients.lastReadRevision
+    }).from(staffMessageRecipients).where(inArray4(staffMessageRecipients.messageId, msgIds));
+    const acks = await db.select({
+      messageId: staffMessageAcknowledgments.messageId,
+      revision: staffMessageAcknowledgments.revision
+    }).from(staffMessageAcknowledgments).where(inArray4(staffMessageAcknowledgments.messageId, msgIds));
+    return messages.map((m) => {
+      const mRecips = recips.filter((r) => r.messageId === m.id);
+      const mAcks = acks.filter((a) => a.messageId === m.id && a.revision === m.revision);
+      const readCount = mRecips.filter((r) => r.readAt != null && (r.lastReadRevision ?? 0) >= m.revision).length;
+      return {
+        ...m,
+        recipientCount: mRecips.length,
+        readCount,
+        ackCount: mAcks.length
+      };
+    });
+  }
+  const sqlite = getSqliteDb();
+  const rows = sqlite.prepare(
+    `SELECT m.*, u.name as senderName,
+       (SELECT count(*) FROM staffMessageRecipients r WHERE r.messageId = m.id) as recipientCount,
+       (SELECT count(*) FROM staffMessageRecipients r WHERE r.messageId = m.id AND r.readAt IS NOT NULL AND r.lastReadRevision >= m.revision) as readCount,
+       (SELECT count(*) FROM staffMessageAcknowledgments a WHERE a.messageId = m.id AND a.revision = m.revision) as ackCount
+       FROM staffMessages m
+       LEFT JOIN users u ON u.id = m.senderUserId
+       ORDER BY datetime(m.createdAt) DESC LIMIT ?`
+  ).all(limit);
+  return rows;
+}
+async function getStaffMessageDetail(messageId) {
+  const db = await getDb();
+  if (db) {
+    const [msg2] = await db.select({
+      id: staffMessages.id,
+      senderUserId: staffMessages.senderUserId,
+      title: staffMessages.title,
+      body: staffMessages.body,
+      revision: staffMessages.revision,
+      archivedAt: staffMessages.archivedAt,
+      createdAt: staffMessages.createdAt,
+      updatedAt: staffMessages.updatedAt,
+      senderName: users.name
+    }).from(staffMessages).leftJoin(users, eq12(users.id, staffMessages.senderUserId)).where(eq12(staffMessages.id, messageId));
+    if (!msg2) return null;
+    const recipients2 = await db.select({
+      nurseId: staffMessageRecipients.nurseId,
+      readAt: staffMessageRecipients.readAt,
+      lastReadRevision: staffMessageRecipients.lastReadRevision,
+      employeeId: nurses.employeeId,
+      firstName: nurses.firstName,
+      lastName: nurses.lastName
+    }).from(staffMessageRecipients).innerJoin(nurses, eq12(nurses.id, staffMessageRecipients.nurseId)).where(eq12(staffMessageRecipients.messageId, messageId));
+    const acks = await db.select({
+      nurseId: staffMessageAcknowledgments.nurseId,
+      revision: staffMessageAcknowledgments.revision,
+      acknowledgedAt: staffMessageAcknowledgments.acknowledgedAt
+    }).from(staffMessageAcknowledgments).where(eq12(staffMessageAcknowledgments.messageId, messageId));
+    const ackMap = new Map(acks.map((a) => [`${a.nurseId}:${a.revision}`, a.acknowledgedAt]));
+    return {
+      ...msg2,
+      recipients: recipients2.map((r) => ({
+        ...r,
+        isRead: r.readAt != null && (r.lastReadRevision ?? 0) >= msg2.revision,
+        acknowledgedAt: ackMap.get(`${r.nurseId}:${msg2.revision}`) ?? null
+      }))
+    };
+  }
+  const sqlite = getSqliteDb();
+  const msg = sqlite.prepare(
+    `SELECT m.*, u.name as senderName FROM staffMessages m LEFT JOIN users u ON u.id = m.senderUserId WHERE m.id = ?`
+  ).get(messageId);
+  if (!msg) return null;
+  const recipients = sqlite.prepare(
+    `SELECT r.nurseId, r.readAt, r.lastReadRevision, n.employeeId, n.firstName, n.lastName,
+       (SELECT a.acknowledgedAt FROM staffMessageAcknowledgments a WHERE a.messageId = r.messageId AND a.nurseId = r.nurseId AND a.revision = ?) as acknowledgedAt
+       FROM staffMessageRecipients r
+       INNER JOIN nurses n ON n.id = r.nurseId
+       WHERE r.messageId = ?`
+  ).all(msg.revision, messageId);
+  return {
+    ...msg,
+    recipients: recipients.map((r) => ({
+      ...r,
+      isRead: r.readAt != null && (r.lastReadRevision ?? 0) >= msg.revision
+    }))
+  };
+}
+async function updateStaffMessage(messageId, title, body) {
+  const trimmedTitle = title.trim();
+  const trimmedBody = body.trim();
+  if (!trimmedTitle || trimmedTitle.length > 160) throw new Error("Title must be between 1 and 160 characters");
+  if (!trimmedBody || trimmedBody.length > 5e3) throw new Error("Body must be between 1 and 5000 characters");
+  const db = await getDb();
+  if (db) {
+    const [msg2] = await db.select().from(staffMessages).where(eq12(staffMessages.id, messageId));
+    if (!msg2) throw new Error("Message not found");
+    const [updated] = await db.update(staffMessages).set({
+      title: trimmedTitle,
+      body: trimmedBody,
+      revision: msg2.revision + 1,
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq12(staffMessages.id, messageId)).returning();
+    return updated;
+  }
+  const sqlite = getSqliteDb();
+  const msg = sqlite.prepare("SELECT * FROM staffMessages WHERE id = ?").get(messageId);
+  if (!msg) throw new Error("Message not found");
+  sqlite.prepare("UPDATE staffMessages SET title = ?, body = ?, revision = revision + 1, updatedAt = CURRENT_TIMESTAMP WHERE id = ?").run(trimmedTitle, trimmedBody, messageId);
+  return sqlite.prepare("SELECT * FROM staffMessages WHERE id = ?").get(messageId);
+}
+async function archiveStaffMessage(messageId) {
+  const db = await getDb();
+  if (db) {
+    await db.update(staffMessages).set({ archivedAt: /* @__PURE__ */ new Date() }).where(eq12(staffMessages.id, messageId));
+    return;
+  }
+  const sqlite = getSqliteDb();
+  sqlite.prepare("UPDATE staffMessages SET archivedAt = CURRENT_TIMESTAMP WHERE id = ?").run(messageId);
+}
+async function listNurseFeed(nurseId, limit = 50) {
+  const db = await getDb();
+  if (db) {
+    const rows2 = await db.select({
+      id: staffMessages.id,
+      title: staffMessages.title,
+      body: staffMessages.body,
+      revision: staffMessages.revision,
+      createdAt: staffMessages.createdAt,
+      updatedAt: staffMessages.updatedAt,
+      senderName: users.name,
+      readAt: staffMessageRecipients.readAt,
+      lastReadRevision: staffMessageRecipients.lastReadRevision
+    }).from(staffMessageRecipients).innerJoin(staffMessages, eq12(staffMessages.id, staffMessageRecipients.messageId)).leftJoin(users, eq12(users.id, staffMessages.senderUserId)).where(and9(eq12(staffMessageRecipients.nurseId, nurseId), isNull10(staffMessages.archivedAt))).orderBy(desc6(staffMessages.createdAt)).limit(limit);
+    if (rows2.length === 0) return [];
+    const msgIds = rows2.map((r) => r.id);
+    const acks = await db.select({
+      messageId: staffMessageAcknowledgments.messageId,
+      revision: staffMessageAcknowledgments.revision,
+      acknowledgedAt: staffMessageAcknowledgments.acknowledgedAt
+    }).from(staffMessageAcknowledgments).where(and9(eq12(staffMessageAcknowledgments.nurseId, nurseId), inArray4(staffMessageAcknowledgments.messageId, msgIds)));
+    const ackMap = new Map(acks.map((a) => [`${a.messageId}:${a.revision}`, a.acknowledgedAt]));
+    return rows2.map((r) => {
+      const isRead = r.readAt != null && (r.lastReadRevision ?? 0) >= r.revision;
+      const acknowledgedAt = ackMap.get(`${r.id}:${r.revision}`) ?? null;
+      return {
+        ...r,
+        isRead,
+        isUnread: !isRead,
+        isEdited: r.revision > 1,
+        acknowledgedAt
+      };
+    });
+  }
+  const sqlite = getSqliteDb();
+  const rows = sqlite.prepare(
+    `SELECT m.id, m.title, m.body, m.revision, m.createdAt, m.updatedAt, u.name as senderName,
+       r.readAt, r.lastReadRevision,
+       (SELECT a.acknowledgedAt FROM staffMessageAcknowledgments a WHERE a.messageId = m.id AND a.nurseId = ? AND a.revision = m.revision) as acknowledgedAt
+       FROM staffMessageRecipients r
+       INNER JOIN staffMessages m ON m.id = r.messageId
+       LEFT JOIN users u ON u.id = m.senderUserId
+       WHERE r.nurseId = ? AND m.archivedAt IS NULL
+       ORDER BY datetime(m.createdAt) DESC LIMIT ?`
+  ).all(nurseId, nurseId, limit);
+  return rows.map((r) => {
+    const isRead = r.readAt != null && (r.lastReadRevision ?? 0) >= r.revision;
+    return {
+      ...r,
+      isRead,
+      isUnread: !isRead,
+      isEdited: r.revision > 1
+    };
+  });
+}
+async function countUnreadNurseMessages(nurseId) {
+  const db = await getDb();
+  if (db) {
+    const rows = await db.select({ count: sql11`count(*)` }).from(staffMessageRecipients).innerJoin(staffMessages, eq12(staffMessages.id, staffMessageRecipients.messageId)).where(
+      and9(
+        eq12(staffMessageRecipients.nurseId, nurseId),
+        isNull10(staffMessages.archivedAt),
+        sql11`(${staffMessageRecipients.readAt} IS NULL OR ${staffMessageRecipients.lastReadRevision} < ${staffMessages.revision})`
+      )
+    );
+    return Number(rows[0]?.count ?? 0);
+  }
+  const sqlite = getSqliteDb();
+  const row = sqlite.prepare(
+    `SELECT count(*) as cnt FROM staffMessageRecipients r
+       INNER JOIN staffMessages m ON m.id = r.messageId
+       WHERE r.nurseId = ? AND m.archivedAt IS NULL AND (r.readAt IS NULL OR r.lastReadRevision < m.revision)`
+  ).get(nurseId);
+  return row?.cnt ?? 0;
+}
+async function markNurseMessageRead(nurseId, messageId) {
+  const db = await getDb();
+  if (db) {
+    const [msg2] = await db.select().from(staffMessages).where(eq12(staffMessages.id, messageId));
+    if (!msg2) return;
+    await db.update(staffMessageRecipients).set({
+      readAt: /* @__PURE__ */ new Date(),
+      lastReadRevision: msg2.revision
+    }).where(and9(eq12(staffMessageRecipients.messageId, messageId), eq12(staffMessageRecipients.nurseId, nurseId)));
+    return;
+  }
+  const sqlite = getSqliteDb();
+  const msg = sqlite.prepare("SELECT revision FROM staffMessages WHERE id = ?").get(messageId);
+  if (!msg) return;
+  sqlite.prepare("UPDATE staffMessageRecipients SET readAt = CURRENT_TIMESTAMP, lastReadRevision = ? WHERE messageId = ? AND nurseId = ?").run(msg.revision, messageId, nurseId);
+}
+async function acknowledgeNurseMessage(nurseId, messageId, revision) {
+  const db = await getDb();
+  if (db) {
+    const [msg2] = await db.select().from(staffMessages).where(eq12(staffMessages.id, messageId));
+    if (!msg2) throw new Error("Message not found");
+    if (msg2.revision !== revision) {
+      throw new Error(`Message was updated to revision ${msg2.revision}. Please review the updated content before acknowledging.`);
+    }
+    const [recipient2] = await db.select().from(staffMessageRecipients).where(and9(eq12(staffMessageRecipients.messageId, messageId), eq12(staffMessageRecipients.nurseId, nurseId)));
+    if (!recipient2) throw new Error("You are not a recipient of this message");
+    await db.insert(staffMessageAcknowledgments).values({
+      messageId,
+      nurseId,
+      revision
+    }).onConflictDoNothing();
+    await db.update(staffMessageRecipients).set({
+      readAt: /* @__PURE__ */ new Date(),
+      lastReadRevision: msg2.revision
+    }).where(and9(eq12(staffMessageRecipients.messageId, messageId), eq12(staffMessageRecipients.nurseId, nurseId)));
+    return { success: true, messageId, revision };
+  }
+  const sqlite = getSqliteDb();
+  const msg = sqlite.prepare("SELECT revision FROM staffMessages WHERE id = ?").get(messageId);
+  if (!msg) throw new Error("Message not found");
+  if (msg.revision !== revision) {
+    throw new Error(`Message was updated to revision ${msg.revision}. Please review the updated content before acknowledging.`);
+  }
+  const recipient = sqlite.prepare("SELECT * FROM staffMessageRecipients WHERE messageId = ? AND nurseId = ?").get(messageId, nurseId);
+  if (!recipient) throw new Error("You are not a recipient of this message");
+  sqlite.prepare("INSERT OR IGNORE INTO staffMessageAcknowledgments (messageId, nurseId, revision) VALUES (?, ?, ?)").run(messageId, nurseId, revision);
+  sqlite.prepare("UPDATE staffMessageRecipients SET readAt = CURRENT_TIMESTAMP, lastReadRevision = ? WHERE messageId = ? AND nurseId = ?").run(msg.revision, messageId, nurseId);
+  return { success: true, messageId, revision };
+}
+
+// server/routers/staffFeed.ts
+init_trainingReminders();
+init_db();
+init_localDb();
+init_schema();
+import { desc as desc7, eq as eq13 } from "drizzle-orm";
+var staffFeedRouter = router({
+  // --- SUPERVISOR PROCEDURES (adminProcedure) ---
+  createMessage: adminProcedure.input(
+    z13.object({
+      title: z13.string().min(1).max(160),
+      body: z13.string().min(1).max(5e3),
+      recipientNurseIds: z13.array(z13.number().int().positive()).min(1)
+    })
+  ).mutation(async ({ ctx, input }) => {
+    try {
+      const msg = await createStaffMessage({
+        senderUserId: ctx.user.id,
+        title: input.title,
+        body: input.body,
+        recipientNurseIds: input.recipientNurseIds
+      });
+      return { ok: true, message: msg };
+    } catch (err) {
+      throw new TRPCError9({ code: "BAD_REQUEST", message: err.message || "Failed to create message" });
+    }
+  }),
+  listSentMessages: adminProcedure.input(z13.object({ limit: z13.number().int().positive().max(100).optional() }).optional()).query(async ({ input }) => {
+    return listSentStaffMessages(input?.limit ?? 50);
+  }),
+  getMessageDetail: adminProcedure.input(z13.object({ id: z13.number().int().positive() })).query(async ({ input }) => {
+    const msg = await getStaffMessageDetail(input.id);
+    if (!msg) throw new TRPCError9({ code: "NOT_FOUND", message: "Message not found" });
+    return msg;
+  }),
+  updateMessage: adminProcedure.input(
+    z13.object({
+      id: z13.number().int().positive(),
+      title: z13.string().min(1).max(160),
+      body: z13.string().min(1).max(5e3)
+    })
+  ).mutation(async ({ input }) => {
+    try {
+      const updated = await updateStaffMessage(input.id, input.title, input.body);
+      return { ok: true, message: updated };
+    } catch (err) {
+      throw new TRPCError9({ code: "BAD_REQUEST", message: err.message || "Failed to update message" });
+    }
+  }),
+  archiveMessage: adminProcedure.input(z13.object({ id: z13.number().int().positive() })).mutation(async ({ input }) => {
+    await archiveStaffMessage(input.id);
+    return { ok: true };
+  }),
+  retryOutbox: adminProcedure.input(z13.object({ itemId: z13.number().int().positive() })).mutation(async ({ input }) => {
+    try {
+      const res = await retryFailedOutboxItem(input.itemId);
+      return { ok: res.ok, status: res.status, error: res.error };
+    } catch (err) {
+      throw new TRPCError9({ code: "BAD_REQUEST", message: err.message || "Failed to retry delivery" });
+    }
+  }),
+  // --- NURSE STAFF PROCEDURES (staffProcedure, scoped to ctx.nurseId) ---
+  myFeed: staffProcedure.input(z13.object({ limit: z13.number().int().positive().max(100).optional() }).optional()).query(async ({ ctx, input }) => {
+    return listNurseFeed(ctx.nurseId, input?.limit ?? 50);
+  }),
+  unreadCount: staffProcedure.query(async ({ ctx }) => {
+    const count = await countUnreadNurseMessages(ctx.nurseId);
+    return { count };
+  }),
+  markRead: staffProcedure.input(z13.object({ messageId: z13.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    await markNurseMessageRead(ctx.nurseId, input.messageId);
+    return { ok: true };
+  }),
+  acknowledge: staffProcedure.input(
+    z13.object({
+      messageId: z13.number().int().positive(),
+      revision: z13.number().int().positive()
+    })
+  ).mutation(async ({ ctx, input }) => {
+    try {
+      await acknowledgeNurseMessage(ctx.nurseId, input.messageId, input.revision);
+      return { ok: true };
+    } catch (err) {
+      if (err.message?.includes("newer revision")) {
+        throw new TRPCError9({
+          code: "CONFLICT",
+          message: "This message was updated by supervisor. Please read the latest version before acknowledging."
+        });
+      }
+      throw new TRPCError9({ code: "BAD_REQUEST", message: err.message || "Failed to acknowledge message" });
+    }
+  }),
+  myActivity: staffProcedure.input(z13.object({ limit: z13.number().int().positive().max(50).optional() }).optional()).query(async ({ ctx, input }) => {
+    const limit = input?.limit ?? 20;
+    const db = await getDb();
+    if (db) {
+      return db.select().from(trainingActivity).where(eq13(trainingActivity.nurseId, ctx.nurseId)).orderBy(desc7(trainingActivity.createdAt)).limit(limit);
+    }
+    const sqlite = getSqliteDb();
+    return sqlite.prepare("SELECT * FROM trainingActivity WHERE nurseId = ? ORDER BY datetime(createdAt) DESC LIMIT ?").all(ctx.nurseId, limit);
   })
 });
 
 // server/routers/smartImport.ts
-import { z as z14 } from "zod";
-import { TRPCError as TRPCError9 } from "@trpc/server";
+import { z as z15 } from "zod";
+import { TRPCError as TRPCError10 } from "@trpc/server";
 import { nanoid } from "nanoid";
 init_db();
 init_nursetrack();
@@ -8045,20 +9779,20 @@ async function extractDocx(buffer) {
 }
 
 // server/_core/aiExtraction.ts
-import { z as z13 } from "zod";
+import { z as z14 } from "zod";
 init_nursetrack();
-var fieldValueSchema = z13.object({
-  value: z13.union([z13.string(), z13.number(), z13.boolean(), z13.null()]).nullable(),
-  confidence: z13.number().min(0).max(1)
+var fieldValueSchema = z14.object({
+  value: z14.union([z14.string(), z14.number(), z14.boolean(), z14.null()]).nullable(),
+  confidence: z14.number().min(0).max(1)
 });
-var aiRowSchema = z13.object({
-  kind: z13.enum(SMART_IMPORT_KINDS),
-  nurseEmployeeIdGuess: z13.string().nullable().optional(),
-  nurseNameGuess: z13.string().nullable().optional(),
-  fields: z13.record(z13.string(), fieldValueSchema),
-  sourceExcerpt: z13.string().default("")
+var aiRowSchema = z14.object({
+  kind: z14.enum(SMART_IMPORT_KINDS),
+  nurseEmployeeIdGuess: z14.string().nullable().optional(),
+  nurseNameGuess: z14.string().nullable().optional(),
+  fields: z14.record(z14.string(), fieldValueSchema),
+  sourceExcerpt: z14.string().default("")
 });
-var aiResponseSchema = z13.object({ rows: z13.array(aiRowSchema) });
+var aiResponseSchema = z14.object({ rows: z14.array(aiRowSchema) });
 function buildPrompt(text2, context) {
   const fieldSchemaDoc = SMART_IMPORT_KINDS.map((kind) => {
     const fields = SMART_IMPORT_FIELDS[kind];
@@ -8167,21 +9901,21 @@ function resolveNurse(employeeIdGuess, nameGuess, nurses2) {
 }
 
 // server/routers/smartImport.ts
-var fieldValueSchema2 = z14.object({
-  value: z14.union([z14.string(), z14.number(), z14.boolean(), z14.null()]).nullable(),
-  confidence: z14.number(),
-  refId: z14.number().nullable().optional()
+var fieldValueSchema2 = z15.object({
+  value: z15.union([z15.string(), z15.number(), z15.boolean(), z15.null()]).nullable(),
+  confidence: z15.number(),
+  refId: z15.number().nullable().optional()
 });
-var rowInputSchema = z14.object({
-  rowId: z14.string(),
-  kind: z14.enum(SMART_IMPORT_KINDS),
-  action: z14.enum(["create", "update"]),
-  nurseId: z14.number().nullable(),
-  nurseMatchConfidence: z14.number(),
-  nurseNameGuess: z14.string(),
-  fields: z14.record(z14.string(), fieldValueSchema2),
-  sourceExcerpt: z14.string(),
-  include: z14.boolean()
+var rowInputSchema = z15.object({
+  rowId: z15.string(),
+  kind: z15.enum(SMART_IMPORT_KINDS),
+  action: z15.enum(["create", "update"]),
+  nurseId: z15.number().nullable(),
+  nurseMatchConfidence: z15.number(),
+  nurseNameGuess: z15.string(),
+  fields: z15.record(z15.string(), fieldValueSchema2),
+  sourceExcerpt: z15.string(),
+  include: z15.boolean()
 });
 var drafts = /* @__PURE__ */ new Map();
 function sweepExpired() {
@@ -8189,16 +9923,16 @@ function sweepExpired() {
   for (const [id, d] of Array.from(drafts)) if (d.expiresAt < now) drafts.delete(id);
 }
 var smartImportRouter = router({
-  analyze: adminProcedure.input(z14.object({ fileBase64: z14.string(), fileName: z14.string().max(200), mimeType: z14.string() })).mutation(async ({ ctx, input }) => {
+  analyze: adminProcedure.input(z15.object({ fileBase64: z15.string(), fileName: z15.string().max(200), mimeType: z15.string() })).mutation(async ({ ctx, input }) => {
     const mimeCheck = validateMime(input.mimeType, "smartImport");
-    if (!mimeCheck.ok) throw new TRPCError9({ code: "BAD_REQUEST", message: mimeCheck.error });
+    if (!mimeCheck.ok) throw new TRPCError10({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
-    if (buffer.length > MAX_FILE_BYTES) throw new TRPCError9({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    if (buffer.length > MAX_FILE_BYTES) throw new TRPCError10({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
     let extracted;
     try {
       extracted = await extractText(buffer, input.mimeType, input.fileName);
     } catch (err) {
-      throw new TRPCError9({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Could not read this file." });
+      throw new TRPCError10({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Could not read this file." });
     }
     const [nurses2, areas2, credentialTypes2, trainingCatalog2] = await Promise.all([
       listNurses(),
@@ -8215,7 +9949,7 @@ var smartImportRouter = router({
         existingTrainingCatalog: trainingCatalog2.map((t2) => t2.name)
       });
     } catch (err) {
-      throw new TRPCError9({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "AI extraction failed." });
+      throw new TRPCError10({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "AI extraction failed." });
     }
     const rows = aiRows.map((r) => {
       const { nurseId, confidence: nurseMatchConfidence } = resolveNurse(r.nurseEmployeeIdGuess, r.nurseNameGuess, nurses2);
@@ -8255,11 +9989,11 @@ var smartImportRouter = router({
     drafts.set(draftId, { supervisorId: ctx.user.id, sourceDocumentKey, expiresAt: Date.now() + SMART_IMPORT_DRAFT_TTL_MS });
     return { draftId, rows, fileName: input.fileName };
   }),
-  commit: adminProcedure.input(z14.object({ draftId: z14.string(), rows: z14.array(rowInputSchema) })).mutation(async ({ ctx, input }) => {
+  commit: adminProcedure.input(z15.object({ draftId: z15.string(), rows: z15.array(rowInputSchema) })).mutation(async ({ ctx, input }) => {
     sweepExpired();
     const draft = drafts.get(input.draftId);
     if (!draft || draft.supervisorId !== ctx.user.id) {
-      throw new TRPCError9({ code: "NOT_FOUND", message: "This import session has expired. Please re-upload the file." });
+      throw new TRPCError10({ code: "NOT_FOUND", message: "This import session has expired. Please re-upload the file." });
     }
     let created = 0;
     let updated = 0;
@@ -8486,8 +10220,8 @@ async function commitCalendarEvent(row, supervisorId) {
 }
 
 // server/routers/aiInsights.ts
-import { z as z15 } from "zod";
-import { TRPCError as TRPCError10 } from "@trpc/server";
+import { z as z16 } from "zod";
+import { TRPCError as TRPCError11 } from "@trpc/server";
 
 // server/_core/aiInsights.ts
 init_db();
@@ -8669,20 +10403,20 @@ var aiInsightsRouter = router({
       const report = await generateInsightsReport();
       return { report, generatedAt: (/* @__PURE__ */ new Date()).toISOString() };
     } catch (err) {
-      throw new TRPCError10({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "Failed to generate report." });
+      throw new TRPCError11({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "Failed to generate report." });
     }
   }),
   chat: adminProcedure.input(
-    z15.object({
-      question: z15.string().min(1).max(1e3),
-      history: z15.array(z15.object({ role: z15.enum(["user", "assistant"]), content: z15.string() })).max(20).optional()
+    z16.object({
+      question: z16.string().min(1).max(1e3),
+      history: z16.array(z16.object({ role: z16.enum(["user", "assistant"]), content: z16.string() })).max(20).optional()
     })
   ).mutation(async ({ input }) => {
     try {
       const answer = await answerInsightsChat(input.question, input.history ?? []);
       return { answer };
     } catch (err) {
-      throw new TRPCError10({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "Failed to answer question." });
+      throw new TRPCError11({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "Failed to answer question." });
     }
   })
 });
@@ -8712,16 +10446,17 @@ var appRouter = router({
   settings: settingsRouter,
   seminars: seminarsRouter,
   staffAccount: staffAccountRouter,
+  staffFeed: staffFeedRouter,
   smartImport: smartImportRouter,
   aiInsights: aiInsightsRouter
 });
 
 // server/importStaffEmails.ts
 init_adminAccess();
-import { z as z16 } from "zod";
+import { z as z17 } from "zod";
 init_db();
-var bodySchema = z16.object({
-  rows: z16.array(z16.object({ licenseNumber: z16.string(), email: z16.string() })).max(2e3)
+var bodySchema = z17.object({
+  rows: z17.array(z17.object({ licenseNumber: z17.string(), email: z17.string() })).max(2e3)
 });
 async function importStaffEmailsHandler(req, res) {
   try {
@@ -8748,19 +10483,19 @@ async function importStaffEmailsHandler(req, res) {
 
 // server/importStaffRoster.ts
 init_adminAccess();
-import { z as z17 } from "zod";
+import { z as z18 } from "zod";
 init_db();
 init_nursetrack();
-var rowSchema = z17.object({
-  firstName: z17.string().min(1).max(128),
-  middleName: z17.string().max(128).optional(),
-  lastName: z17.string().min(1).max(128),
-  staffType: z17.enum(["Registered Nurse", "Nursing Attendant"]),
-  licenseNumber: z17.string().min(1).max(64),
-  expiryDate: z17.string(),
-  email: z17.string().email()
+var rowSchema = z18.object({
+  firstName: z18.string().min(1).max(128),
+  middleName: z18.string().max(128).optional(),
+  lastName: z18.string().min(1).max(128),
+  staffType: z18.enum(["Registered Nurse", "Nursing Attendant"]),
+  licenseNumber: z18.string().min(1).max(64),
+  expiryDate: z18.string(),
+  email: z18.string().email()
 });
-var bodySchema2 = z17.object({ rows: z17.array(rowSchema).max(500) });
+var bodySchema2 = z18.object({ rows: z18.array(rowSchema).max(500) });
 var CREDENTIAL_TYPE_BY_STAFF_TYPE = {
   "Registered Nurse": CANONICAL_CREDENTIAL_TYPES.RN,
   "Nursing Attendant": CANONICAL_CREDENTIAL_TYPES.NA
@@ -8836,10 +10571,10 @@ async function importStaffRosterHandler(req, res) {
 
 // server/importStaffAreas.ts
 init_adminAccess();
-import { z as z18 } from "zod";
+import { z as z19 } from "zod";
 init_db();
-var rowSchema2 = z18.object({ fullName: z18.string().min(1).max(256), areaName: z18.string().min(1).max(128) });
-var bodySchema3 = z18.object({ rows: z18.array(rowSchema2).max(500) });
+var rowSchema2 = z19.object({ fullName: z19.string().min(1).max(256), areaName: z19.string().min(1).max(128) });
+var bodySchema3 = z19.object({ rows: z19.array(rowSchema2).max(500) });
 function normTokenSet(s) {
   return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
 }
@@ -8931,16 +10666,16 @@ async function importStaffAreasHandler(req, res) {
 
 // server/importStaffTrainings.ts
 init_adminAccess();
-import { z as z19 } from "zod";
+import { z as z20 } from "zod";
 init_db();
-var rowSchema3 = z19.object({
-  fullName: z19.string().min(1).max(256),
-  title: z19.string().min(1).max(512),
-  dateText: z19.string().max(256).optional(),
-  provider: z19.string().max(128).optional(),
-  quarter: z19.string().max(32)
+var rowSchema3 = z20.object({
+  fullName: z20.string().min(1).max(256),
+  title: z20.string().min(1).max(512),
+  dateText: z20.string().max(256).optional(),
+  provider: z20.string().max(128).optional(),
+  quarter: z20.string().max(32)
 });
-var bodySchema4 = z19.object({ rows: z19.array(rowSchema3).max(1e3) });
+var bodySchema4 = z20.object({ rows: z20.array(rowSchema3).max(1e3) });
 function normTokenSet2(s) {
   return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
 }

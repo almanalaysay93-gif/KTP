@@ -4,7 +4,7 @@ export interface SendEmailOptions {
   to: string;
   subject: string;
   html: string;
-  emailType: "license_expiry" | "seminar_announcement" | "seminar_reminder" | "profile_update" | "manual_notice";
+  emailType: "license_expiry" | "seminar_announcement" | "seminar_reminder" | "profile_update" | "manual_notice" | "training_reminder";
   nurseId: number;
   referenceId?: number | null;
   thresholdKey?: string | null;
@@ -13,6 +13,7 @@ export interface SendEmailOptions {
 export interface SendEmailResult {
   success: boolean;
   status: "sent" | "mock_sent" | "failed";
+  messageId?: string;
   error?: string;
 }
 
@@ -102,7 +103,8 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
       errorMessage: null,
     });
 
-    return { success: true, status: "sent" };
+    const resData = await res.json().catch(() => null);
+    return { success: true, status: "sent", messageId: resData?.id };
   } catch (err: any) {
     const errorMsg = err?.message || String(err);
     console.error(`[Email:Exception] ${errorMsg}`);

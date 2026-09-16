@@ -19,39 +19,13 @@ import { LICENSE_STATUS_META, nurseIdLabel, type LicenseStatus, formatDate } fro
 import { toast } from "sonner";
 import { FileCheck, LogOut, Plus, Upload, CheckCircle2 } from "lucide-react";
 
+import StaffLayout from "@/components/StaffLayout";
+
 function StaffShell({ children }: { children: React.ReactNode }) {
-  const { logout } = useAuth();
-  const utils = trpc.useUtils();
-  const [, navigate] = useLocation();
-
-  const handleSignOut = async () => {
-    // logout() clears the Google session cookie AND the claim cookie server-side
-    // (server/routers.ts) — a claim session has no Google cookie, so this used
-    // to look like a no-op. Clear the cached profile too, so a second staff
-    // member on this browser never sees the previous one's data before the
-    // redirect lands.
-    await logout();
-    utils.staffAccount.myLink.setData(undefined, undefined);
-    utils.staffAccount.myProfile.setData(undefined, undefined);
-    navigate("/staff-signin");
-  };
-
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="flex items-center justify-between px-6 py-4 border-b glass-panel">
-        <div className="flex items-center gap-2.5">
-          <img src="/branding/spmc-nephro-cluster.jpg" alt="" className="h-8 w-8 object-contain rounded-full bg-white shrink-0" />
-          <span className="font-bold tracking-tight">NurseTrack</span>
-        </div>
-        <Button variant="ghost" size="sm" onClick={handleSignOut}>
-          <LogOut className="h-4 w-4 mr-1.5" />
-          Sign out
-        </Button>
-      </header>
-      <main className="flex-1 flex items-start justify-center p-4 md:p-8">
-        <div className="w-full max-w-2xl">{children}</div>
-      </main>
-    </div>
+    <StaffLayout>
+      <div className="w-full max-w-2xl mx-auto">{children}</div>
+    </StaffLayout>
   );
 }
 

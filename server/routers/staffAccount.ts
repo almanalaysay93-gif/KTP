@@ -8,6 +8,7 @@ import { sdk } from "../_core/sdk";
 import * as db from "../db";
 import { nurseFullName, sanitizeFilename, storageKey, validateMime } from "../../shared/nursetrack";
 import { storagePut } from "../storage";
+import { resolveTrainingSchedule } from "../trainingReminders";
 
 const GENERIC_CLAIM_ERROR =
   "No matching staff record, or this profile already has a sign-in email.";
@@ -269,5 +270,144 @@ export const staffAccountRouter = router({
         summary: `Training certificate uploaded by ${nurseFullName(nurse)} (self-service)`,
       });
       return { url };
+    }),
+
+  myTrainingCalendar: staffProcedure
+    .input(
+      z
+        .object({
+          startDate: z.string().optional(),
+          endDate: z.string().optional(),
+          status: z.string().optional(),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) => {
+      const assignments = await db.listNurseTrainings({ nurseId: ctx.nurseId });
+      const results: any[] = [];
+      for (const a of assignments) {
+        if (input?.status && input.status !== "all" && a.status !== input.status) continue;
+        const resolved = await resolveTrainingSchedule(a.id);
+        if (!resolved) continue;
+        if (input?.startDate && resolved.startDateStr && resolved.startDateStr < input.startDate) continue;
+        if (input?.endDate && resolved.startDateStr && resolved.startDateStr > input.endDate) continue;
+
+        results.push({
+          assignmentId: resolved.assignmentId,
+          trainingId: resolved.trainingId,
+          trainingName: resolved.trainingName,
+          startDateStr: resolved.startDateStr,
+          endDateStr: resolved.endDateStr,
+          startTime: resolved.startTime,
+          endTime: resolved.endTime,
+          venue: resolved.venue,
+          status: resolved.status,
+          scheduleVersion: resolved.scheduleVersion,
+          staffResponse: resolved.staffResponse,
+          staffResponseReason: resolved.staffResponseReason,
+          attendanceOutcome: resolved.attendanceOutcome,
+          evidenceRequired: resolved.evidenceRequired,
+          evidenceStatus: resolved.evidenceStatus,
+          instructions: resolved.remarks,
+        });
+      }
+      return results;
+    }),
+
+  myTrainingDetail: staffProcedure
+    .input(z.object({ assignmentId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const resolved = await resolveTrainingSchedule(input.assignmentId);
+      if (!resolved || resolved.nurseId !== ctx.nurseId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Training assignment not found on your profile." });
+      }
+      return resolved;
+    }),
+
+  respondToTraining: staffProcedure
+    .input(
+      z.object({
+        assignmentId: z.number().int().positive(),
+        scheduleVersion: z.number().int().positive(),
+        response: z.enum(["confirmed", "cannot_attend"]),
+        reason: z.string().max(1000).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const resolved = await resolveTrainingSchedule(input.assignmentId);
+      if (!resolved || resolved.nurseId !== ctx.nurseId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Training assignment not found on your profile." });
+      }
+      if (resolved.scheduleVersion !== input.scheduleVersion) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "The training schedule was updated by supervisor. Please review the current schedule.",
+        });
+      }
+      if (input.response === "cannot_attend" && (!input.reason || input.reason.trim().length === 0)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "A reason is required when indicating you cannot attend (1 to 1000 characters).",
+        });
+      }
+
+      const responseValue = input.response === "cannot_attend" ? ("Cannot attend" as const) : ("Confirmed" as const);
+      await db.updateNurseTraining(input.assignmentId, {
+        staffResponse: responseValue,
+        staffResponseReason: input.response === "cannot_attend" ? input.reason!.trim() : null,
+        staffRespondedAt: new Date(),
+        staffResponseVersion: input.scheduleVersion,
+      });
+
+      await db.logActivity({
+        supervisorId: null,
+        nurseId: ctx.nurseId,
+        actionType: "training.response",
+        entityType: "nurseTraining",
+        entityId: input.assignmentId,
+        summary: `Staff response: ${responseValue}${input.reason ? ` - ${input.reason.trim()}` : ""}`,
+      });
+
+      return { ok: true };
+    }),
+
+  submitTrainingEvidence: staffProcedure
+    .input(
+      z.object({
+        assignmentId: z.number().int().positive(),
+        fileBase64: z.string(),
+        fileName: z.string().max(200),
+        mimeType: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const resolved = await resolveTrainingSchedule(input.assignmentId);
+      if (!resolved || resolved.nurseId !== ctx.nurseId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Training assignment not found on your profile." });
+      }
+      const mimeCheck = validateMime(input.mimeType, "document");
+      if (!mimeCheck.ok) throw new TRPCError({ code: "BAD_REQUEST", message: mimeCheck.error });
+      const buffer = Buffer.from(input.fileBase64, "base64");
+      if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+
+      const key = storageKey("certificates", ctx.nurseId, sanitizeFilename(input.fileName));
+      const { url } = await storagePut(key, buffer, input.mimeType);
+
+      await db.updateNurseTraining(input.assignmentId, {
+        certificateKey: key,
+        evidenceStatus: "Submitted",
+        evidenceSubmittedAt: new Date(),
+      });
+
+      await db.logActivity({
+        supervisorId: null,
+        nurseId: ctx.nurseId,
+        actionType: "training.evidence.submitted",
+        entityType: "nurseTraining",
+        entityId: input.assignmentId,
+        summary: `Training completion evidence submitted for ${resolved.trainingName}`,
+      });
+
+      return { ok: true, url };
     }),
 });

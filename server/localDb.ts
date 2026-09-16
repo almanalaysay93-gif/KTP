@@ -166,6 +166,23 @@ function initSchemaAndSeed(db: Database.Database) {
       certificateNumber TEXT,
       certificateKey TEXT,
       remarks TEXT,
+      scheduleVersion INTEGER DEFAULT 1 NOT NULL,
+      staffResponse TEXT DEFAULT 'Pending' NOT NULL,
+      staffResponseReason TEXT,
+      staffRespondedAt TEXT,
+      staffResponseVersion INTEGER,
+      attendanceOutcome TEXT DEFAULT 'not_recorded' NOT NULL,
+      attendanceRecordedAt TEXT,
+      attendanceRecordedBy INTEGER,
+      attendanceNote TEXT,
+      evidenceStatus TEXT DEFAULT 'None' NOT NULL,
+      evidenceRequired INTEGER DEFAULT 0 NOT NULL,
+      evidenceSubmittedAt TEXT,
+      evidenceReviewedAt TEXT,
+      evidenceReviewedBy INTEGER,
+      evidenceReviewNote TEXT,
+      conflictOverrideReason TEXT,
+      conflictOverrideBy INTEGER,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
       updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
@@ -228,6 +245,67 @@ function initSchemaAndSeed(db: Database.Database) {
       errorMessage TEXT,
       sentAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS staffMessages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      senderUserId INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      revision INTEGER DEFAULT 1 NOT NULL,
+      archivedAt TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS staffMessageRecipients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      messageId INTEGER NOT NULL,
+      nurseId INTEGER NOT NULL,
+      readAt TEXT,
+      lastReadRevision INTEGER,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      UNIQUE(messageId, nurseId)
+    );
+
+    CREATE TABLE IF NOT EXISTS staffMessageAcknowledgments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      messageId INTEGER NOT NULL,
+      nurseId INTEGER NOT NULL,
+      revision INTEGER NOT NULL,
+      acknowledgedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      UNIQUE(messageId, nurseId, revision)
+    );
+
+    CREATE TABLE IF NOT EXISTS trainingOutbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      assignmentId INTEGER NOT NULL,
+      scheduleVersion INTEGER NOT NULL,
+      noticeKind TEXT NOT NULL,
+      thresholdDays INTEGER,
+      dueDate TEXT,
+      recipientNurseId INTEGER NOT NULL,
+      recipientEmail TEXT,
+      status TEXT DEFAULT 'pending' NOT NULL,
+      attempts INTEGER DEFAULT 0 NOT NULL,
+      lastAttemptAt TEXT,
+      claimedAt TEXT,
+      providerMessageId TEXT,
+      errorDetail TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      UNIQUE(assignmentId, scheduleVersion, noticeKind)
+    );
+
+    CREATE TABLE IF NOT EXISTS trainingActivity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nurseId INTEGER NOT NULL,
+      assignmentId INTEGER NOT NULL,
+      activityType TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT,
+      readAt TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
   `);
 
   // Migrate existing SQLite schema if missing newly added columns
@@ -236,6 +314,26 @@ function initSchemaAndSeed(db: Database.Database) {
   if (!colSet.has("contactNumber")) db.exec("ALTER TABLE nurses ADD COLUMN contactNumber TEXT");
   if (!colSet.has("accountEmail")) db.exec("ALTER TABLE nurses ADD COLUMN accountEmail TEXT");
   if (!colSet.has("linkedUserId")) db.exec("ALTER TABLE nurses ADD COLUMN linkedUserId INTEGER");
+
+  const ntCols = db.prepare("PRAGMA table_info(nurseTrainings)").all() as { name: string }[];
+  const ntColSet = new Set(ntCols.map((c) => c.name));
+  if (!ntColSet.has("scheduleVersion")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN scheduleVersion INTEGER DEFAULT 1 NOT NULL");
+  if (!ntColSet.has("staffResponse")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponse TEXT DEFAULT 'Pending' NOT NULL");
+  if (!ntColSet.has("staffResponseReason")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponseReason TEXT");
+  if (!ntColSet.has("staffRespondedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffRespondedAt TEXT");
+  if (!ntColSet.has("staffResponseVersion")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponseVersion INTEGER");
+  if (!ntColSet.has("attendanceOutcome")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceOutcome TEXT DEFAULT 'Not recorded' NOT NULL");
+  if (!ntColSet.has("attendanceRecordedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceRecordedAt TEXT");
+  if (!ntColSet.has("attendanceRecordedBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceRecordedBy INTEGER");
+  if (!ntColSet.has("attendanceNote")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceNote TEXT");
+  if (!ntColSet.has("evidenceStatus")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceStatus TEXT DEFAULT 'None' NOT NULL");
+  if (!ntColSet.has("evidenceRequired")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceRequired INTEGER DEFAULT 0 NOT NULL");
+  if (!ntColSet.has("evidenceSubmittedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceSubmittedAt TEXT");
+  if (!ntColSet.has("evidenceReviewedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewedAt TEXT");
+  if (!ntColSet.has("evidenceReviewedBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewedBy INTEGER");
+  if (!ntColSet.has("evidenceReviewNote")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewNote TEXT");
+  if (!ntColSet.has("conflictOverrideReason")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN conflictOverrideReason TEXT");
+  if (!ntColSet.has("conflictOverrideBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN conflictOverrideBy INTEGER");
 
   // Check if data already seeded
   const countRow = db.prepare("SELECT count(*) as cnt FROM nurses").get() as { cnt: number };

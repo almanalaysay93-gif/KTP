@@ -95,6 +95,14 @@ describe("importFromCsvOutputs", () => {
         certificateNumber TEXT,
         certificateKey TEXT,
         remarks TEXT,
+        scheduleVersion INTEGER DEFAULT 1,
+        staffResponse TEXT DEFAULT 'Pending',
+        staffResponseReason TEXT,
+        attendanceOutcome TEXT DEFAULT 'not_recorded',
+        evidenceStatus TEXT DEFAULT 'None',
+        evidenceRequired INTEGER DEFAULT 0,
+        conflictOverrideReason TEXT,
+        conflictOverrideBy INTEGER,
         createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
         updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
       );

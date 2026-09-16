@@ -12,6 +12,14 @@ import {
   TRAINING_KINDS,
 } from "../../shared/nursetrack";
 import { storagePut } from "../storage";
+import {
+  checkTrainingConflicts,
+  enqueueTrainingNotice,
+  createMilestonesForAssignment,
+  invalidatePendingOutboxJobs,
+  dispatchSingleOutboxItem,
+  resolveTrainingSchedule,
+} from "../trainingReminders";
 
 const nullableDateInput = z.union([z.date(), z.string().datetime(), z.null()]).transform((d) => (d === null ? null : d instanceof Date ? d : new Date(d))).optional();
 
@@ -119,6 +127,28 @@ export const trainingsRouter = router({
       return rows.map((r) => ({ ...r, trainingName: catById.get(r.trainingId)?.name ?? "Unknown" }));
     }),
 
+  checkConflict: adminProcedure
+    .input(
+      z.object({
+        nurseId: z.number(),
+        startDate: z.string(),
+        endDate: z.string().optional().nullable(),
+        startTime: z.string().optional().nullable(),
+        endTime: z.string().optional().nullable(),
+        excludeAssignmentId: z.number().optional().nullable(),
+      })
+    )
+    .query(async ({ input }) => {
+      return checkTrainingConflicts(
+        input.nurseId,
+        input.startDate,
+        input.endDate,
+        input.startTime,
+        input.endTime,
+        input.excludeAssignmentId
+      );
+    }),
+
   createRecord: adminProcedure
     .input(
       z.object({
@@ -136,15 +166,39 @@ export const trainingsRouter = router({
         certificateNumber: z.string().max(64).optional(),
         certificateKey: z.string().optional(),
         remarks: z.string().max(2000).optional(),
+        conflictOverrideReason: z.string().max(1000).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const nurse = await db.getNurseById(input.nurseId);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Nurse not found" });
+
+      const status = input.status ?? "Scheduled";
+      const scheduledDateStr = input.scheduledDate ? input.scheduledDate.toISOString().slice(0, 10) : null;
+
+      // Conflict validation for scheduled training
+      if (status === "Scheduled" && scheduledDateStr) {
+        const conflictRes = await checkTrainingConflicts(input.nurseId, scheduledDateStr);
+        if (conflictRes.hasConflict && !conflictRes.warningOnly) {
+          if (!input.conflictOverrideReason || input.conflictOverrideReason.trim().length === 0) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: `Scheduling conflict detected with: ${conflictRes.conflicts.map((c) => c.trainingName).join(", ")}. Override reason is required to proceed.`,
+            });
+          }
+        }
+      }
+
       const id = await db.createNurseTraining({
         ...input,
-        status: input.status ?? "Scheduled",
+        status,
+        scheduleVersion: 1,
+        staffResponse: "Pending",
+        evidenceRequired: true,
+        conflictOverrideReason: input.conflictOverrideReason ?? null,
+        conflictOverrideBy: input.conflictOverrideReason ? ctx.user.id : null,
       });
+
       await db.logActivity({
         supervisorId: ctx.user.id,
         nurseId: input.nurseId,
@@ -153,6 +207,32 @@ export const trainingsRouter = router({
         entityId: id,
         summary: `Training record added for ${nurseFullName(nurse)}`,
       });
+
+      // If scheduled, enqueue immediate notice and schedule reminder milestones
+      if (status === "Scheduled" && scheduledDateStr) {
+        try {
+          const noticeItem = await enqueueTrainingNotice({
+            assignmentId: id,
+            scheduleVersion: 1,
+            noticeKind: "assigned",
+            recipientNurseId: input.nurseId,
+            actorUserId: ctx.user.id,
+          });
+          await createMilestonesForAssignment({
+            assignmentId: id,
+            scheduleVersion: 1,
+            startDateStr: scheduledDateStr,
+            recipientNurseId: input.nurseId,
+          });
+          if (noticeItem?.id) {
+            // Awaited bounded dispatch attempt
+            await dispatchSingleOutboxItem(noticeItem.id).catch(() => {});
+          }
+        } catch (noticeErr) {
+          console.warn("[Trainings] Failed to enqueue training notice:", noticeErr);
+        }
+      }
+
       return { id };
     }),
 
@@ -170,6 +250,7 @@ export const trainingsRouter = router({
         cpdUnits: z.number().int().positive().optional(),
         certificateNumber: z.string().max(64).optional(),
         remarks: z.string().max(2000).optional(),
+        conflictOverrideReason: z.string().max(1000).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -177,16 +258,259 @@ export const trainingsRouter = router({
       const rows = await db.listNurseTrainings();
       const record = rows.find((r) => r.id === id);
       if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Training record not found" });
-      await db.updateNurseTraining(id, { ...rest });
+
+      const oldDateStr = record.scheduledDate ? new Date(record.scheduledDate).toISOString().slice(0, 10) : null;
+      const newDateStr = rest.scheduledDate ? rest.scheduledDate.toISOString().slice(0, 10) : oldDateStr;
+      const isReschedule = Boolean(oldDateStr && newDateStr && oldDateStr !== newDateStr);
+      const isCancellation = Boolean(rest.status === "Cancelled" && record.status !== "Cancelled");
+
+      let newScheduleVersion = record.scheduleVersion ?? 1;
+      const updatePayload: any = { ...rest };
+
+      if (isReschedule) {
+        newScheduleVersion += 1;
+        updatePayload.scheduleVersion = newScheduleVersion;
+        updatePayload.staffResponse = "Pending";
+        updatePayload.staffResponseReason = null;
+        updatePayload.staffRespondedAt = null;
+        updatePayload.staffResponseVersion = null;
+      }
+
+      if (rest.conflictOverrideReason) {
+        updatePayload.conflictOverrideReason = rest.conflictOverrideReason;
+        updatePayload.conflictOverrideBy = ctx.user.id;
+      }
+
+      await db.updateNurseTraining(id, updatePayload);
+
       await db.logActivity({
         supervisorId: ctx.user.id,
         nurseId: record.nurseId,
         actionType: "training.updated",
         entityType: "nurseTraining",
         entityId: id,
-        summary: `Training record #${id} updated`,
+        summary: `Training record #${id} updated${isReschedule ? " (rescheduled)" : isCancellation ? " (cancelled)" : ""}`,
       });
+
+      // Handle reschedule notices and milestone jobs
+      if (isReschedule && newDateStr) {
+        try {
+          await invalidatePendingOutboxJobs(id, newScheduleVersion);
+          const notice = await enqueueTrainingNotice({
+            assignmentId: id,
+            scheduleVersion: newScheduleVersion,
+            noticeKind: "rescheduled",
+            recipientNurseId: record.nurseId,
+            actorUserId: ctx.user.id,
+          });
+          await createMilestonesForAssignment({
+            assignmentId: id,
+            scheduleVersion: newScheduleVersion,
+            startDateStr: newDateStr,
+            recipientNurseId: record.nurseId,
+          });
+          if (notice?.id) {
+            await dispatchSingleOutboxItem(notice.id).catch(() => {});
+          }
+        } catch (err) {
+          console.warn("[Trainings] Reschedule outbox notice failed:", err);
+        }
+      } else if (isCancellation) {
+        try {
+          await invalidatePendingOutboxJobs(id);
+          const cancelNotice = await enqueueTrainingNotice({
+            assignmentId: id,
+            scheduleVersion: record.scheduleVersion ?? 1,
+            noticeKind: "cancelled",
+            recipientNurseId: record.nurseId,
+            actorUserId: ctx.user.id,
+          });
+          if (cancelNotice?.id) {
+            await dispatchSingleOutboxItem(cancelNotice.id).catch(() => {});
+          }
+        } catch (err) {
+          console.warn("[Trainings] Cancellation outbox notice failed:", err);
+        }
+      }
+
       return { success: true } as const;
+    }),
+
+  recordAttendance: adminProcedure
+    .input(
+      z.object({
+        assignmentId: z.number().int().positive(),
+        attendanceOutcome: z.enum(["not_recorded", "attended", "missed", "excused"]),
+        attendanceNote: z.string().max(1000).optional(),
+        autoComplete: z.boolean().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const rows = await db.listNurseTrainings();
+      const record = rows.find((r) => r.id === input.assignmentId);
+      if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Training record not found" });
+
+      const updateData: any = {
+        attendanceOutcome: input.attendanceOutcome,
+        attendanceRecordedAt: new Date(),
+        attendanceRecordedBy: ctx.user.id,
+        attendanceNote: input.attendanceNote ?? null,
+      };
+
+      if (input.autoComplete && input.attendanceOutcome === "attended") {
+        updateData.status = "Completed";
+        if (!record.completionDate) {
+          updateData.completionDate = record.scheduledDate ?? new Date();
+        }
+      }
+
+      await db.updateNurseTraining(input.assignmentId, updateData);
+
+      await db.logActivity({
+        supervisorId: ctx.user.id,
+        nurseId: record.nurseId,
+        actionType: "training.attendance.recorded",
+        entityType: "nurseTraining",
+        entityId: input.assignmentId,
+        summary: `Attendance recorded as ${input.attendanceOutcome} for training record #${input.assignmentId}`,
+      });
+
+      return { ok: true };
+    }),
+
+  reviewEvidence: adminProcedure
+    .input(
+      z.object({
+        assignmentId: z.number().int().positive(),
+        decision: z.enum(["verified", "rejected"]),
+        note: z.string().max(1000).optional(),
+        autoComplete: z.boolean().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const rows = await db.listNurseTrainings();
+      const record = rows.find((r) => r.id === input.assignmentId);
+      if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Training record not found" });
+
+      if (input.decision === "rejected" && (!input.note || input.note.trim().length === 0)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A reason is required when rejecting evidence." });
+      }
+
+      const updateData: any = {
+        evidenceStatus: input.decision === "verified" ? "Verified" : "Rejected",
+        evidenceReviewedAt: new Date(),
+        evidenceReviewedBy: ctx.user.id,
+        evidenceReviewNote: input.note ?? null,
+      };
+
+      if (input.decision === "verified" && input.autoComplete) {
+        updateData.status = "Completed";
+        if (!record.completionDate) {
+          updateData.completionDate = record.scheduledDate ?? new Date();
+        }
+      }
+
+      await db.updateNurseTraining(input.assignmentId, updateData);
+
+      await db.logActivity({
+        supervisorId: ctx.user.id,
+        nurseId: record.nurseId,
+        actionType: "training.evidence.reviewed",
+        entityType: "nurseTraining",
+        entityId: input.assignmentId,
+        summary: `Training evidence ${input.decision} for training record #${input.assignmentId}`,
+      });
+
+      return { ok: true };
+    }),
+
+  followUpList: adminProcedure
+    .input(
+      z
+        .object({
+          trainingId: z.number().optional(),
+          filter: z
+            .enum([
+              "all",
+              "pending_response",
+              "cannot_attend",
+              "missing_email",
+              "delivery_failed",
+              "evidence_review",
+              "missed",
+            ])
+            .optional(),
+        })
+        .optional()
+    )
+    .query(async ({ input }) => {
+      const [rows, allNurses, catalog] = await Promise.all([
+        db.listNurseTrainings(),
+        db.listNurses(),
+        db.listTrainingCatalog(true),
+      ]);
+      const nurseById = new Map(allNurses.map((n) => [n.id, n]));
+      const catById = new Map(catalog.map((c) => [c.id, c]));
+
+      let assignments = rows.filter((r) => r.status !== "Cancelled");
+      if (input?.trainingId) {
+        assignments = assignments.filter((r) => r.trainingId === input.trainingId);
+      }
+
+      const items: any[] = [];
+      for (const a of assignments) {
+        const nurse = nurseById.get(a.nurseId);
+        if (!nurse) continue;
+        const resolved = await resolveTrainingSchedule(a.id);
+        if (!resolved) continue;
+
+        const trainingName = catById.get(a.trainingId)?.name || resolved.trainingName;
+        const hasEmail = Boolean(nurse.accountEmail);
+        const item = {
+          assignmentId: a.id,
+          nurseId: a.nurseId,
+          nurseName: nurseFullName(nurse),
+          employeeId: nurse.employeeId,
+          accountEmail: nurse.accountEmail,
+          hasEmail,
+          trainingId: a.trainingId,
+          trainingName,
+          startDateStr: resolved.startDateStr,
+          endDateStr: resolved.endDateStr,
+          startTime: resolved.startTime,
+          venue: resolved.venue,
+          status: a.status,
+          scheduleVersion: a.scheduleVersion ?? 1,
+          staffResponse: a.staffResponse || "Pending",
+          staffResponseReason: a.staffResponseReason,
+          attendanceOutcome: a.attendanceOutcome || "not_recorded",
+          evidenceRequired: Boolean(a.evidenceRequired),
+          evidenceStatus: a.evidenceStatus || "None",
+          certificateKey: a.certificateKey,
+        };
+
+        // Filter evaluation
+        const filter = input?.filter || "all";
+        if (filter === "pending_response" && item.staffResponse !== "Pending") continue;
+        if (filter === "cannot_attend" && item.staffResponse !== "Cannot attend") continue;
+        if (filter === "missing_email" && item.hasEmail) continue;
+        if (filter === "evidence_review" && item.evidenceStatus !== "Submitted") continue;
+        if (filter === "missed" && item.attendanceOutcome !== "missed") continue;
+
+        items.push(item);
+      }
+
+      // Compute total metrics across the dataset
+      const counts = {
+        total: assignments.length,
+        pendingResponse: assignments.filter((a) => (a.staffResponse || "Pending") === "Pending").length,
+        cannotAttend: assignments.filter((a) => a.staffResponse === "Cannot attend").length,
+        missingEmail: assignments.filter((a) => !nurseById.get(a.nurseId)?.accountEmail).length,
+        evidenceReview: assignments.filter((a) => a.evidenceStatus === "Submitted").length,
+        missed: assignments.filter((a) => a.attendanceOutcome === "missed").length,
+      };
+
+      return { items, counts };
     }),
 
   deleteRecord: adminProcedure
@@ -204,6 +528,7 @@ export const trainingsRouter = router({
       });
       return { success: true } as const;
     }),
+
 
   uploadCertificate: adminProcedure
     .input(

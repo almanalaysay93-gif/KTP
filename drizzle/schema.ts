@@ -278,6 +278,38 @@ export const nurseTrainings = pgTable(
     certificateNumber: varchar("certificateNumber", { length: 64 }),
     certificateKey: text("certificateKey"),
     remarks: text("remarks"),
+    scheduleVersion: integer("scheduleVersion").default(1).notNull(),
+    staffResponse: varchar("staffResponse", {
+      length: 32,
+      enum: ["Pending", "Confirmed", "Cannot attend"],
+    })
+      .default("Pending")
+      .notNull(),
+    staffResponseReason: text("staffResponseReason"),
+    staffRespondedAt: timestamp("staffRespondedAt"),
+    staffResponseVersion: integer("staffResponseVersion"),
+    attendanceOutcome: varchar("attendanceOutcome", {
+      length: 32,
+      enum: ["Not recorded", "Attended", "Missed", "Excused"],
+    })
+      .default("Not recorded")
+      .notNull(),
+    attendanceRecordedAt: timestamp("attendanceRecordedAt"),
+    attendanceRecordedBy: integer("attendanceRecordedBy"),
+    attendanceNote: text("attendanceNote"),
+    evidenceStatus: varchar("evidenceStatus", {
+      length: 32,
+      enum: ["None", "Submitted", "Verified", "Rejected"],
+    })
+      .default("None")
+      .notNull(),
+    evidenceRequired: boolean("evidenceRequired").default(false).notNull(),
+    evidenceSubmittedAt: timestamp("evidenceSubmittedAt"),
+    evidenceReviewedAt: timestamp("evidenceReviewedAt"),
+    evidenceReviewedBy: integer("evidenceReviewedBy"),
+    evidenceReviewNote: text("evidenceReviewNote"),
+    conflictOverrideReason: text("conflictOverrideReason"),
+    conflictOverrideBy: integer("conflictOverrideBy"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().$onUpdate(touchedOnUpdate).notNull(),
   },
@@ -379,3 +411,102 @@ export const emailLogs = pgTable(
 );
 export type EmailLog = typeof emailLogs.$inferSelect;
 export type InsertEmailLog = typeof emailLogs.$inferInsert;
+
+/** Supervisor broadcast/direct messages for the nurse portal feed. */
+export const staffMessages = pgTable(
+  "staffMessages",
+  {
+    id: serial("id").primaryKey(),
+    senderUserId: integer("senderUserId").notNull(),
+    title: varchar("title", { length: 160 }).notNull(),
+    body: text("body").notNull(),
+    revision: integer("revision").default(1).notNull(),
+    archivedAt: timestamp("archivedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().$onUpdate(touchedOnUpdate).notNull(),
+  },
+  (t) => [index("idx_msg_created").on(t.createdAt)],
+);
+export type StaffMessage = typeof staffMessages.$inferSelect;
+export type InsertStaffMessage = typeof staffMessages.$inferInsert;
+
+/** Recipients and per-nurse read state for supervisor messages. */
+export const staffMessageRecipients = pgTable(
+  "staffMessageRecipients",
+  {
+    id: serial("id").primaryKey(),
+    messageId: integer("messageId").notNull(),
+    nurseId: integer("nurseId").notNull(),
+    readAt: timestamp("readAt"),
+    lastReadRevision: integer("lastReadRevision"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_msg_recipient").on(t.messageId, t.nurseId),
+    index("idx_msg_recip_nurse").on(t.nurseId),
+  ],
+);
+export type StaffMessageRecipient = typeof staffMessageRecipients.$inferSelect;
+
+/** Explicit revision-specific nurse acknowledgment of supervisor messages. */
+export const staffMessageAcknowledgments = pgTable(
+  "staffMessageAcknowledgments",
+  {
+    id: serial("id").primaryKey(),
+    messageId: integer("messageId").notNull(),
+    nurseId: integer("nurseId").notNull(),
+    revision: integer("revision").notNull(),
+    acknowledgedAt: timestamp("acknowledgedAt").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uniq_msg_ack").on(t.messageId, t.nurseId, t.revision),
+    index("idx_msg_ack_nurse").on(t.nurseId),
+  ],
+);
+export type StaffMessageAcknowledgment = typeof staffMessageAcknowledgments.$inferSelect;
+
+/** Durable outbox for training milestone reminders and immediate notices. */
+export const trainingOutbox = pgTable(
+  "trainingOutbox",
+  {
+    id: serial("id").primaryKey(),
+    assignmentId: integer("assignmentId").notNull(),
+    scheduleVersion: integer("scheduleVersion").notNull(),
+    noticeKind: varchar("noticeKind", { length: 32 }).notNull(), // assignment, reschedule, cancellation, reminder_14d, reminder_7d, reminder_1d, combined_due
+    thresholdDays: integer("thresholdDays"), // 14, 7, 1, or null
+    dueDate: date("dueDate", { mode: "date" }),
+    recipientNurseId: integer("recipientNurseId").notNull(),
+    recipientEmail: varchar("recipientEmail", { length: 320 }),
+    status: varchar("status", { length: 32 }).default("pending").notNull(), // pending, claimed, sent, mock_sent, failed, skipped, superseded
+    attempts: integer("attempts").default(0).notNull(),
+    lastAttemptAt: timestamp("lastAttemptAt"),
+    claimedAt: timestamp("claimedAt"),
+    providerMessageId: text("providerMessageId"),
+    errorDetail: text("errorDetail"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().$onUpdate(touchedOnUpdate).notNull(),
+  },
+  (t) => [
+    index("idx_outbox_status_due").on(t.status, t.dueDate),
+    index("idx_outbox_assignment").on(t.assignmentId, t.scheduleVersion),
+    uniqueIndex("uniq_outbox_milestone").on(t.assignmentId, t.scheduleVersion, t.noticeKind),
+  ],
+);
+export type TrainingOutboxItem = typeof trainingOutbox.$inferSelect;
+
+/** In-app training activity feed items for the staff portal. */
+export const trainingActivity = pgTable(
+  "trainingActivity",
+  {
+    id: serial("id").primaryKey(),
+    nurseId: integer("nurseId").notNull(),
+    assignmentId: integer("assignmentId").notNull(),
+    activityType: varchar("activityType", { length: 32 }).notNull(),
+    title: varchar("title", { length: 256 }).notNull(),
+    message: text("message"),
+    readAt: timestamp("readAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [index("idx_tact_nurse").on(t.nurseId), index("idx_tact_assignment").on(t.assignmentId)],
+);
+export type TrainingActivityItem = typeof trainingActivity.$inferSelect;

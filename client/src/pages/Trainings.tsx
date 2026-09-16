@@ -1,6 +1,7 @@
 import { FileUploadButton } from "@/components/nursetrack/FileUpload";
 import { TrainingStatusBadge } from "@/components/nursetrack/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -33,7 +34,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { formatDate, nurseFullName, TRAINING_KINDS } from "../../../shared/nursetrack";
-import { BookOpen, Plus, Trash2 } from "lucide-react";
+import {
+  BookOpen,
+  Plus,
+  Trash2,
+  Users,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  MessageSquare,
+  Mail,
+  RefreshCw,
+  FileCheck,
+  Check,
+  X,
+  Clock,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -81,8 +97,13 @@ export default function Trainings() {
       <Tabs defaultValue="records" className="w-full">
         <TabsList>
           <TabsTrigger value="records">Training Records ({records?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="followup">Follow-up & Reminders</TabsTrigger>
           <TabsTrigger value="catalog">Catalog ({catalog?.length ?? 0})</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="followup">
+          <FollowUpTab />
+        </TabsContent>
 
         <TabsContent value="records">
           <RecordsTab
@@ -791,5 +812,298 @@ function TrainingRecordDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function FollowUpTab() {
+  const [, navigate] = useLocation();
+  const utils = trpc.useUtils();
+  const [filter, setFilter] = useState<
+    "all" | "pending_response" | "cannot_attend" | "missing_email" | "delivery_failed" | "evidence_review" | "missed"
+  >("all");
+
+  const { data, isLoading } = trpc.trainings.followUpList.useQuery({ filter });
+
+  const recordAttendanceMutation = trpc.trainings.recordAttendance.useMutation({
+    onSuccess: () => {
+      toast.success("Attendance outcome recorded");
+      utils.trainings.followUpList.invalidate();
+      utils.trainings.initial.invalidate();
+    },
+    onError: (err) => toast.error(err.message || "Failed to record attendance"),
+  });
+
+  const reviewEvidenceMutation = trpc.trainings.reviewEvidence.useMutation({
+    onSuccess: () => {
+      toast.success("Evidence review saved");
+      utils.trainings.followUpList.invalidate();
+      utils.trainings.initial.invalidate();
+    },
+    onError: (err) => toast.error(err.message || "Failed to review evidence"),
+  });
+
+  const items = data?.items ?? [];
+  const counts = data?.counts ?? {
+    total: 0,
+    pendingResponse: 0,
+    cannotAttend: 0,
+    missingEmail: 0,
+    evidenceReview: 0,
+    missed: 0,
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Metric summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <Card
+          onClick={() => setFilter("all")}
+          className={`glass-card p-3 cursor-pointer transition ${filter === "all" ? "border-primary ring-1 ring-primary" : "hover:border-slate-300"}`}
+        >
+          <span className="text-[11px] text-muted-foreground block">Total Assigned</span>
+          <span className="text-xl font-bold text-foreground">{counts.total}</span>
+        </Card>
+        <Card
+          onClick={() => setFilter("pending_response")}
+          className={`glass-card p-3 cursor-pointer transition ${filter === "pending_response" ? "border-amber-500 ring-1 ring-amber-500" : "hover:border-slate-300"}`}
+        >
+          <span className="text-[11px] text-muted-foreground block">Pending Response</span>
+          <span className="text-xl font-bold text-amber-600">{counts.pendingResponse}</span>
+        </Card>
+        <Card
+          onClick={() => setFilter("cannot_attend")}
+          className={`glass-card p-3 cursor-pointer transition ${filter === "cannot_attend" ? "border-rose-500 ring-1 ring-rose-500" : "hover:border-slate-300"}`}
+        >
+          <span className="text-[11px] text-muted-foreground block">Cannot Attend</span>
+          <span className="text-xl font-bold text-rose-600">{counts.cannotAttend}</span>
+        </Card>
+        <Card
+          onClick={() => setFilter("evidence_review")}
+          className={`glass-card p-3 cursor-pointer transition ${filter === "evidence_review" ? "border-sky-500 ring-1 ring-sky-500" : "hover:border-slate-300"}`}
+        >
+          <span className="text-[11px] text-muted-foreground block">Evidence to Review</span>
+          <span className="text-xl font-bold text-sky-600">{counts.evidenceReview}</span>
+        </Card>
+        <Card
+          onClick={() => setFilter("missing_email")}
+          className={`glass-card p-3 cursor-pointer transition ${filter === "missing_email" ? "border-slate-500 ring-1 ring-slate-500" : "hover:border-slate-300"}`}
+        >
+          <span className="text-[11px] text-muted-foreground block">Missing Email</span>
+          <span className="text-xl font-bold text-slate-600">{counts.missingEmail}</span>
+        </Card>
+      </div>
+
+      {/* Filter Selector */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+        <Button
+          size="sm"
+          variant={filter === "all" ? "default" : "outline"}
+          className="text-xs h-7"
+          onClick={() => setFilter("all")}
+        >
+          All ({counts.total})
+        </Button>
+        <Button
+          size="sm"
+          variant={filter === "pending_response" ? "default" : "outline"}
+          className="text-xs h-7"
+          onClick={() => setFilter("pending_response")}
+        >
+          Pending Response ({counts.pendingResponse})
+        </Button>
+        <Button
+          size="sm"
+          variant={filter === "cannot_attend" ? "default" : "outline"}
+          className="text-xs h-7"
+          onClick={() => setFilter("cannot_attend")}
+        >
+          Cannot Attend ({counts.cannotAttend})
+        </Button>
+        <Button
+          size="sm"
+          variant={filter === "evidence_review" ? "default" : "outline"}
+          className="text-xs h-7"
+          onClick={() => setFilter("evidence_review")}
+        >
+          Evidence Awaiting Review ({counts.evidenceReview})
+        </Button>
+        <Button
+          size="sm"
+          variant={filter === "missed" ? "default" : "outline"}
+          className="text-xs h-7"
+          onClick={() => setFilter("missed")}
+        >
+          Missed ({counts.missed})
+        </Button>
+      </div>
+
+      {/* Roster Table */}
+      {isLoading ? (
+        <Skeleton className="h-48 w-full rounded-lg" />
+      ) : items.length === 0 ? (
+        <Card className="glass-card p-8 text-center text-xs text-muted-foreground">
+          No training assignments match the selected filter.
+        </Card>
+      ) : (
+        <div className="rounded-lg border bg-card overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-muted/50 border-b text-muted-foreground font-semibold">
+              <tr>
+                <th className="p-3">Staff Nurse</th>
+                <th className="p-3">Training & Schedule</th>
+                <th className="p-3">Nurse Response</th>
+                <th className="p-3">Attendance Outcome</th>
+                <th className="p-3">Evidence</th>
+                <th className="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {items.map((it: any) => (
+                <tr key={it.assignmentId} className="hover:bg-muted/30 transition">
+                  <td className="p-3">
+                    <div className="font-semibold text-foreground">{it.nurseName}</div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                      <span>ID: {it.employeeId || "—"}</span>
+                      {!it.hasEmail ? (
+                        <span className="text-amber-600 font-medium">(No email)</span>
+                      ) : (
+                        <span className="truncate max-w-[140px]" title={it.accountEmail}>
+                          {it.accountEmail}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+
+                  <td className="p-3">
+                    <div className="font-medium text-foreground">{it.trainingName}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {it.startDateStr}
+                      {it.startTime ? ` at ${it.startTime}` : ""}
+                    </div>
+                  </td>
+
+                  <td className="p-3">
+                    {it.staffResponse === "Confirmed" ? (
+                      <Badge className="bg-teal-600 text-white text-[10px]">Confirmed</Badge>
+                    ) : it.staffResponse === "Cannot attend" ? (
+                      <div>
+                        <Badge className="bg-rose-600 text-white text-[10px]">Cannot Attend</Badge>
+                        {it.staffResponseReason && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1" title={it.staffResponseReason}>
+                            {it.staffResponseReason}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <Badge variant="outline" className="text-amber-600 border-amber-300 text-[10px]">
+                        Pending
+                      </Badge>
+                    )}
+                  </td>
+
+                  <td className="p-3">
+                    <Select
+                      value={it.attendanceOutcome || "not_recorded"}
+                      onValueChange={(val) =>
+                        recordAttendanceMutation.mutate({
+                          assignmentId: it.assignmentId,
+                          attendanceOutcome: val as any,
+                          autoComplete: val === "attended",
+                        })
+                      }
+                    >
+                      <SelectTrigger className="text-xs h-7 w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="not_recorded" className="text-xs">Not recorded</SelectItem>
+                        <SelectItem value="attended" className="text-xs">Attended</SelectItem>
+                        <SelectItem value="missed" className="text-xs">Missed</SelectItem>
+                        <SelectItem value="excused" className="text-xs">Excused</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </td>
+
+                  <td className="p-3">
+                    {it.evidenceStatus === "Verified" ? (
+                      <Badge className="bg-emerald-600 text-white text-[10px] flex items-center gap-1 w-fit">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Verified
+                      </Badge>
+                    ) : it.evidenceStatus === "Submitted" ? (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white"
+                          disabled={reviewEvidenceMutation.isPending}
+                          onClick={() =>
+                            reviewEvidenceMutation.mutate({
+                              assignmentId: it.assignmentId,
+                              decision: "verified",
+                              autoComplete: true,
+                            })
+                          }
+                        >
+                          <Check className="h-3 w-3 mr-0.5" />
+                          Verify
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 px-2 text-[10px] text-rose-600 border-rose-300"
+                          disabled={reviewEvidenceMutation.isPending}
+                          onClick={() => {
+                            const reason = prompt("Enter reason for evidence rejection:");
+                            if (reason && reason.trim()) {
+                              reviewEvidenceMutation.mutate({
+                                assignmentId: it.assignmentId,
+                                decision: "rejected",
+                                note: reason.trim(),
+                              });
+                            }
+                          }}
+                        >
+                          <X className="h-3 w-3 mr-0.5" />
+                          Reject
+                        </Button>
+                      </div>
+                    ) : it.evidenceStatus === "Rejected" ? (
+                      <Badge variant="outline" className="text-rose-600 border-rose-300 text-[10px]">
+                        Rejected
+                      </Badge>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground">None</span>
+                    )}
+                  </td>
+
+                  <td className="p-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs"
+                        title="Send in-app message to nurse"
+                        onClick={() => navigate(`/messages?nurseId=${it.nurseId}`)}
+                      >
+                        <MessageSquare className="h-3.5 w-3.5 text-sky-600" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs"
+                        title="Open nurse profile"
+                        onClick={() => navigate(`/nurses/${it.nurseId}`)}
+                      >
+                        Profile
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
