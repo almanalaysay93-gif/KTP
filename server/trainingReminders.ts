@@ -10,7 +10,7 @@ import {
   trainingActivity,
   type TrainingOutboxItem,
 } from "../drizzle/schema";
-import { nurseFullName } from "../shared/nursetrack";
+import { dateKey, nurseFullName } from "../shared/nursetrack";
 import { sendEmail } from "./email/service";
 import { renderTrainingNoticeEmail, renderTrainingMilestoneEmail } from "./email/templates";
 
@@ -62,7 +62,7 @@ export interface ResolvedTrainingSchedule {
   attendanceOutcome: string;
 }
 
-export async function resolveTrainingSchedule(assignmentId: number): Promise<ResolvedTrainingSchedule | null> {
+async function loadTrainingSchedules(scope: { assignmentId: number } | { nurseId: number }): Promise<ResolvedTrainingSchedule[]> {
   const db = await getDb();
   if (db) {
     const rows = await db
@@ -74,57 +74,57 @@ export async function resolveTrainingSchedule(assignmentId: number): Promise<Res
       .from(nurseTrainings)
       .leftJoin(trainingEvents, eq(trainingEvents.id, nurseTrainings.eventId))
       .leftJoin(trainingCatalog, eq(trainingCatalog.id, nurseTrainings.trainingId))
-      .where(eq(nurseTrainings.id, assignmentId))
-      .limit(1);
+      .where("assignmentId" in scope ? eq(nurseTrainings.id, scope.assignmentId) : eq(nurseTrainings.nurseId, scope.nurseId))
+      .orderBy(desc(nurseTrainings.scheduledDate));
 
-    if (rows.length === 0) return null;
-    const { assignment, event, catalog } = rows[0];
+    return rows.map(({ assignment, event, catalog }) => {
 
-    let startDateStr = "";
-    let endDateStr = "";
-    let startTime: string | null = null;
-    let endTime: string | null = null;
-    let venue: string | null = null;
+      let startDateStr = "";
+      let endDateStr = "";
+      let startTime: string | null = null;
+      let endTime: string | null = null;
+      let venue: string | null = null;
 
-    if (event) {
-      startDateStr = event.startDate ? String(event.startDate).slice(0, 10) : "";
-      endDateStr = event.endDate ? String(event.endDate).slice(0, 10) : startDateStr;
-      startTime = event.startTime || null;
-      endTime = event.endTime || null;
-      venue = event.venue || null;
-    } else if (assignment.scheduledDate) {
-      startDateStr = String(assignment.scheduledDate).slice(0, 10);
-      endDateStr = startDateStr;
-    } else if (assignment.completionDate) {
-      startDateStr = String(assignment.completionDate).slice(0, 10);
-      endDateStr = startDateStr;
-    }
+      if (event) {
+        startDateStr = event.startDate ? dateKey(event.startDate) : "";
+        endDateStr = event.endDate ? dateKey(event.endDate) : startDateStr;
+        startTime = event.startTime || null;
+        endTime = event.endTime || null;
+        venue = event.venue || null;
+      } else if (assignment.scheduledDate) {
+        startDateStr = dateKey(assignment.scheduledDate);
+        endDateStr = startDateStr;
+      } else if (assignment.completionDate) {
+        startDateStr = dateKey(assignment.completionDate);
+        endDateStr = startDateStr;
+      }
 
-    const trainingName = catalog?.name || "Assigned Training";
+      const trainingName = catalog?.name || "Assigned Training";
 
-    return {
-      assignmentId: assignment.id,
-      nurseId: assignment.nurseId,
-      scheduleVersion: assignment.scheduleVersion ?? 1,
-      status: assignment.status,
-      trainingId: assignment.trainingId,
-      trainingName,
-      startDateStr,
-      endDateStr,
-      startTime,
-      endTime,
-      venue,
-      remarks: assignment.remarks || event?.remarks || null,
-      evidenceRequired: Boolean(assignment.evidenceRequired),
-      evidenceStatus: assignment.evidenceStatus || "None",
-      staffResponse: assignment.staffResponse || "Pending",
-      staffResponseReason: assignment.staffResponseReason || null,
-      attendanceOutcome: assignment.attendanceOutcome || "not_recorded",
-    };
+      return {
+        assignmentId: assignment.id,
+        nurseId: assignment.nurseId,
+        scheduleVersion: assignment.scheduleVersion ?? 1,
+        status: assignment.status,
+        trainingId: assignment.trainingId,
+        trainingName,
+        startDateStr,
+        endDateStr,
+        startTime,
+        endTime,
+        venue,
+        remarks: assignment.remarks || event?.remarks || null,
+        evidenceRequired: Boolean(assignment.evidenceRequired),
+        evidenceStatus: assignment.evidenceStatus || "None",
+        staffResponse: assignment.staffResponse || "Pending",
+        staffResponseReason: assignment.staffResponseReason || null,
+        attendanceOutcome: assignment.attendanceOutcome || "not_recorded",
+      };
+    });
   }
 
   const sqlite = getSqliteDb();
-  const row = sqlite
+  const rows = sqlite
     .prepare(
       `SELECT t.*, e.startDate as evStart, e.endDate as evEnd, e.startTime as evStartTime,
               e.endTime as evEndTime, e.venue as evVenue, e.remarks as evRemarks,
@@ -132,53 +132,63 @@ export async function resolveTrainingSchedule(assignmentId: number): Promise<Res
        FROM nurseTrainings t
        LEFT JOIN trainingEvents e ON e.id = t.eventId
        LEFT JOIN trainingCatalog c ON c.id = t.trainingId
-       WHERE t.id = ?`
+       WHERE ${"assignmentId" in scope ? "t.id" : "t.nurseId"} = ?
+       ORDER BY date(t.scheduledDate) DESC`
     )
-    .get(assignmentId) as any;
+    .all("assignmentId" in scope ? scope.assignmentId : scope.nurseId) as any[];
 
-  if (!row) return null;
+  return rows.map((row) => {
 
-  let startDateStr = "";
-  let endDateStr = "";
-  let startTime: string | null = null;
-  let endTime: string | null = null;
-  let venue: string | null = null;
+    let startDateStr = "";
+    let endDateStr = "";
+    let startTime: string | null = null;
+    let endTime: string | null = null;
+    let venue: string | null = null;
 
-  if (row.eventId) {
-    startDateStr = row.evStart ? String(row.evStart).slice(0, 10) : "";
-    endDateStr = row.evEnd ? String(row.evEnd).slice(0, 10) : startDateStr;
-    startTime = row.evStartTime || null;
-    endTime = row.evEndTime || null;
-    venue = row.evVenue || null;
-  } else if (row.scheduledDate) {
-    startDateStr = String(row.scheduledDate).slice(0, 10);
-    endDateStr = startDateStr;
-  } else if (row.completionDate) {
-    startDateStr = String(row.completionDate).slice(0, 10);
-    endDateStr = startDateStr;
-  }
+    if (row.eventId) {
+      startDateStr = row.evStart ? dateKey(row.evStart) : "";
+      endDateStr = row.evEnd ? dateKey(row.evEnd) : startDateStr;
+      startTime = row.evStartTime || null;
+      endTime = row.evEndTime || null;
+      venue = row.evVenue || null;
+    } else if (row.scheduledDate) {
+      startDateStr = dateKey(row.scheduledDate);
+      endDateStr = startDateStr;
+    } else if (row.completionDate) {
+      startDateStr = dateKey(row.completionDate);
+      endDateStr = startDateStr;
+    }
 
-  const trainingName = row.catalogName || "Assigned Training";
+    const trainingName = row.catalogName || "Assigned Training";
 
-  return {
-    assignmentId: row.id,
-    nurseId: row.nurseId,
-    scheduleVersion: row.scheduleVersion ?? 1,
-    status: row.status,
-    trainingId: row.trainingId,
-    trainingName,
-    startDateStr,
-    endDateStr,
-    startTime,
-    endTime,
-    venue,
-    remarks: row.remarks || row.evRemarks || null,
-    evidenceRequired: Boolean(row.evidenceRequired),
-    evidenceStatus: row.evidenceStatus || "None",
-    staffResponse: row.staffResponse || "Pending",
-    staffResponseReason: row.staffResponseReason || null,
-    attendanceOutcome: row.attendanceOutcome || "not_recorded",
-  };
+    return {
+      assignmentId: row.id,
+      nurseId: row.nurseId,
+      scheduleVersion: row.scheduleVersion ?? 1,
+      status: row.status,
+      trainingId: row.trainingId,
+      trainingName,
+      startDateStr,
+      endDateStr,
+      startTime,
+      endTime,
+      venue,
+      remarks: row.remarks || row.evRemarks || null,
+      evidenceRequired: Boolean(row.evidenceRequired),
+      evidenceStatus: row.evidenceStatus || "None",
+      staffResponse: row.staffResponse || "Pending",
+      staffResponseReason: row.staffResponseReason || null,
+      attendanceOutcome: row.attendanceOutcome || "not_recorded",
+    };
+  });
+}
+
+export async function resolveTrainingSchedule(assignmentId: number): Promise<ResolvedTrainingSchedule | null> {
+  return (await loadTrainingSchedules({ assignmentId }))[0] ?? null;
+}
+
+export async function listResolvedTrainingSchedules(nurseId: number): Promise<ResolvedTrainingSchedule[]> {
+  return loadTrainingSchedules({ nurseId });
 }
 
 export interface TrainingConflictItem {

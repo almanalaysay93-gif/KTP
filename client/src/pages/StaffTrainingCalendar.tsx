@@ -34,7 +34,7 @@ export default function StaffTrainingCalendar() {
   const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{ base64: string; name: string; mimeType: string } | null>(null);
 
-  const { data: calendarItems, isLoading } = trpc.staffAccount.myTrainingCalendar.useQuery();
+  const { data: calendarItems, isLoading, error, refetch } = trpc.staffAccount.myTrainingCalendar.useQuery(undefined, { retry: false });
 
   const respondMutation = trpc.staffAccount.respondToTraining.useMutation({
     onSuccess: () => {
@@ -155,7 +155,12 @@ export default function StaffTrainingCalendar() {
           </Tabs>
         </div>
 
-        {isLoading ? (
+        {error ? (
+          <Card className="glass-card p-6 space-y-3" role="alert">
+            <p>Could not load your training calendar. Please try again.</p>
+            <Button onClick={() => void refetch()}>Retry</Button>
+          </Card>
+        ) : isLoading ? (
           <div className="space-y-3">
             <Skeleton className="h-24 w-full rounded-lg" />
             <Skeleton className="h-24 w-full rounded-lg" />

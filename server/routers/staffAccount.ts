@@ -8,7 +8,7 @@ import { sdk } from "../_core/sdk";
 import * as db from "../db";
 import { nurseFullName, sanitizeFilename, storageKey, validateMime } from "../../shared/nursetrack";
 import { storagePut } from "../storage";
-import { resolveTrainingSchedule } from "../trainingReminders";
+import { listResolvedTrainingSchedules, resolveTrainingSchedule } from "../trainingReminders";
 
 const GENERIC_CLAIM_ERROR =
   "No matching staff record, or this profile already has a sign-in email.";
@@ -286,12 +286,10 @@ export const staffAccountRouter = router({
         .optional()
     )
     .query(async ({ ctx, input }) => {
-      const assignments = await db.listNurseTrainings({ nurseId: ctx.nurseId });
+      const assignments = await listResolvedTrainingSchedules(ctx.nurseId);
       const results: any[] = [];
-      for (const a of assignments) {
-        if (input?.status && input.status !== "all" && a.status !== input.status) continue;
-        const resolved = await resolveTrainingSchedule(a.id);
-        if (!resolved) continue;
+      for (const resolved of assignments) {
+        if (input?.status && input.status !== "all" && resolved.status !== input.status) continue;
         if (input?.startDate && resolved.startDateStr && resolved.startDateStr < input.startDate) continue;
         if (input?.endDate && resolved.startDateStr && resolved.startDateStr > input.endDate) continue;
 

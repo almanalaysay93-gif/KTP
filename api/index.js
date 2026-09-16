@@ -3266,7 +3266,7 @@ var init_templates = __esm({
 });
 
 // server/trainingReminders.ts
-import { eq as eq2, and as and2, lte as lte2, isNull as isNull2, sql as sql3, inArray as inArray2, or as or2 } from "drizzle-orm";
+import { eq as eq2, and as and2, lte as lte2, isNull as isNull2, sql as sql3, inArray as inArray2, or as or2, desc as desc2 } from "drizzle-orm";
 function getManilaTodayKey() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(/* @__PURE__ */ new Date());
 }
@@ -3285,104 +3285,112 @@ function addCalendarDays(dateStr, days) {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
-async function resolveTrainingSchedule(assignmentId) {
+async function loadTrainingSchedules(scope) {
   const db = await getDb();
   if (db) {
-    const rows = await db.select({
+    const rows2 = await db.select({
       assignment: nurseTrainings,
       event: trainingEvents,
       catalog: trainingCatalog
-    }).from(nurseTrainings).leftJoin(trainingEvents, eq2(trainingEvents.id, nurseTrainings.eventId)).leftJoin(trainingCatalog, eq2(trainingCatalog.id, nurseTrainings.trainingId)).where(eq2(nurseTrainings.id, assignmentId)).limit(1);
-    if (rows.length === 0) return null;
-    const { assignment, event, catalog } = rows[0];
-    let startDateStr2 = "";
-    let endDateStr2 = "";
-    let startTime2 = null;
-    let endTime2 = null;
-    let venue2 = null;
-    if (event) {
-      startDateStr2 = event.startDate ? String(event.startDate).slice(0, 10) : "";
-      endDateStr2 = event.endDate ? String(event.endDate).slice(0, 10) : startDateStr2;
-      startTime2 = event.startTime || null;
-      endTime2 = event.endTime || null;
-      venue2 = event.venue || null;
-    } else if (assignment.scheduledDate) {
-      startDateStr2 = String(assignment.scheduledDate).slice(0, 10);
-      endDateStr2 = startDateStr2;
-    } else if (assignment.completionDate) {
-      startDateStr2 = String(assignment.completionDate).slice(0, 10);
-      endDateStr2 = startDateStr2;
-    }
-    const trainingName2 = catalog?.name || "Assigned Training";
-    return {
-      assignmentId: assignment.id,
-      nurseId: assignment.nurseId,
-      scheduleVersion: assignment.scheduleVersion ?? 1,
-      status: assignment.status,
-      trainingId: assignment.trainingId,
-      trainingName: trainingName2,
-      startDateStr: startDateStr2,
-      endDateStr: endDateStr2,
-      startTime: startTime2,
-      endTime: endTime2,
-      venue: venue2,
-      remarks: assignment.remarks || event?.remarks || null,
-      evidenceRequired: Boolean(assignment.evidenceRequired),
-      evidenceStatus: assignment.evidenceStatus || "None",
-      staffResponse: assignment.staffResponse || "Pending",
-      staffResponseReason: assignment.staffResponseReason || null,
-      attendanceOutcome: assignment.attendanceOutcome || "not_recorded"
-    };
+    }).from(nurseTrainings).leftJoin(trainingEvents, eq2(trainingEvents.id, nurseTrainings.eventId)).leftJoin(trainingCatalog, eq2(trainingCatalog.id, nurseTrainings.trainingId)).where("assignmentId" in scope ? eq2(nurseTrainings.id, scope.assignmentId) : eq2(nurseTrainings.nurseId, scope.nurseId)).orderBy(desc2(nurseTrainings.scheduledDate));
+    return rows2.map(({ assignment, event, catalog }) => {
+      let startDateStr = "";
+      let endDateStr = "";
+      let startTime = null;
+      let endTime = null;
+      let venue = null;
+      if (event) {
+        startDateStr = event.startDate ? dateKey(event.startDate) : "";
+        endDateStr = event.endDate ? dateKey(event.endDate) : startDateStr;
+        startTime = event.startTime || null;
+        endTime = event.endTime || null;
+        venue = event.venue || null;
+      } else if (assignment.scheduledDate) {
+        startDateStr = dateKey(assignment.scheduledDate);
+        endDateStr = startDateStr;
+      } else if (assignment.completionDate) {
+        startDateStr = dateKey(assignment.completionDate);
+        endDateStr = startDateStr;
+      }
+      const trainingName = catalog?.name || "Assigned Training";
+      return {
+        assignmentId: assignment.id,
+        nurseId: assignment.nurseId,
+        scheduleVersion: assignment.scheduleVersion ?? 1,
+        status: assignment.status,
+        trainingId: assignment.trainingId,
+        trainingName,
+        startDateStr,
+        endDateStr,
+        startTime,
+        endTime,
+        venue,
+        remarks: assignment.remarks || event?.remarks || null,
+        evidenceRequired: Boolean(assignment.evidenceRequired),
+        evidenceStatus: assignment.evidenceStatus || "None",
+        staffResponse: assignment.staffResponse || "Pending",
+        staffResponseReason: assignment.staffResponseReason || null,
+        attendanceOutcome: assignment.attendanceOutcome || "not_recorded"
+      };
+    });
   }
   const sqlite = getSqliteDb();
-  const row = sqlite.prepare(
+  const rows = sqlite.prepare(
     `SELECT t.*, e.startDate as evStart, e.endDate as evEnd, e.startTime as evStartTime,
               e.endTime as evEndTime, e.venue as evVenue, e.remarks as evRemarks,
               c.name as catalogName
        FROM nurseTrainings t
        LEFT JOIN trainingEvents e ON e.id = t.eventId
        LEFT JOIN trainingCatalog c ON c.id = t.trainingId
-       WHERE t.id = ?`
-  ).get(assignmentId);
-  if (!row) return null;
-  let startDateStr = "";
-  let endDateStr = "";
-  let startTime = null;
-  let endTime = null;
-  let venue = null;
-  if (row.eventId) {
-    startDateStr = row.evStart ? String(row.evStart).slice(0, 10) : "";
-    endDateStr = row.evEnd ? String(row.evEnd).slice(0, 10) : startDateStr;
-    startTime = row.evStartTime || null;
-    endTime = row.evEndTime || null;
-    venue = row.evVenue || null;
-  } else if (row.scheduledDate) {
-    startDateStr = String(row.scheduledDate).slice(0, 10);
-    endDateStr = startDateStr;
-  } else if (row.completionDate) {
-    startDateStr = String(row.completionDate).slice(0, 10);
-    endDateStr = startDateStr;
-  }
-  const trainingName = row.catalogName || "Assigned Training";
-  return {
-    assignmentId: row.id,
-    nurseId: row.nurseId,
-    scheduleVersion: row.scheduleVersion ?? 1,
-    status: row.status,
-    trainingId: row.trainingId,
-    trainingName,
-    startDateStr,
-    endDateStr,
-    startTime,
-    endTime,
-    venue,
-    remarks: row.remarks || row.evRemarks || null,
-    evidenceRequired: Boolean(row.evidenceRequired),
-    evidenceStatus: row.evidenceStatus || "None",
-    staffResponse: row.staffResponse || "Pending",
-    staffResponseReason: row.staffResponseReason || null,
-    attendanceOutcome: row.attendanceOutcome || "not_recorded"
-  };
+       WHERE ${"assignmentId" in scope ? "t.id" : "t.nurseId"} = ?
+       ORDER BY date(t.scheduledDate) DESC`
+  ).all("assignmentId" in scope ? scope.assignmentId : scope.nurseId);
+  return rows.map((row) => {
+    let startDateStr = "";
+    let endDateStr = "";
+    let startTime = null;
+    let endTime = null;
+    let venue = null;
+    if (row.eventId) {
+      startDateStr = row.evStart ? dateKey(row.evStart) : "";
+      endDateStr = row.evEnd ? dateKey(row.evEnd) : startDateStr;
+      startTime = row.evStartTime || null;
+      endTime = row.evEndTime || null;
+      venue = row.evVenue || null;
+    } else if (row.scheduledDate) {
+      startDateStr = dateKey(row.scheduledDate);
+      endDateStr = startDateStr;
+    } else if (row.completionDate) {
+      startDateStr = dateKey(row.completionDate);
+      endDateStr = startDateStr;
+    }
+    const trainingName = row.catalogName || "Assigned Training";
+    return {
+      assignmentId: row.id,
+      nurseId: row.nurseId,
+      scheduleVersion: row.scheduleVersion ?? 1,
+      status: row.status,
+      trainingId: row.trainingId,
+      trainingName,
+      startDateStr,
+      endDateStr,
+      startTime,
+      endTime,
+      venue,
+      remarks: row.remarks || row.evRemarks || null,
+      evidenceRequired: Boolean(row.evidenceRequired),
+      evidenceStatus: row.evidenceStatus || "None",
+      staffResponse: row.staffResponse || "Pending",
+      staffResponseReason: row.staffResponseReason || null,
+      attendanceOutcome: row.attendanceOutcome || "not_recorded"
+    };
+  });
+}
+async function resolveTrainingSchedule(assignmentId) {
+  return (await loadTrainingSchedules({ assignmentId }))[0] ?? null;
+}
+async function listResolvedTrainingSchedules(nurseId) {
+  return loadTrainingSchedules({ nurseId });
 }
 async function checkTrainingConflicts(nurseId, startDateStr, endDateStr, startTime, endTime, excludeAssignmentId) {
   const normEnd = endDateStr || startDateStr;
@@ -9148,12 +9156,10 @@ var staffAccountRouter = router({
       status: z12.string().optional()
     }).optional()
   ).query(async ({ ctx, input }) => {
-    const assignments = await listNurseTrainings({ nurseId: ctx.nurseId });
+    const assignments = await listResolvedTrainingSchedules(ctx.nurseId);
     const results = [];
-    for (const a of assignments) {
-      if (input?.status && input.status !== "all" && a.status !== input.status) continue;
-      const resolved = await resolveTrainingSchedule(a.id);
-      if (!resolved) continue;
+    for (const resolved of assignments) {
+      if (input?.status && input.status !== "all" && resolved.status !== input.status) continue;
       if (input?.startDate && resolved.startDateStr && resolved.startDateStr < input.startDate) continue;
       if (input?.endDate && resolved.startDateStr && resolved.startDateStr > input.endDate) continue;
       results.push({
