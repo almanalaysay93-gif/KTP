@@ -1852,10 +1852,35 @@ export async function isEmailDuplicate(params: {
 export async function listRecentEmailLogs(limit = 50) {
   const db = await getDb();
   if (db) {
-    return await db.select().from(emailLogs).orderBy(desc(emailLogs.sentAt)).limit(limit);
+    return await db
+      .select({
+        id: emailLogs.id,
+        nurseId: emailLogs.nurseId,
+        recipientEmail: emailLogs.recipientEmail,
+        emailType: emailLogs.emailType,
+        referenceId: emailLogs.referenceId,
+        thresholdKey: emailLogs.thresholdKey,
+        subject: emailLogs.subject,
+        status: emailLogs.status,
+        errorMessage: emailLogs.errorMessage,
+        sentAt: emailLogs.sentAt,
+        nurseName: sql<string | null>`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
+        nursePhotoKey: nurses.profilePhotoKey,
+      })
+      .from(emailLogs)
+      .leftJoin(nurses, eq(nurses.id, emailLogs.nurseId))
+      .orderBy(desc(emailLogs.sentAt))
+      .limit(limit);
   }
   const sqlite = getSqliteDb();
-  return sqlite.prepare(`SELECT * FROM emailLogs ORDER BY sentAt DESC LIMIT ?`).all(limit) as EmailLog[];
+  return sqlite
+    .prepare(
+      `SELECT l.*, (n.firstName || ' ' || n.lastName) as nurseName, n.profilePhotoKey as nursePhotoKey
+       FROM emailLogs l
+       LEFT JOIN nurses n ON n.id = l.nurseId
+       ORDER BY l.sentAt DESC LIMIT ?`
+    )
+    .all(limit) as (EmailLog & { nurseName?: string | null; nursePhotoKey?: string | null })[];
 }
 
 /* ---------------- Reminder Lock / Lease ---------------- */
