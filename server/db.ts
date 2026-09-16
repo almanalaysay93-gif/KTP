@@ -1461,22 +1461,66 @@ export async function deleteCustomEvent(id: number) {
 }
 
 /* ---------------- Notifications ---------------- */
+export function getNotificationLogicalKey(n: {
+  id?: number;
+  type: string;
+  nurseId?: number | null;
+  relatedEntityType?: string | null;
+  relatedEntityId?: number | null;
+  title?: string | null;
+}): string {
+  if (n.type === "license.expired") {
+    return `license.expired:${n.nurseId ?? ""}:${n.relatedEntityType ?? ""}:${n.relatedEntityId ?? ""}`;
+  }
+  if (n.type === "license.renewalReminder") {
+    const prefix = (n.title ?? "").split(" — ")[0].trim();
+    return `license.renewalReminder:${n.nurseId ?? ""}:${n.relatedEntityType ?? ""}:${n.relatedEntityId ?? ""}:${prefix}`;
+  }
+  if (n.relatedEntityType && n.relatedEntityId) {
+    return `${n.type}:${n.nurseId ?? ""}:${n.relatedEntityType}:${n.relatedEntityId}`;
+  }
+  return `notif:${n.id ?? Math.random()}`;
+}
+
 export async function listNotifications(limit = 100) {
   const db = await getDb();
-  if (db) return await db.select().from(notifications).orderBy(desc(notifications.createdAt)).limit(limit);
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM notifications ORDER BY date(createdAt) DESC LIMIT ?").all(limit) as any[];
+  let rawRows: any[] = [];
+  if (db) {
+    rawRows = await db.select().from(notifications).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(limit * 3);
+  } else {
+    const sqlite = getSqliteDb();
+    rawRows = sqlite.prepare("SELECT * FROM notifications ORDER BY datetime(createdAt) DESC, id DESC LIMIT ?").all(limit * 3) as any[];
+  }
+
+  const seen = new Set<string>();
+  const deduplicated: any[] = [];
+  for (const row of rawRows) {
+    const key = getNotificationLogicalKey(row);
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduplicated.push(row);
+      if (deduplicated.length >= limit) break;
+    }
+  }
+  return deduplicated;
 }
 
 export async function countUnreadNotifications() {
   const db = await getDb();
+  let unreadRows: any[] = [];
   if (db) {
-    const rows = await db.select({ count: sql<number>`count(*)` }).from(notifications).where(isNull(notifications.readAt));
-    return Number(rows[0]?.count ?? 0);
+    unreadRows = await db.select().from(notifications).where(isNull(notifications.readAt));
+  } else {
+    const sqlite = getSqliteDb();
+    unreadRows = sqlite.prepare("SELECT * FROM notifications WHERE readAt IS NULL").all() as any[];
   }
-  const sqlite = getSqliteDb();
-  const row = sqlite.prepare("SELECT count(*) as count FROM notifications WHERE readAt IS NULL").get() as { count: number };
-  return row.count;
+
+  const seen = new Set<string>();
+  for (const row of unreadRows) {
+    const key = getNotificationLogicalKey(row);
+    seen.add(key);
+  }
+  return seen.size;
 }
 
 export async function createNotification(data: { type: string; severity: string; title: string; message?: string; nurseId?: number | null; relatedEntityType?: string; relatedEntityId?: number | null; dayKey?: string }): Promise<number> {
@@ -1546,11 +1590,27 @@ export async function createNotificationsBatch(data: Array<{ type: string; sever
 export async function markNotificationRead(id: number) {
   const db = await getDb();
   if (db) {
-    await db.update(notifications).set({ readAt: new Date() }).where(eq(notifications.id, id));
+    const target = await db.select().from(notifications).where(eq(notifications.id, id)).limit(1);
+    if (target.length > 0) {
+      const t = target[0];
+      if (t.relatedEntityType && t.relatedEntityId) {
+        await db.update(notifications)
+          .set({ readAt: new Date() })
+          .where(sql`${notifications.type} = ${t.type} AND (${notifications.nurseId} = ${t.nurseId} OR (${notifications.nurseId} IS NULL AND ${t.nurseId} IS NULL)) AND ${notifications.relatedEntityType} = ${t.relatedEntityType} AND ${notifications.relatedEntityId} = ${t.relatedEntityId} AND ${notifications.readAt} IS NULL`);
+      } else {
+        await db.update(notifications).set({ readAt: new Date() }).where(eq(notifications.id, id));
+      }
+    }
     return;
   }
   const sqlite = getSqliteDb();
-  sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+  const target = sqlite.prepare("SELECT * FROM notifications WHERE id = ?").get(id) as any;
+  if (target && target.relatedEntityType && target.relatedEntityId) {
+    sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE type = ? AND (nurseId = ? OR (nurseId IS NULL AND ? IS NULL)) AND relatedEntityType = ? AND relatedEntityId = ? AND readAt IS NULL")
+      .run(target.type, target.nurseId ?? null, target.nurseId ?? null, target.relatedEntityType, target.relatedEntityId);
+  } else {
+    sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+  }
 }
 
 export async function markAllNotificationsRead() {

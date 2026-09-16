@@ -13,15 +13,24 @@ type ChatEntry = { role: "user" | "assistant"; content: string };
 export default function AiInsightsPage() {
   const [report, setReport] = useState<string | null>(null);
   const [reportGeneratedAt, setReportGeneratedAt] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [question, setQuestion] = useState("");
 
   const generateReport = trpc.aiInsights.generateReport.useMutation({
+    onMutate: () => {
+      setReportError(null);
+    },
     onSuccess: (data) => {
       setReport(data.report);
       setReportGeneratedAt(data.generatedAt);
+      setReportError(null);
+      toast.success("AI Insights report generated successfully.");
     },
-    onError: (err) => toast.error(err.message),
+    onError: (err) => {
+      setReportError(err.message);
+      toast.error(err.message);
+    },
   });
 
   const chat = trpc.aiInsights.chat.useMutation({
@@ -60,10 +69,43 @@ export default function AiInsightsPage() {
           <CardDescription>Urgent/upcoming license expirations, upcoming trainings and seminars, and staffing patterns.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Button type="button" onClick={() => generateReport.mutate()} disabled={generateReport.isPending}>
+          <Button
+            type="button"
+            onClick={() => generateReport.mutate()}
+            disabled={generateReport.isPending}
+          >
             {generateReport.isPending ? <Spinner className="h-4 w-4 mr-2" /> : <Sparkles className="h-4 w-4 mr-2" />}
             {generateReport.isPending ? "Generating…" : report ? "Regenerate Report" : "Generate Report"}
           </Button>
+
+          {generateReport.isPending && (
+            <div className="rounded-lg border bg-muted/40 p-4 flex items-center gap-3">
+              <Spinner className="h-5 w-5 text-primary shrink-0" />
+              <div>
+                <p className="text-sm font-medium">Analyzing staff records and generating report...</p>
+                <p className="text-xs text-muted-foreground">Evaluating license expirations, training schedules, and area coverage.</p>
+              </div>
+            </div>
+          )}
+
+          {reportError && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 flex items-start justify-between gap-3 text-sm text-destructive">
+              <div>
+                <p className="font-semibold">Unable to generate AI report</p>
+                <p className="text-xs mt-1 text-destructive/90">{reportError}</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => generateReport.mutate()}
+                disabled={generateReport.isPending}
+                className="shrink-0 text-xs h-8 border-destructive/30 hover:bg-destructive/10 text-destructive"
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+
           {report && (
             <div className="rounded-lg border bg-muted/30 p-4">
               {reportGeneratedAt && (

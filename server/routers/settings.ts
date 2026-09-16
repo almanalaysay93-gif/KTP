@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { eq, isNull, sql } from "drizzle-orm";
 import { adminProcedure, router } from "../_core/trpc";
 import { getDb, getNurseByEmployeeId, createNurse, createAssignment, logActivity } from "../db";
+import { getSqliteDb } from "../localDb";
 import { areas, nurseCredentials, nurseTrainings, areaAssignments, appSettings, nurses } from "../../drizzle/schema";
 import { EMPLOYMENT_STATUSES, nurseFullName } from "../../shared/nursetrack";
 import { runDailyReminders } from "../reminders";
@@ -210,20 +211,38 @@ export const settingsRouter = router({
     .input(z.object({ entity: z.enum(["nurses", "credentials", "trainings", "assignments", "all"]) }))
     .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
       const out: Record<string, unknown[]> = {};
 
+      if (db) {
+        const fetches: Promise<void>[] = [];
+        if (input.entity === "nurses" || input.entity === "all") {
+          fetches.push(db.select().from(nurses).then((r) => { out.nurses = r; }));
+        }
+        if (input.entity === "credentials" || input.entity === "all") {
+          fetches.push(db.select().from(nurseCredentials).then((r) => { out.nurseCredentials = r; }));
+        }
+        if (input.entity === "trainings" || input.entity === "all") {
+          fetches.push(db.select().from(nurseTrainings).then((r) => { out.nurseTrainings = r; }));
+        }
+        if (input.entity === "assignments" || input.entity === "all") {
+          fetches.push(db.select().from(areaAssignments).then((r) => { out.areaAssignments = r; }));
+        }
+        await Promise.all(fetches);
+        return out;
+      }
+
+      const sqlite = getSqliteDb();
       if (input.entity === "nurses" || input.entity === "all") {
-        out.nurses = await db.select().from(nurses);
+        out.nurses = sqlite.prepare("SELECT * FROM nurses").all() as any[];
       }
       if (input.entity === "credentials" || input.entity === "all") {
-        out.nurseCredentials = await db.select().from(nurseCredentials);
+        out.nurseCredentials = sqlite.prepare("SELECT * FROM nurseCredentials").all() as any[];
       }
       if (input.entity === "trainings" || input.entity === "all") {
-        out.nurseTrainings = await db.select().from(nurseTrainings);
+        out.nurseTrainings = sqlite.prepare("SELECT * FROM nurseTrainings").all() as any[];
       }
       if (input.entity === "assignments" || input.entity === "all") {
-        out.areaAssignments = await db.select().from(areaAssignments);
+        out.areaAssignments = sqlite.prepare("SELECT * FROM areaAssignments").all() as any[];
       }
       return out;
     }),

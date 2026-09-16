@@ -908,6 +908,7 @@ __export(db_exports, {
   getAssignmentsForArea: () => getAssignmentsForArea,
   getBatchClient: () => getBatchClient,
   getDb: () => getDb,
+  getNotificationLogicalKey: () => getNotificationLogicalKey,
   getNurseByEmployeeId: () => getNurseByEmployeeId,
   getNurseById: () => getNurseById,
   getNurseByLinkedUserId: () => getNurseByLinkedUserId,
@@ -2202,21 +2203,55 @@ async function deleteCustomEvent(id) {
   const sqlite = getSqliteDb();
   sqlite.prepare("DELETE FROM customCalendarEvents WHERE id = ?").run(id);
 }
+function getNotificationLogicalKey(n) {
+  if (n.type === "license.expired") {
+    return `license.expired:${n.nurseId ?? ""}:${n.relatedEntityType ?? ""}:${n.relatedEntityId ?? ""}`;
+  }
+  if (n.type === "license.renewalReminder") {
+    const prefix = (n.title ?? "").split(" \u2014 ")[0].trim();
+    return `license.renewalReminder:${n.nurseId ?? ""}:${n.relatedEntityType ?? ""}:${n.relatedEntityId ?? ""}:${prefix}`;
+  }
+  if (n.relatedEntityType && n.relatedEntityId) {
+    return `${n.type}:${n.nurseId ?? ""}:${n.relatedEntityType}:${n.relatedEntityId}`;
+  }
+  return `notif:${n.id ?? Math.random()}`;
+}
 async function listNotifications(limit = 100) {
   const db = await getDb();
-  if (db) return await db.select().from(notifications).orderBy(desc(notifications.createdAt)).limit(limit);
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM notifications ORDER BY date(createdAt) DESC LIMIT ?").all(limit);
+  let rawRows = [];
+  if (db) {
+    rawRows = await db.select().from(notifications).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(limit * 3);
+  } else {
+    const sqlite = getSqliteDb();
+    rawRows = sqlite.prepare("SELECT * FROM notifications ORDER BY datetime(createdAt) DESC, id DESC LIMIT ?").all(limit * 3);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const deduplicated = [];
+  for (const row of rawRows) {
+    const key = getNotificationLogicalKey(row);
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduplicated.push(row);
+      if (deduplicated.length >= limit) break;
+    }
+  }
+  return deduplicated;
 }
 async function countUnreadNotifications() {
   const db = await getDb();
+  let unreadRows = [];
   if (db) {
-    const rows = await db.select({ count: sql2`count(*)` }).from(notifications).where(isNull(notifications.readAt));
-    return Number(rows[0]?.count ?? 0);
+    unreadRows = await db.select().from(notifications).where(isNull(notifications.readAt));
+  } else {
+    const sqlite = getSqliteDb();
+    unreadRows = sqlite.prepare("SELECT * FROM notifications WHERE readAt IS NULL").all();
   }
-  const sqlite = getSqliteDb();
-  const row = sqlite.prepare("SELECT count(*) as count FROM notifications WHERE readAt IS NULL").get();
-  return row.count;
+  const seen = /* @__PURE__ */ new Set();
+  for (const row of unreadRows) {
+    const key = getNotificationLogicalKey(row);
+    seen.add(key);
+  }
+  return seen.size;
 }
 async function createNotification(data) {
   const db = await getDb();
@@ -2286,11 +2321,24 @@ async function createNotificationsBatch(data) {
 async function markNotificationRead(id) {
   const db = await getDb();
   if (db) {
-    await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where(eq(notifications.id, id));
+    const target2 = await db.select().from(notifications).where(eq(notifications.id, id)).limit(1);
+    if (target2.length > 0) {
+      const t2 = target2[0];
+      if (t2.relatedEntityType && t2.relatedEntityId) {
+        await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where(sql2`${notifications.type} = ${t2.type} AND (${notifications.nurseId} = ${t2.nurseId} OR (${notifications.nurseId} IS NULL AND ${t2.nurseId} IS NULL)) AND ${notifications.relatedEntityType} = ${t2.relatedEntityType} AND ${notifications.relatedEntityId} = ${t2.relatedEntityId} AND ${notifications.readAt} IS NULL`);
+      } else {
+        await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where(eq(notifications.id, id));
+      }
+    }
     return;
   }
   const sqlite = getSqliteDb();
-  sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+  const target = sqlite.prepare("SELECT * FROM notifications WHERE id = ?").get(id);
+  if (target && target.relatedEntityType && target.relatedEntityId) {
+    sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE type = ? AND (nurseId = ? OR (nurseId IS NULL AND ? IS NULL)) AND relatedEntityType = ? AND relatedEntityId = ? AND readAt IS NULL").run(target.type, target.nurseId ?? null, target.nurseId ?? null, target.relatedEntityType, target.relatedEntityId);
+  } else {
+    sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+  }
 }
 async function markAllNotificationsRead() {
   const db = await getDb();
@@ -2657,8 +2705,8 @@ function renderLicenseExpiryEmail({
   actionUrl
 }) {
   const isExpired = daysRemaining <= 0;
-  const badgeClass = isExpired || daysRemaining <= 30 ? "badge-urgent" : "badge-warning";
-  const badgeLabel = isExpired ? "License Expired" : daysRemaining <= 30 ? "Urgent Renewal Required" : "Upcoming Renewal";
+  const badgeClass = isExpired || daysRemaining <= 30 ? "badge-urgent" : daysRemaining <= 90 ? "badge-warning" : "badge-info";
+  const badgeLabel = isExpired ? "License Expired" : daysRemaining <= 30 ? "Urgent Renewal Required" : daysRemaining <= 180 ? "Upcoming Renewal" : "Advance Renewal Notice";
   const content = `
     <div style="margin-bottom: 16px;">
       <span class="${badgeClass}">${badgeLabel}</span>
@@ -2904,7 +2952,14 @@ async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
       await db2.update(licenseReminders).set({ status: "expired" }).where(sql6`${licenseReminders.credentialId} IN (${sql6.join(expiredIds.map((i) => sql6`${i}`), sql6`, `)})`);
     }
   }
-  const expiredNotifs = expiredNotes.map(({ cred }) => ({
+  const existingNotifications = await listNotifications(500);
+  const existingExpiredNotifKeys = new Set(
+    existingNotifications.filter((n) => n.type === "license.expired").map((n) => `${n.nurseId}:${n.relatedEntityType}:${n.relatedEntityId}`)
+  );
+  const existingRenewalNotifKeys = new Set(
+    existingNotifications.filter((n) => n.type === "license.renewalReminder").map((n) => `${n.nurseId}:${n.relatedEntityType}:${n.relatedEntityId}:${(n.title ?? "").split(" \u2014 ")[0].trim()}`)
+  );
+  const expiredNotifs = expiredNotes.filter(({ cred }) => !existingExpiredNotifKeys.has(`${cred.nurseId}:credential:${cred.id}`)).map(({ cred }) => ({
     type: "license.expired",
     severity: "urgent_or_expired",
     title: `License expired \u2014 ${cred.nurse.firstName} ${cred.nurse.lastName}`,
@@ -2924,7 +2979,10 @@ async function runDailyReminders(today, thresholds = DEFAULT_THRESHOLDS) {
       notifsByCred.set(pair.cred.id, pair);
     }
   }
-  const notifPayloads = Array.from(notifsByCred.values()).map(({ cred, threshold, days }) => ({
+  const notifPayloads = Array.from(notifsByCred.values()).filter(({ cred, threshold }) => {
+    const thresholdLabel = threshold === 365 ? "1-year renewal reminder" : `${threshold}-day renewal reminder`;
+    return !existingRenewalNotifKeys.has(`${cred.nurseId}:credential:${cred.id}:${thresholdLabel}`);
+  }).map(({ cred, threshold, days }) => ({
     type: "license.renewalReminder",
     severity: threshold >= 365 ? "attention" : "upcoming_renewal",
     title: `${threshold === 365 ? "1-year" : `${threshold}-day`} renewal reminder \u2014 ${cred.nurse.firstName} ${cred.nurse.lastName}`,
@@ -3026,8 +3084,10 @@ async function runLicenseExpiryEmailPass(today = todayDate()) {
       continue;
     }
     const daysLeft = daysUntilExpiry(record.expiryDate, today);
-    for (const thresh of EXPIRY_THRESHOLDS) {
-      const matches = thresh.days === 0 ? daysLeft <= 0 : daysLeft <= thresh.days && daysLeft > (thresh.days === 7 ? 0 : thresh.days - (thresh.days === 90 ? 30 : thresh.days === 60 ? 30 : 23));
+    for (let i = 0; i < EXPIRY_THRESHOLDS.length; i++) {
+      const thresh = EXPIRY_THRESHOLDS[i];
+      const nextThresh = EXPIRY_THRESHOLDS[i + 1];
+      const matches = thresh.days === 0 ? daysLeft <= 0 : daysLeft <= thresh.days && daysLeft > (nextThresh ? nextThresh.days : 0);
       if (!matches) continue;
       processed++;
       const isDup = await isEmailDuplicate({
@@ -3049,7 +3109,7 @@ async function runLicenseExpiryEmailPass(today = todayDate()) {
         thresholdKey: thresh.key,
         actionUrl: `${APP_URL}/me`
       });
-      const subject = daysLeft <= 0 ? `[URGENT] License Expired: ${record.typeName} (${record.licenseNumber})` : daysLeft <= 30 ? `[Action Required] ${record.typeName} expires in ${daysLeft} days` : `Renewal Notice: ${record.typeName} expires in ${daysLeft} days`;
+      const subject = daysLeft <= 0 ? `[URGENT] License Expired: ${record.typeName} (${record.licenseNumber})` : daysLeft <= 30 ? `[Action Required] ${record.typeName} expires in ${daysLeft} days` : daysLeft <= 90 ? `Renewal Notice: ${record.typeName} expires in ${daysLeft} days` : daysLeft <= 180 ? `6-Month Renewal Notice: ${record.typeName} expires in ${daysLeft} days` : `1-Year Renewal Notice: ${record.typeName} expires in ${daysLeft} days`;
       const res = await sendEmail({
         to: record.accountEmail,
         subject,
@@ -3183,6 +3243,8 @@ var init_dispatcher = __esm({
     init_templates();
     init_service();
     EXPIRY_THRESHOLDS = [
+      { days: 365, key: "365d" },
+      { days: 180, key: "180d" },
       { days: 90, key: "90d" },
       { days: 60, key: "60d" },
       { days: 30, key: "30d" },
@@ -6263,6 +6325,7 @@ import { z as z10 } from "zod";
 import { TRPCError as TRPCError6 } from "@trpc/server";
 import { eq as eq9 } from "drizzle-orm";
 init_db();
+init_localDb();
 init_schema();
 init_nursetrack();
 init_reminders();
@@ -7169,19 +7232,44 @@ var settingsRouter = router({
   }),
   exportData: adminProcedure.input(z10.object({ entity: z10.enum(["nurses", "credentials", "trainings", "assignments", "all"]) })).query(async ({ input }) => {
     const db = await getDb();
-    if (!db) throw new Error("Database unavailable");
     const out = {};
+    if (db) {
+      const fetches = [];
+      if (input.entity === "nurses" || input.entity === "all") {
+        fetches.push(db.select().from(nurses).then((r) => {
+          out.nurses = r;
+        }));
+      }
+      if (input.entity === "credentials" || input.entity === "all") {
+        fetches.push(db.select().from(nurseCredentials).then((r) => {
+          out.nurseCredentials = r;
+        }));
+      }
+      if (input.entity === "trainings" || input.entity === "all") {
+        fetches.push(db.select().from(nurseTrainings).then((r) => {
+          out.nurseTrainings = r;
+        }));
+      }
+      if (input.entity === "assignments" || input.entity === "all") {
+        fetches.push(db.select().from(areaAssignments).then((r) => {
+          out.areaAssignments = r;
+        }));
+      }
+      await Promise.all(fetches);
+      return out;
+    }
+    const sqlite = getSqliteDb();
     if (input.entity === "nurses" || input.entity === "all") {
-      out.nurses = await db.select().from(nurses);
+      out.nurses = sqlite.prepare("SELECT * FROM nurses").all();
     }
     if (input.entity === "credentials" || input.entity === "all") {
-      out.nurseCredentials = await db.select().from(nurseCredentials);
+      out.nurseCredentials = sqlite.prepare("SELECT * FROM nurseCredentials").all();
     }
     if (input.entity === "trainings" || input.entity === "all") {
-      out.nurseTrainings = await db.select().from(nurseTrainings);
+      out.nurseTrainings = sqlite.prepare("SELECT * FROM nurseTrainings").all();
     }
     if (input.entity === "assignments" || input.entity === "all") {
-      out.areaAssignments = await db.select().from(areaAssignments);
+      out.areaAssignments = sqlite.prepare("SELECT * FROM areaAssignments").all();
     }
     return out;
   }),
@@ -8500,14 +8588,23 @@ async function callOpenRouter(messages) {
   if (!ENV.openRouterApiKey) {
     throw new Error("AI Insights is not configured: OPENROUTER_API_KEY is missing.");
   }
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${ENV.openRouterApiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ model: ENV.openRouterModel, messages, temperature: 0.3 })
-  });
+  let response;
+  try {
+    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ENV.openRouterApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ model: ENV.openRouterModel, messages, temperature: 0.3 }),
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch (err) {
+    if (err instanceof Error && (err.name === "TimeoutError" || err.message.includes("timed out") || err.name === "AbortError")) {
+      throw new Error("AI service request timed out after 10 seconds. Please try again.");
+    }
+    throw new Error(`AI service connection failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+  }
   const rawText = await response.text().catch(() => "");
   if (!response.ok) {
     let errorDetail = rawText;
@@ -8516,6 +8613,12 @@ async function callOpenRouter(messages) {
       errorDetail = errJson?.error?.message ?? errJson?.message ?? rawText;
     } catch {
       errorDetail = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 200);
+    }
+    if (response.status === 401) {
+      throw new Error("AI service authorization failed: Invalid or expired OPENROUTER_API_KEY.");
+    }
+    if (response.status === 429) {
+      throw new Error("AI service rate limit exceeded. Please wait a moment and try again.");
     }
     throw new Error(`AI request failed (${response.status}): ${errorDetail || response.statusText}`);
   }
@@ -8527,8 +8630,10 @@ async function callOpenRouter(messages) {
     throw new Error(`AI service returned unexpected non-JSON response: ${preview || "Unknown error"}`);
   }
   const content = json2.choices?.[0]?.message?.content;
-  if (!content) throw new Error("AI request returned an empty response.");
-  return content;
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error("AI request returned an empty or invalid response.");
+  }
+  return content.trim();
 }
 async function generateInsightsReport() {
   const digest = await buildDataDigest();

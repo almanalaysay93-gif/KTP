@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { Bell, Download, FileSpreadsheet, Play, RefreshCw, Save, Upload, Mail, Send, CheckCircle2, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Spinner } from "@/components/ui/spinner";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -311,27 +312,59 @@ function ExportTab() {
   );
 }
 
-function ExportButton({ entity, label }: { entity: string; label: string }) {
-  const { data, isPending } = trpc.settings.exportData.useQuery({ entity: entity as "nurses" });
-  const download = () => {
-    if (!data || Object.keys(data).length === 0) {
-      toast.error(`No records found to export for ${label}.`);
-      return;
+type ExportEntity = "nurses" | "credentials" | "trainings" | "assignments" | "all";
+
+function ExportButton({ entity, label }: { entity: ExportEntity; label: string }) {
+  const utils = trpc.useUtils();
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleExport = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const data = await utils.settings.exportData.fetch({ entity });
+      const recordCount = Object.values(data).reduce(
+        (acc, arr) => acc + (Array.isArray(arr) ? arr.length : 0),
+        0
+      );
+      if (recordCount === 0) {
+        toast.info(`Export completed: 0 records found for ${label}.`);
+      }
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `nursetrack-${entity}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(`${label} exported (${recordCount} records).`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Export failed. Please try again.";
+      setError(msg);
+      toast.error(`Failed to export ${label}: ${msg}`);
+    } finally {
+      setExporting(false);
     }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `nursetrack-${entity}-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`${label} exported.`);
   };
+
   return (
-    <Button variant="outline" disabled={isPending} onClick={download}>
-      <FileSpreadsheet className="h-4 w-4 mr-1" />
-      {label}
-    </Button>
+    <div className="flex flex-col gap-1">
+      <Button
+        variant="outline"
+        disabled={exporting}
+        onClick={handleExport}
+        className="w-fit"
+      >
+        {exporting ? <Spinner className="h-4 w-4 mr-1" /> : <FileSpreadsheet className="h-4 w-4 mr-1" />}
+        {exporting ? `Exporting ${label}...` : label}
+      </Button>
+      {error && (
+        <span className="text-xs text-destructive flex items-center gap-1">
+          {error}
+        </span>
+      )}
+    </div>
   );
 }
 

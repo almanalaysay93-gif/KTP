@@ -135,14 +135,23 @@ async function callOpenRouter(messages: Array<{ role: string; content: string }>
   if (!ENV.openRouterApiKey) {
     throw new Error("AI Insights is not configured: OPENROUTER_API_KEY is missing.");
   }
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${ENV.openRouterApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ model: ENV.openRouterModel, messages, temperature: 0.3 }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ENV.openRouterApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: ENV.openRouterModel, messages, temperature: 0.3 }),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (err: unknown) {
+    if (err instanceof Error && (err.name === "TimeoutError" || err.message.includes("timed out") || err.name === "AbortError")) {
+      throw new Error("AI service request timed out after 10 seconds. Please try again.");
+    }
+    throw new Error(`AI service connection failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+  }
 
   const rawText = await response.text().catch(() => "");
   if (!response.ok) {
@@ -152,6 +161,12 @@ async function callOpenRouter(messages: Array<{ role: string; content: string }>
       errorDetail = errJson?.error?.message ?? errJson?.message ?? rawText;
     } catch {
       errorDetail = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 200);
+    }
+    if (response.status === 401) {
+      throw new Error("AI service authorization failed: Invalid or expired OPENROUTER_API_KEY.");
+    }
+    if (response.status === 429) {
+      throw new Error("AI service rate limit exceeded. Please wait a moment and try again.");
     }
     throw new Error(`AI request failed (${response.status}): ${errorDetail || response.statusText}`);
   }
@@ -165,8 +180,10 @@ async function callOpenRouter(messages: Array<{ role: string; content: string }>
   }
 
   const content = json.choices?.[0]?.message?.content;
-  if (!content) throw new Error("AI request returned an empty response.");
-  return content;
+  if (typeof content !== "string" || !content.trim()) {
+    throw new Error("AI request returned an empty or invalid response.");
+  }
+  return content.trim();
 }
 
 export async function generateInsightsReport(): Promise<string> {

@@ -20,7 +20,9 @@ import { useLocation } from "wouter";
 export default function Areas() {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
-  const { data: areas, isLoading } = trpc.areas.list.useQuery();
+  const { data: areas, isLoading } = trpc.areas.list.useQuery(undefined, {
+    placeholderData: (prev) => prev,
+  });
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -42,7 +44,7 @@ export default function Areas() {
     onError: (e) => toast.error(e.message),
   });
 
-  if (isLoading) {
+  if (isLoading && !areas) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-48" />

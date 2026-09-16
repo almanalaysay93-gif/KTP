@@ -58,6 +58,7 @@ import { Button } from "./ui/button";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
 import { ScrollArea } from "./ui/scroll-area";
+import { Spinner } from "./ui/spinner";
 
 type NavItem = {
   icon: typeof LayoutDashboard;
@@ -184,10 +185,19 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
   const activeMenuItem = NAV_ITEMS.find((item) => isItemActive(item.path)) || NAV_ITEMS.find((item) => item.path === location);
   const isMobile = useIsMobile();
   const [searchOpen, setSearchOpen] = useState(false);
-  const { data: nurseSearchResults } = trpc.nurses.search.useQuery(
-    { query: "" },
-    { enabled: false },
-  );
+  const utils = trpc.useUtils();
+
+  const handlePrefetch = (path: string) => {
+    if (path.startsWith("/nurses")) {
+      utils.nurses.initial.prefetch();
+    } else if (path === "/areas") {
+      utils.areas.list.prefetch();
+    } else if (path === "/trainings") {
+      utils.trainings.initial.prefetch();
+    } else if (path === "/seminars") {
+      utils.seminars.list.prefetch();
+    }
+  };
 
   return (
     <>
@@ -225,29 +235,44 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
             <SidebarMenu className="px-2 py-1 gap-1">
               {NAV_ITEMS.map((item) => {
                 const isActive = isItemActive(item.path);
+                const buttonClasses = cn(
+                  "h-12 text-base transition-all duration-200 ease-out font-medium",
+                  isActive
+                    ? "bg-primary/20 text-primary font-bold shadow-xs ring-1 ring-primary/30 translate-x-1"
+                    : "hover:bg-accent/60 text-foreground/85 hover:text-foreground"
+                );
                 return (
                   <SidebarMenuItem key={item.path}>
-                    <SidebarMenuButton
-                      isActive={isActive}
-                      aria-label={`${item.label}${item.external ? " (opens in new tab)" : ""}`}
-                      onClick={() => {
-                        if (item.external) {
-                          window.open(item.path, "_blank", "noopener,noreferrer");
-                          return;
-                        }
-                        setLocation(item.path);
-                      }}
-                      tooltip={item.label}
-                      className={cn(
-                        "h-12 text-base transition-all duration-200 ease-out font-medium",
-                        isActive
-                          ? "bg-primary/20 text-primary font-bold shadow-xs ring-1 ring-primary/30 translate-x-1"
-                          : "hover:bg-accent/60 text-foreground/85 hover:text-foreground"
-                      )}
-                    >
-                      <item.icon className={cn("h-5 w-5 transition-transform duration-200", isActive ? "text-primary scale-110" : "")} />
-                      <span className="text-base">{item.label}</span>
-                    </SidebarMenuButton>
+                    {item.external ? (
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        aria-label={`${item.label} (opens in new tab)`}
+                        tooltip={item.label}
+                        className={buttonClasses}
+                      >
+                        <a
+                          href={item.path}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <item.icon className={cn("h-5 w-5 transition-transform duration-200", isActive ? "text-primary scale-110" : "")} />
+                          <span className="text-base">{item.label}</span>
+                        </a>
+                      </SidebarMenuButton>
+                    ) : (
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        aria-label={item.label}
+                        onClick={() => setLocation(item.path)}
+                        onMouseEnter={() => handlePrefetch(item.path)}
+                        tooltip={item.label}
+                        className={buttonClasses}
+                      >
+                        <item.icon className={cn("h-5 w-5 transition-transform duration-200", isActive ? "text-primary scale-110" : "")} />
+                        <span className="text-base">{item.label}</span>
+                      </SidebarMenuButton>
+                    )}
                   </SidebarMenuItem>
                 );
               })}
@@ -400,7 +425,13 @@ function NotificationsBell() {
             )}
             <div className="space-y-2">
               {notifications?.map((n) => (
-                <NotificationRow key={n.id} notification={n} onRead={() => refetch()} invalidateUnread={() => utils.notifications.unreadCount.invalidate()} />
+                <NotificationRow
+                  key={n.id}
+                  notification={n}
+                  onCloseDrawer={() => setOpen(false)}
+                  onRead={() => refetch()}
+                  invalidateUnread={() => utils.notifications.unreadCount.invalidate()}
+                />
               ))}
             </div>
           </ScrollArea>
@@ -462,6 +493,7 @@ function ScrollToTop() {
 
 function NotificationRow({
   notification,
+  onCloseDrawer,
   onRead,
   invalidateUnread,
 }: {
@@ -477,6 +509,7 @@ function NotificationRow({
     readAt: Date | null;
     createdAt: Date;
   };
+  onCloseDrawer: () => void;
   onRead: () => void;
   invalidateUnread: () => void;
 }) {
@@ -497,8 +530,8 @@ function NotificationRow({
           : "border-l-blue-500";
 
   const handleOpen = () => {
+    onCloseDrawer();
     if (!notification.readAt) markRead.mutate({ id: notification.id });
-    setTimeout(onRead, 200);
     if (notification.nurseId) setLocation(`/nurses/${notification.nurseId}`);
     else if (notification.relatedEntityType === "customEvent" && notification.relatedEntityId) setLocation(`/calendar`);
     onRead();
@@ -524,35 +557,72 @@ function NotificationRow({
 
 function NurseSearchDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const [query, setQuery] = useState("");
-  const { data: results } = trpc.nurses.search.useQuery({ query: query.trim() }, { enabled: open && query.trim().length > 0 });
+  const trimmed = query.trim();
+  const {
+    data: results,
+    isLoading,
+    isFetching,
+    isError,
+    error,
+    refetch,
+  } = trpc.nurses.search.useQuery(
+    { query: trimmed },
+    { enabled: open && trimmed.length > 0 }
+  );
   const [, setLocation] = useLocation();
+
+  const isSearching = trimmed.length > 0 && (isLoading || isFetching);
+  const hasSearched = trimmed.length > 0 && !isSearching && !isError && results !== undefined;
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} shouldFilter={false}>
       <CommandInput placeholder="Search nurses by name or employee ID..." value={query} onValueChange={setQuery} />
       <CommandList>
-        <CommandEmpty>{query.trim() ? "No nurses found." : "Type to search nurses."}</CommandEmpty>
-        <CommandGroup heading="Nurses">
-          {results?.map((n) => (
-            <CommandItem
-              key={n.id}
-              value={`${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.employeeId} ${n.staffType ?? ""}`.trim()}
-              onSelect={() => {
-                onOpenChange(false);
-                setLocation(`/nurses/${n.id}`);
-              }}
-            >
-              <Users className="h-4 w-4 mr-2 text-muted-foreground" />
-              <span>{n.firstName} {n.lastName}</span>
-              <span className="text-xs text-muted-foreground ml-2">{nurseIdLabel(n)}</span>
-              {n.staffType && (
-                <span className="text-[10px] text-muted-foreground ml-auto bg-muted px-1.5 py-0.5 rounded">
-                  {n.staffType === "Registered Nurse" ? "NOD" : "NA"}
-                </span>
-              )}
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        {trimmed.length === 0 && (
+          <div className="py-6 text-center text-sm text-muted-foreground">
+            Type to search nurses by name or employee ID.
+          </div>
+        )}
+        {isSearching && (
+          <div className="py-6 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Spinner className="h-4 w-4" />
+            <span>Searching nurses...</span>
+          </div>
+        )}
+        {isError && (
+          <div className="py-6 text-center text-sm space-y-2">
+            <p className="text-destructive">Search failed: {error?.message || "Unknown error"}</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Retry
+            </Button>
+          </div>
+        )}
+        {hasSearched && results.length === 0 && (
+          <CommandEmpty>No nurses found.</CommandEmpty>
+        )}
+        {hasSearched && results.length > 0 && (
+          <CommandGroup heading="Nurses">
+            {results.map((n) => (
+              <CommandItem
+                key={n.id}
+                value={`${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.employeeId} ${n.staffType ?? ""}`.trim()}
+                onSelect={() => {
+                  onOpenChange(false);
+                  setLocation(`/nurses/${n.id}`);
+                }}
+              >
+                <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+                <span>{n.firstName} {n.lastName}</span>
+                <span className="text-xs text-muted-foreground ml-2">{nurseIdLabel(n)}</span>
+                {n.staffType && (
+                  <span className="text-[10px] text-muted-foreground ml-auto bg-muted px-1.5 py-0.5 rounded">
+                    {n.staffType === "Registered Nurse" ? "NOD" : "NA"}
+                  </span>
+                )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
       </CommandList>
     </CommandDialog>
   );
@@ -637,16 +707,31 @@ function MoreMenu() {
           <div className="grid grid-cols-4 gap-4 pt-4">
             {NAV_ITEMS.map((item) => {
               const active = isItemActive(item.path);
+              if (item.external) {
+                return (
+                  <a
+                    key={item.path}
+                    href={item.path}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${item.label} (opens in new tab)`}
+                    onClick={() => setOpen(false)}
+                    className={cn(
+                      "flex flex-col items-center gap-2 py-3 rounded-lg transition-colors",
+                      active ? "bg-primary/15 text-primary font-medium" : "hover:bg-accent",
+                    )}
+                  >
+                    <item.icon className="h-5 w-5" />
+                    <span className="text-xs text-center leading-tight">{item.label}</span>
+                  </a>
+                );
+              }
               return (
                 <button
                   key={item.path}
-                  aria-label={`${item.label}${item.external ? " (opens in new tab)" : ""}`}
+                  aria-label={item.label}
                   onClick={() => {
                     setOpen(false);
-                    if (item.external) {
-                      window.open(item.path, "_blank", "noopener,noreferrer");
-                      return;
-                    }
                     setLocation(item.path);
                   }}
                   className={cn(

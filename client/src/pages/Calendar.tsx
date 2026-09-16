@@ -97,10 +97,14 @@ export default function Calendar() {
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [showPastMonths, setShowPastMonths] = useState(false);
 
-  const { data: events, isLoading } = trpc.calendar.listEvents.useQuery({
+  const dateParams = useMemo(() => ({
     from: new Date("2026-01-01T00:00:00"),
     to: new Date("2027-12-31T23:59:59"),
     includeTypes,
+  }), [includeTypes]);
+
+  const { data: events, isLoading } = trpc.calendar.listEvents.useQuery(dateParams, {
+    placeholderData: (prev) => prev,
   });
 
   const toggleType = (t: EventType) => {
@@ -179,7 +183,7 @@ export default function Calendar() {
             </button>
           </div>
 
-          {isLoading ? (
+          {isLoading && !events ? (
             <Skeleton className="h-64 w-full" />
           ) : view === "month" ? (
             <MonthView events={filtered} month={monthAnchor} onMonthChange={setMonthAnchor} navigate={navigate} />

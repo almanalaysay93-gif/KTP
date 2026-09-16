@@ -73,7 +73,9 @@ export default function Nurses() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createStaffType, setCreateStaffType] = useState<(typeof STAFF_TYPES)[number]>("Registered Nurse");
   // Single round-trip: server merges nurses + areas.
-  const { data: initial, isLoading } = trpc.nurses.initial.useQuery();
+  const { data: initial, isLoading } = trpc.nurses.initial.useQuery(undefined, {
+    placeholderData: (prev) => prev,
+  });
   const nurses = initial?.nurses;
   const areas = initial?.areas;
   const utils = trpc.useUtils();
@@ -138,7 +140,7 @@ export default function Nurses() {
     return { count: matches.length, targetType, firstMatch: matches[0] };
   }, [search, filtered.length, nurses]);
 
-  if (isLoading) {
+  if (isLoading && !initial) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-64" />

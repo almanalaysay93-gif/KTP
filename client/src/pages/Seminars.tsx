@@ -32,7 +32,9 @@ export default function Seminars() {
   const utils = trpc.useUtils();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [seminarToDelete, setSeminarToDelete] = useState<{ id: number; name: string; kind: string; date: string; attendanceCount: number } | null>(null);
-  const { data, isLoading } = trpc.seminars.list.useQuery(undefined);
+  const { data, isLoading } = trpc.seminars.list.useQuery(undefined, {
+    placeholderData: (prev) => prev,
+  });
 
   const deleteSeminar = trpc.seminars.deleteEvent.useMutation({
     onSuccess: async ({ attendanceDeleted }) => {
@@ -73,7 +75,7 @@ export default function Seminars() {
           <TabsTrigger value="import">Workbook Analyzer</TabsTrigger>
         </TabsList>
         <TabsContent value="schedule">
-          {isLoading ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-48" />)}</div> : !data?.length ? (
+          {isLoading && !data ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-48" />)}</div> : !data?.length ? (
             <Card className="glass-card"><CardContent className="py-14 text-center text-sm text-muted-foreground">No seminar occurrences yet. Create a catalog item under Trainings, then schedule it here.</CardContent></Card>
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">

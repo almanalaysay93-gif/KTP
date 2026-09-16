@@ -7,6 +7,8 @@ import { renderLicenseExpiryEmail, renderSeminarReminderEmail } from "./template
 import { sendEmail } from "./service";
 
 const EXPIRY_THRESHOLDS = [
+  { days: 365, key: "365d" },
+  { days: 180, key: "180d" },
   { days: 90, key: "90d" },
   { days: 60, key: "60d" },
   { days: 30, key: "30d" },
@@ -127,9 +129,13 @@ export async function runLicenseExpiryEmailPass(today = todayDate()): Promise<Em
 
     const daysLeft = daysUntilExpiry(record.expiryDate, today);
 
-    for (const thresh of EXPIRY_THRESHOLDS) {
+    for (let i = 0; i < EXPIRY_THRESHOLDS.length; i++) {
+      const thresh = EXPIRY_THRESHOLDS[i];
+      const nextThresh = EXPIRY_THRESHOLDS[i + 1];
       // Check if threshold applies
-      const matches = thresh.days === 0 ? daysLeft <= 0 : daysLeft <= thresh.days && daysLeft > (thresh.days === 7 ? 0 : thresh.days - (thresh.days === 90 ? 30 : thresh.days === 60 ? 30 : 23));
+      const matches = thresh.days === 0
+        ? daysLeft <= 0
+        : daysLeft <= thresh.days && daysLeft > (nextThresh ? nextThresh.days : 0);
       
       if (!matches) continue;
 
@@ -162,7 +168,11 @@ export async function runLicenseExpiryEmailPass(today = todayDate()): Promise<Em
         ? `[URGENT] License Expired: ${record.typeName} (${record.licenseNumber})`
         : daysLeft <= 30
         ? `[Action Required] ${record.typeName} expires in ${daysLeft} days`
-        : `Renewal Notice: ${record.typeName} expires in ${daysLeft} days`;
+        : daysLeft <= 90
+        ? `Renewal Notice: ${record.typeName} expires in ${daysLeft} days`
+        : daysLeft <= 180
+        ? `6-Month Renewal Notice: ${record.typeName} expires in ${daysLeft} days`
+        : `1-Year Renewal Notice: ${record.typeName} expires in ${daysLeft} days`;
 
       const res = await sendEmail({
         to: record.accountEmail,

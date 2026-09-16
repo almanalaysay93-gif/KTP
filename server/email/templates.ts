@@ -71,8 +71,8 @@ export function renderLicenseExpiryEmail({
   actionUrl: string;
 }): string {
   const isExpired = daysRemaining <= 0;
-  const badgeClass = isExpired || daysRemaining <= 30 ? "badge-urgent" : "badge-warning";
-  const badgeLabel = isExpired ? "License Expired" : daysRemaining <= 30 ? "Urgent Renewal Required" : "Upcoming Renewal";
+  const badgeClass = isExpired || daysRemaining <= 30 ? "badge-urgent" : daysRemaining <= 90 ? "badge-warning" : "badge-info";
+  const badgeLabel = isExpired ? "License Expired" : daysRemaining <= 30 ? "Urgent Renewal Required" : daysRemaining <= 180 ? "Upcoming Renewal" : "Advance Renewal Notice";
 
   const content = `
     <div style="margin-bottom: 16px;">

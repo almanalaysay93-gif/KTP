@@ -152,15 +152,31 @@ export async function runDailyReminders(today: string, thresholds: readonly numb
       await db2.update(licenseReminders).set({ status: "expired" }).where(sql`${licenseReminders.credentialId} IN (${sql.join(expiredIds.map((i) => sql`${i}`), sql`, `)})`);
     }
   }
-  const expiredNotifs = expiredNotes.map(({ cred }) => ({
-    type: "license.expired",
-    severity: "urgent_or_expired",
-    title: `License expired — ${cred.nurse.firstName} ${cred.nurse.lastName}`,
-    message: `The license (${cred.renewalCycleKey}) for ${cred.nurse.firstName} ${cred.nurse.lastName} expired. Mark renewal as complete to start a new cycle.`,
-    nurseId: cred.nurseId,
-    relatedEntityType: "credential",
-    relatedEntityId: cred.id,
-  }));
+
+  // Load existing notifications to prevent duplicate notification generation
+  const existingNotifications = await listNotifications(500);
+  const existingExpiredNotifKeys = new Set(
+    existingNotifications
+      .filter((n) => n.type === "license.expired")
+      .map((n) => `${n.nurseId}:${n.relatedEntityType}:${n.relatedEntityId}`)
+  );
+  const existingRenewalNotifKeys = new Set(
+    existingNotifications
+      .filter((n) => n.type === "license.renewalReminder")
+      .map((n) => `${n.nurseId}:${n.relatedEntityType}:${n.relatedEntityId}:${(n.title ?? "").split(" — ")[0].trim()}`)
+  );
+
+  const expiredNotifs = expiredNotes
+    .filter(({ cred }) => !existingExpiredNotifKeys.has(`${cred.nurseId}:credential:${cred.id}`))
+    .map(({ cred }) => ({
+      type: "license.expired",
+      severity: "urgent_or_expired",
+      title: `License expired — ${cred.nurse.firstName} ${cred.nurse.lastName}`,
+      message: `The license (${cred.renewalCycleKey}) for ${cred.nurse.firstName} ${cred.nurse.lastName} expired. Mark renewal as complete to start a new cycle.`,
+      nurseId: cred.nurseId,
+      relatedEntityType: "credential",
+      relatedEntityId: cred.id,
+    }));
   if (expiredNotifs.length > 0) {
     await createNotificationsBatch(expiredNotifs);
   }
@@ -176,15 +192,20 @@ export async function runDailyReminders(today: string, thresholds: readonly numb
     }
   }
 
-  const notifPayloads = Array.from(notifsByCred.values()).map(({ cred, threshold, days }) => ({
-    type: "license.renewalReminder",
-    severity: threshold >= 365 ? "attention" : "upcoming_renewal",
-    title: `${threshold === 365 ? "1-year" : `${threshold}-day`} renewal reminder — ${cred.nurse.firstName} ${cred.nurse.lastName}`,
-    message: `${cred.nurse.firstName} ${cred.nurse.lastName} has a license expiring in ${days <= 0 ? "about " + (Math.abs(days) + 1) + " day(s) (due " + dateKey(cred.expiryDate) + ")" : days + " days"}. Review the license and begin renewal.`,
-    nurseId: cred.nurseId,
-    relatedEntityType: "credential",
-    relatedEntityId: cred.id,
-  }));
+  const notifPayloads = Array.from(notifsByCred.values())
+    .filter(({ cred, threshold }) => {
+      const thresholdLabel = threshold === 365 ? "1-year renewal reminder" : `${threshold}-day renewal reminder`;
+      return !existingRenewalNotifKeys.has(`${cred.nurseId}:credential:${cred.id}:${thresholdLabel}`);
+    })
+    .map(({ cred, threshold, days }) => ({
+      type: "license.renewalReminder",
+      severity: threshold >= 365 ? "attention" : "upcoming_renewal",
+      title: `${threshold === 365 ? "1-year" : `${threshold}-day`} renewal reminder — ${cred.nurse.firstName} ${cred.nurse.lastName}`,
+      message: `${cred.nurse.firstName} ${cred.nurse.lastName} has a license expiring in ${days <= 0 ? "about " + (Math.abs(days) + 1) + " day(s) (due " + dateKey(cred.expiryDate) + ")" : days + " days"}. Review the license and begin renewal.`,
+      nurseId: cred.nurseId,
+      relatedEntityType: "credential",
+      relatedEntityId: cred.id,
+    }));
   if (notifPayloads.length > 0) {
     await createNotificationsBatch(notifPayloads);
   }

@@ -49,7 +49,9 @@ export default function Trainings() {
 
   const utils = trpc.useUtils();
   // Single round-trip: server merges catalog + records.
-  const { data: initial, isLoading } = trpc.trainings.initial.useQuery();
+  const { data: initial, isLoading } = trpc.trainings.initial.useQuery(undefined, {
+    placeholderData: (prev) => prev,
+  });
   const catalog = initial?.catalog;
   const records = initial?.records;
   const catalogLoading = isLoading;
@@ -63,7 +65,7 @@ export default function Trainings() {
     onError: (e) => toast.error(e.message),
   });
 
-  if (catalogLoading || recordsLoading) {
+  if ((catalogLoading || recordsLoading) && !initial) {
     return <Skeleton className="h-64 w-full" />;
   }
 
