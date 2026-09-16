@@ -366,7 +366,18 @@ export default function Nurses() {
                           <TableCell className="text-base font-medium text-foreground/90">{n.currentArea?.name ?? "—"}</TableCell>
                           <TableCell className="text-sm font-medium text-muted-foreground">{sharedFormatDate(n.dateHired)}</TableCell>
                           <TableCell><EmploymentStatusBadge status={n.employmentStatus ?? "Active"} /></TableCell>
-                          <TableCell>{n.licenseStatus ? <LicenseStatusBadge status={n.licenseStatus as never} /> : "—"}</TableCell>
+                          <TableCell>
+                            {n.licenseStatus ? (
+                              <LicenseStatusBadge
+                                status={n.licenseStatus as never}
+                                expiryDate={n.licenseExpiryDate}
+                                licenseNumber={n.licenseNumber}
+                                daysRemaining={n.licenseDaysRemaining}
+                              />
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
                           <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                             <Button
                               variant="ghost"
@@ -448,6 +459,8 @@ function NurseCard({
     currentArea?: { name: string } | null;
     employmentStatus?: string | null;
     licenseStatus?: string | null;
+    licenseExpiryDate?: string | null;
+    licenseDaysRemaining?: number | null;
     dateHired: Date | string | null;
     archivedAt?: Date | null;
   };
@@ -529,9 +542,28 @@ function NurseCard({
             </Badge>
           )}
         </div>
-        <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between">
-          <EmploymentStatusBadge status={nurse.employmentStatus ?? "Active"} />
-          {nurse.licenseStatus ? <LicenseStatusBadge status={nurse.licenseStatus as never} /> : "—"}
+        <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">
+              Employment
+            </span>
+            <EmploymentStatusBadge status={nurse.employmentStatus ?? "Active"} />
+          </div>
+          <div className="flex flex-col items-end gap-1 min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">
+              PRC License
+            </span>
+            {nurse.licenseStatus ? (
+              <LicenseStatusBadge
+                status={nurse.licenseStatus as never}
+                expiryDate={nurse.licenseExpiryDate}
+                licenseNumber={nurse.licenseNumber}
+                daysRemaining={nurse.licenseDaysRemaining}
+              />
+            ) : (
+              <span className="text-xs text-muted-foreground italic">No license on file</span>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>

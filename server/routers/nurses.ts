@@ -19,12 +19,14 @@ export const nursesRouter = router({
     ]);
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     const nurses = rows.map((n) => {
-      const info = licenseMap.get(n.id) ?? { status: null, licenseNumber: null };
+      const info = licenseMap.get(n.id) ?? { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
       return {
         ...n,
         currentArea: n.currentAreaId ? areaById.get(n.currentAreaId) ?? null : null,
         licenseStatus: info.status,
         licenseNumber: info.licenseNumber,
+        licenseExpiryDate: info.expiryDate,
+        licenseDaysRemaining: info.daysRemaining,
       };
     });
     return { nurses, areas: areaRows };
@@ -40,29 +42,33 @@ export const nursesRouter = router({
       ]);
       const areaById = new Map(areaRows.map((a) => [a.id, a]));
       return rows.map((n) => {
-        const info = licenseMap.get(n.id) ?? { status: null, licenseNumber: null };
+        const info = licenseMap.get(n.id) ?? { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
         return {
           ...n,
           currentArea: n.currentAreaId ? areaById.get(n.currentAreaId) ?? null : null,
           licenseStatus: info.status,
           licenseNumber: info.licenseNumber,
+          licenseExpiryDate: info.expiryDate,
+          licenseDaysRemaining: info.daysRemaining,
         };
       });
     }),
 
   search: adminProcedure
-    .input(z.object({ query: z.string().min(1).max(128) }))
+    .input(z.object({ query: z.string().min(1) }))
     .query(async ({ input }) => {
       const rows = await db.searchNurses(input.query);
       const areaRows = await db.listAreas(false);
       const areaById = new Map(areaRows.map((a) => [a.id, a]));
       return Promise.all(rows.map(async (n) => {
-        const { status, licenseNumber } = await db.getNurseLicenseInfo(n.id);
+        const info = await db.getNurseLicenseInfo(n.id);
         return {
           ...n,
           currentArea: n.currentAreaId ? areaById.get(n.currentAreaId) ?? null : null,
-          licenseStatus: status,
-          licenseNumber,
+          licenseStatus: info.status,
+          licenseNumber: info.licenseNumber,
+          licenseExpiryDate: info.expiryDate,
+          licenseDaysRemaining: info.daysRemaining,
         };
       }));
     }),
@@ -74,8 +80,15 @@ export const nursesRouter = router({
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Nurse not found" });
       const areaRows = await db.listAreas(false);
       const areaById = new Map(areaRows.map((a) => [a.id, a]));
-      const { status, licenseNumber } = await db.getNurseLicenseInfo(nurse.id);
-      return { ...nurse, currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null, licenseStatus: status, licenseNumber };
+      const info = await db.getNurseLicenseInfo(nurse.id);
+      return {
+        ...nurse,
+        currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
+        licenseStatus: info.status,
+        licenseNumber: info.licenseNumber,
+        licenseExpiryDate: info.expiryDate,
+        licenseDaysRemaining: info.daysRemaining,
+      };
     }),
 
   profile: adminProcedure
@@ -137,6 +150,8 @@ export const nursesRouter = router({
         const latestCred = rawCreds[0];
         const licenseStatus = latestCred ? deriveLicenseStatus(dateKey(latestCred.expiryDate)) : null;
         const licenseNumber = latestCred?.licenseNumber ?? null;
+        const licenseExpiryDate = latestCred?.expiryDate ? dateKey(latestCred.expiryDate) : null;
+        const licenseDaysRemaining = licenseExpiryDate ? daysUntilExpiry(licenseExpiryDate) : null;
 
         const trainings = rawTrainings.map((r: any) => ({
           ...r,
@@ -181,6 +196,8 @@ export const nursesRouter = router({
             currentArea: effectiveAreaId ? areaById.get(effectiveAreaId) ?? null : null,
             licenseStatus,
             licenseNumber,
+            licenseExpiryDate,
+            licenseDaysRemaining,
           },
           assignments,
           credentials,
@@ -257,6 +274,8 @@ export const nursesRouter = router({
           currentArea: effectiveAreaId ? areaById.get(effectiveAreaId) ?? null : null,
           licenseStatus: licenseInfo.status,
           licenseNumber: licenseInfo.licenseNumber,
+          licenseExpiryDate: licenseInfo.expiryDate,
+          licenseDaysRemaining: licenseInfo.daysRemaining,
         },
         assignments,
         credentials,

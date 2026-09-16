@@ -271,7 +271,15 @@ export default function NurseProfile() {
         </div>
         <div className="flex items-center gap-2">
           <EmploymentStatusBadge status={nurse.employmentStatus ?? "Active"} />
-          {nurse.licenseStatus ? <LicenseStatusBadge status={nurse.licenseStatus as never} /> : null}
+          {nurse.licenseStatus ? (
+            <LicenseStatusBadge
+              status={nurse.licenseStatus as never}
+              expiryDate={(nurse as any).licenseExpiryDate}
+              licenseNumber={(nurse as any).licenseNumber}
+              daysRemaining={(nurse as any).licenseDaysRemaining}
+              showPrefix
+            />
+          ) : null}
           <Button
             variant="outline"
             size="sm"
@@ -418,7 +426,12 @@ export default function NurseProfile() {
                             {c.daysRemaining != null ? ` · ${c.daysRemaining} days remaining` : ""}
                           </p>
                           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                            <LicenseStatusBadge status={c.derivedStatus ?? "Valid"} />
+                            <LicenseStatusBadge
+                              status={c.derivedStatus ?? "Valid"}
+                              expiryDate={c.expiryDate}
+                              licenseNumber={c.licenseNumber}
+                              daysRemaining={c.daysRemaining}
+                            />
                             <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{c.renewalStatus}</span>
                             <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{c.verificationStatus}</span>
                           </div>

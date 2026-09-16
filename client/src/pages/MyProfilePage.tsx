@@ -329,7 +329,15 @@ function MyProfileView() {
       <Card className="glass-card p-6 space-y-3">
         <h2 className="font-semibold">License</h2>
         <div className="flex items-center gap-2">
-          {profile.licenseStatus ? <LicenseStatusBadge status={profile.licenseStatus as never} /> : <Badge variant="outline">No license on file</Badge>}
+          {profile.licenseStatus ? (
+            <LicenseStatusBadge
+              status={profile.licenseStatus as never}
+              licenseNumber={profile.licenseNumber}
+              showPrefix
+            />
+          ) : (
+            <Badge variant="outline">No license on file</Badge>
+          )}
           {profile.licenseNumber ? <span className="text-sm text-muted-foreground font-mono">{profile.licenseNumber}</span> : null}
         </div>
       </Card>

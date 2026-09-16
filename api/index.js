@@ -1631,13 +1631,27 @@ async function getNurseLicenseInfo(nurseId) {
   if (db) {
     const rows = await db.select().from(nurseCredentials).where(eq(nurseCredentials.nurseId, nurseId)).orderBy(desc(nurseCredentials.expiryDate)).limit(1);
     const cred2 = rows[0];
-    if (!cred2) return { status: null, licenseNumber: null };
-    return { status: deriveLicenseStatusFromCred(cred2), licenseNumber: cred2.licenseNumber ?? null };
+    if (!cred2) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
+    const expKey2 = dateKey(cred2.expiryDate);
+    const days2 = expKey2 ? daysUntilExpiry(expKey2) : null;
+    return {
+      status: deriveLicenseStatusFromCred(cred2),
+      licenseNumber: cred2.licenseNumber ?? null,
+      expiryDate: expKey2 || null,
+      daysRemaining: days2
+    };
   }
   const sqlite = getSqliteDb();
   const cred = sqlite.prepare("SELECT * FROM nurseCredentials WHERE nurseId = ? ORDER BY date(expiryDate) DESC LIMIT 1").get(nurseId);
-  if (!cred) return { status: null, licenseNumber: null };
-  return { status: deriveLicenseStatusFromCred(cred), licenseNumber: cred.licenseNumber ?? null };
+  if (!cred) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
+  const expKey = dateKey(cred.expiryDate);
+  const days = expKey ? daysUntilExpiry(expKey) : null;
+  return {
+    status: deriveLicenseStatusFromCred(cred),
+    licenseNumber: cred.licenseNumber ?? null,
+    expiryDate: expKey || null,
+    daysRemaining: days
+  };
 }
 async function getNurseLicenseStatus(nurseId) {
   return (await getNurseLicenseInfo(nurseId)).status;
@@ -1649,9 +1663,13 @@ async function getAllNurseLicenseInfos() {
     const creds2 = await db.select().from(nurseCredentials).orderBy(desc(nurseCredentials.expiryDate));
     for (const cred of creds2) {
       if (!map.has(cred.nurseId)) {
+        const expKey = dateKey(cred.expiryDate);
+        const days = expKey ? daysUntilExpiry(expKey) : null;
         map.set(cred.nurseId, {
           status: deriveLicenseStatusFromCred(cred),
-          licenseNumber: cred.licenseNumber ?? null
+          licenseNumber: cred.licenseNumber ?? null,
+          expiryDate: expKey || null,
+          daysRemaining: days
         });
       }
     }
@@ -1661,9 +1679,13 @@ async function getAllNurseLicenseInfos() {
   const creds = sqlite.prepare("SELECT * FROM nurseCredentials ORDER BY date(expiryDate) DESC").all();
   for (const cred of creds) {
     if (!map.has(cred.nurseId)) {
+      const expKey = dateKey(cred.expiryDate);
+      const days = expKey ? daysUntilExpiry(expKey) : null;
       map.set(cred.nurseId, {
         status: deriveLicenseStatusFromCred(cred),
-        licenseNumber: cred.licenseNumber ?? null
+        licenseNumber: cred.licenseNumber ?? null,
+        expiryDate: expKey || null,
+        daysRemaining: days
       });
     }
   }
@@ -4694,12 +4716,14 @@ var nursesRouter = router({
     ]);
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     const nurses2 = rows.map((n) => {
-      const info = licenseMap.get(n.id) ?? { status: null, licenseNumber: null };
+      const info = licenseMap.get(n.id) ?? { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
       return {
         ...n,
         currentArea: n.currentAreaId ? areaById.get(n.currentAreaId) ?? null : null,
         licenseStatus: info.status,
-        licenseNumber: info.licenseNumber
+        licenseNumber: info.licenseNumber,
+        licenseExpiryDate: info.expiryDate,
+        licenseDaysRemaining: info.daysRemaining
       };
     });
     return { nurses: nurses2, areas: areaRows };
@@ -4712,26 +4736,30 @@ var nursesRouter = router({
     ]);
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     return rows.map((n) => {
-      const info = licenseMap.get(n.id) ?? { status: null, licenseNumber: null };
+      const info = licenseMap.get(n.id) ?? { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
       return {
         ...n,
         currentArea: n.currentAreaId ? areaById.get(n.currentAreaId) ?? null : null,
         licenseStatus: info.status,
-        licenseNumber: info.licenseNumber
+        licenseNumber: info.licenseNumber,
+        licenseExpiryDate: info.expiryDate,
+        licenseDaysRemaining: info.daysRemaining
       };
     });
   }),
-  search: adminProcedure.input(z2.object({ query: z2.string().min(1).max(128) })).query(async ({ input }) => {
+  search: adminProcedure.input(z2.object({ query: z2.string().min(1) })).query(async ({ input }) => {
     const rows = await searchNurses(input.query);
     const areaRows = await listAreas(false);
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     return Promise.all(rows.map(async (n) => {
-      const { status, licenseNumber } = await getNurseLicenseInfo(n.id);
+      const info = await getNurseLicenseInfo(n.id);
       return {
         ...n,
         currentArea: n.currentAreaId ? areaById.get(n.currentAreaId) ?? null : null,
-        licenseStatus: status,
-        licenseNumber
+        licenseStatus: info.status,
+        licenseNumber: info.licenseNumber,
+        licenseExpiryDate: info.expiryDate,
+        licenseDaysRemaining: info.daysRemaining
       };
     }));
   }),
@@ -4740,8 +4768,15 @@ var nursesRouter = router({
     if (!nurse) throw new TRPCError2({ code: "NOT_FOUND", message: "Nurse not found" });
     const areaRows = await listAreas(false);
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
-    const { status, licenseNumber } = await getNurseLicenseInfo(nurse.id);
-    return { ...nurse, currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null, licenseStatus: status, licenseNumber };
+    const info = await getNurseLicenseInfo(nurse.id);
+    return {
+      ...nurse,
+      currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
+      licenseStatus: info.status,
+      licenseNumber: info.licenseNumber,
+      licenseExpiryDate: info.expiryDate,
+      licenseDaysRemaining: info.daysRemaining
+    };
   }),
   profile: adminProcedure.input(z2.object({ id: z2.number() })).query(async ({ input }) => {
     const nurseId = Math.floor(input.id);
@@ -4784,6 +4819,8 @@ var nursesRouter = router({
       const latestCred = rawCreds2[0];
       const licenseStatus = latestCred ? deriveLicenseStatus(dateKey(latestCred.expiryDate)) : null;
       const licenseNumber = latestCred?.licenseNumber ?? null;
+      const licenseExpiryDate = latestCred?.expiryDate ? dateKey(latestCred.expiryDate) : null;
+      const licenseDaysRemaining = licenseExpiryDate ? daysUntilExpiry(licenseExpiryDate) : null;
       const trainings2 = rawTrainings2.map((r) => ({
         ...r,
         trainingName: catById2.get(r.trainingId)?.name ?? "Unknown"
@@ -4820,7 +4857,9 @@ var nursesRouter = router({
           ...nurse2,
           currentArea: effectiveAreaId2 ? areaById2.get(effectiveAreaId2) ?? null : null,
           licenseStatus,
-          licenseNumber
+          licenseNumber,
+          licenseExpiryDate,
+          licenseDaysRemaining
         },
         assignments: assignments2,
         credentials: credentials2,
@@ -4886,7 +4925,9 @@ var nursesRouter = router({
         ...nurse,
         currentArea: effectiveAreaId ? areaById.get(effectiveAreaId) ?? null : null,
         licenseStatus: licenseInfo.status,
-        licenseNumber: licenseInfo.licenseNumber
+        licenseNumber: licenseInfo.licenseNumber,
+        licenseExpiryDate: licenseInfo.expiryDate,
+        licenseDaysRemaining: licenseInfo.daysRemaining
       },
       assignments,
       credentials,
@@ -8950,12 +8991,14 @@ var staffAccountRouter = router({
     const areaById = new Map(areaRows.map((a) => [a.id, a]));
     const typeById = new Map(types.map((t2) => [t2.id, t2.name]));
     const catalogById = new Map(catalog.map((c) => [c.id, c.name]));
-    const { status, licenseNumber } = licenseInfo;
+    const { status, licenseNumber, expiryDate, daysRemaining } = licenseInfo;
     return {
       ...nurse,
       currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
       licenseStatus: status,
       licenseNumber,
+      licenseExpiryDate: expiryDate,
+      licenseDaysRemaining: daysRemaining,
       credentials: credentials.map((c) => ({
         ...c,
         typeName: typeById.get(c.credentialTypeId) ?? "Credential / License"

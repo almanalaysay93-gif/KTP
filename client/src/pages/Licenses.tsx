@@ -145,7 +145,13 @@ export default function Licenses() {
                       <td className="px-3 py-2.5 font-mono text-xs">{c.licenseNumber ?? "—"}</td>
                       <td className="px-3 py-2.5 text-muted-foreground">{formatDate(c.issueDate)}</td>
                       <td className="px-3 py-2.5">{formatDate(c.expiryDate)}</td>
-                      <td className="px-3 py-2.5"><LicenseStatusBadge status={c.derivedStatus} /></td>
+                      <td className="px-3 py-2.5">
+                        <LicenseStatusBadge
+                          status={c.derivedStatus}
+                          expiryDate={c.expiryDate}
+                          licenseNumber={c.licenseNumber}
+                        />
+                      </td>
                       <td className="px-3 py-2.5 text-xs">{c.renewalStatus}</td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1">

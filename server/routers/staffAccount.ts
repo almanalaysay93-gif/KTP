@@ -96,13 +96,15 @@ export const staffAccountRouter = router({
     const typeById = new Map(types.map((t) => [t.id, t.name]));
     const catalogById = new Map(catalog.map((c) => [c.id, c.name]));
 
-    const { status, licenseNumber } = licenseInfo;
+    const { status, licenseNumber, expiryDate, daysRemaining } = licenseInfo;
 
     return {
       ...nurse,
       currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
       licenseStatus: status,
       licenseNumber,
+      licenseExpiryDate: expiryDate,
+      licenseDaysRemaining: daysRemaining,
       credentials: credentials.map((c) => ({
         ...c,
         typeName: typeById.get(c.credentialTypeId) ?? "Credential / License",

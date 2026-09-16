@@ -1,4 +1,4 @@
-import { dateKey, INACTIVE_EMPLOYMENT_STATUSES } from "../shared/nursetrack";
+import { dateKey, daysUntilExpiry, INACTIVE_EMPLOYMENT_STATUSES } from "../shared/nursetrack";
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, like, lte, not, or, sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -629,8 +629,15 @@ function deriveLicenseStatusFromCred(cred: { renewalStatus: string; expiryDate: 
   return "Valid";
 }
 
-/** Status + license number of a nurse's most current credential (latest expiryDate on file). */
-export async function getNurseLicenseInfo(nurseId: number): Promise<{ status: string | null; licenseNumber: string | null }> {
+export interface NurseLicenseInfo {
+  status: string | null;
+  licenseNumber: string | null;
+  expiryDate: string | null;
+  daysRemaining: number | null;
+}
+
+/** Status + license number + expiry details of a nurse's most current credential (latest expiryDate on file). */
+export async function getNurseLicenseInfo(nurseId: number): Promise<NurseLicenseInfo> {
   const db = await getDb();
   if (db) {
     const rows = await db
@@ -640,21 +647,35 @@ export async function getNurseLicenseInfo(nurseId: number): Promise<{ status: st
       .orderBy(desc(nurseCredentials.expiryDate))
       .limit(1);
     const cred = rows[0];
-    if (!cred) return { status: null, licenseNumber: null };
-    return { status: deriveLicenseStatusFromCred(cred), licenseNumber: cred.licenseNumber ?? null };
+    if (!cred) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
+    const expKey = dateKey(cred.expiryDate);
+    const days = expKey ? daysUntilExpiry(expKey) : null;
+    return {
+      status: deriveLicenseStatusFromCred(cred),
+      licenseNumber: cred.licenseNumber ?? null,
+      expiryDate: expKey || null,
+      daysRemaining: days,
+    };
   }
   const sqlite = getSqliteDb();
   const cred = sqlite.prepare("SELECT * FROM nurseCredentials WHERE nurseId = ? ORDER BY date(expiryDate) DESC LIMIT 1").get(nurseId) as any;
-  if (!cred) return { status: null, licenseNumber: null };
-  return { status: deriveLicenseStatusFromCred(cred), licenseNumber: cred.licenseNumber ?? null };
+  if (!cred) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
+  const expKey = dateKey(cred.expiryDate);
+  const days = expKey ? daysUntilExpiry(expKey) : null;
+  return {
+    status: deriveLicenseStatusFromCred(cred),
+    licenseNumber: cred.licenseNumber ?? null,
+    expiryDate: expKey || null,
+    daysRemaining: days,
+  };
 }
 
 export async function getNurseLicenseStatus(nurseId: number): Promise<string | null> {
   return (await getNurseLicenseInfo(nurseId)).status;
 }
 
-export async function getAllNurseLicenseInfos(): Promise<Map<number, { status: string | null; licenseNumber: string | null }>> {
-  const map = new Map<number, { status: string | null; licenseNumber: string | null }>();
+export async function getAllNurseLicenseInfos(): Promise<Map<number, NurseLicenseInfo>> {
+  const map = new Map<number, NurseLicenseInfo>();
   const db = await getDb();
   if (db) {
     const creds = await db
@@ -663,9 +684,13 @@ export async function getAllNurseLicenseInfos(): Promise<Map<number, { status: s
       .orderBy(desc(nurseCredentials.expiryDate));
     for (const cred of creds) {
       if (!map.has(cred.nurseId)) {
+        const expKey = dateKey(cred.expiryDate);
+        const days = expKey ? daysUntilExpiry(expKey) : null;
         map.set(cred.nurseId, {
           status: deriveLicenseStatusFromCred(cred),
           licenseNumber: cred.licenseNumber ?? null,
+          expiryDate: expKey || null,
+          daysRemaining: days,
         });
       }
     }
@@ -675,9 +700,13 @@ export async function getAllNurseLicenseInfos(): Promise<Map<number, { status: s
   const creds = sqlite.prepare("SELECT * FROM nurseCredentials ORDER BY date(expiryDate) DESC").all() as any[];
   for (const cred of creds) {
     if (!map.has(cred.nurseId)) {
+      const expKey = dateKey(cred.expiryDate);
+      const days = expKey ? daysUntilExpiry(expKey) : null;
       map.set(cred.nurseId, {
         status: deriveLicenseStatusFromCred(cred),
         licenseNumber: cred.licenseNumber ?? null,
+        expiryDate: expKey || null,
+        daysRemaining: days,
       });
     }
   }
