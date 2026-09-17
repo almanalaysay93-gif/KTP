@@ -11,7 +11,7 @@ import {
   validateMime,
   TRAINING_KINDS,
 } from "../../shared/nursetrack";
-import { storagePut } from "../storage";
+import { storageDelete, storagePut } from "../storage";
 import {
   checkTrainingConflicts,
   enqueueTrainingNotice,
@@ -518,6 +518,9 @@ export const trainingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const record = await db.deleteNurseTraining(input.id);
       if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Training record not found." });
+      if (record.certificateKey) {
+        await storageDelete(record.certificateKey).catch(() => {});
+      }
       await db.logActivity({
         supervisorId: ctx.user.id,
         nurseId: record.nurseId,
@@ -547,9 +550,13 @@ export const trainingsRouter = router({
       if (!mimeCheck.ok) throw new TRPCError({ code: "BAD_REQUEST", message: mimeCheck.error });
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+      const oldKey = record.certificateKey;
       const key = storageKey("certificates", record.nurseId, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
       await db.updateNurseTraining(input.recordId, { certificateKey: storedKey });
+      if (oldKey && oldKey !== storedKey) {
+        await storageDelete(oldKey).catch(() => {});
+      }
       await db.logActivity({
         supervisorId: ctx.user.id,
         nurseId: record.nurseId,

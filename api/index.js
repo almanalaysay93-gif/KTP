@@ -1152,6 +1152,7 @@ __export(db_exports, {
   deleteCustomEvent: () => deleteCustomEvent,
   deleteNurse: () => deleteNurse,
   deleteNurseTraining: () => deleteNurseTraining,
+  deleteStoredFile: () => deleteStoredFile,
   deleteTrainingCatalogItem: () => deleteTrainingCatalogItem,
   deleteTrainingEvent: () => deleteTrainingEvent,
   findNurseIdsByLicenseNumber: () => findNurseIdsByLicenseNumber,
@@ -1192,6 +1193,7 @@ __export(db_exports, {
   markAllNotificationsRead: () => markAllNotificationsRead,
   markNotificationRead: () => markNotificationRead,
   markReminderExpiredByCredential: () => markReminderExpiredByCredential,
+  purgeOrphanStoredFiles: () => purgeOrphanStoredFiles,
   recordEmailLog: () => recordEmailLog,
   releaseReminderLock: () => releaseReminderLock,
   saveClaimEmail: () => saveClaimEmail,
@@ -3034,6 +3036,80 @@ async function getStoredFile(key) {
     return null;
   }
 }
+async function deleteStoredFile(key) {
+  await ensureStoredFilesTable();
+  const pg = getBatchClient();
+  if (pg) {
+    try {
+      await pg.unsafe(`DELETE FROM nursetrack."storedFiles" WHERE key = $1`, [key]);
+      return;
+    } catch (err) {
+      console.warn("[Database] deleteStoredFile pg query failed:", err);
+    }
+  }
+  const d = await getDb();
+  if (d) {
+    try {
+      await d.delete(storedFiles).where(eq(storedFiles.key, key));
+      return;
+    } catch {
+    }
+  }
+  try {
+    const sqlite = getSqliteDb();
+    sqlite.prepare("DELETE FROM storedFiles WHERE key = ?").run(key);
+  } catch (err) {
+    console.warn("[Database] deleteStoredFile sqlite failed:", err);
+  }
+}
+async function purgeOrphanStoredFiles(olderThanHours = 2) {
+  await ensureStoredFilesTable();
+  const timeClausePg = olderThanHours <= 0 ? "" : `AND "createdAt" < NOW() - INTERVAL '${Math.max(1, Math.floor(olderThanHours))} hours'`;
+  const timeClauseSqlite = olderThanHours <= 0 ? "" : `AND datetime(createdAt) <= datetime('now', '-${Math.max(1, Math.floor(olderThanHours))} hours')`;
+  const pg = getBatchClient();
+  if (pg) {
+    try {
+      const deleted = await pg.unsafe(`
+        WITH deleted AS (
+          DELETE FROM nursetrack."storedFiles"
+          WHERE key NOT IN (
+              SELECT "profilePhotoKey" FROM nursetrack.nurses WHERE "profilePhotoKey" IS NOT NULL
+              UNION
+              SELECT "documentKey" FROM nursetrack."nurseCredentials" WHERE "documentKey" IS NOT NULL
+              UNION
+              SELECT "certificateKey" FROM nursetrack."nurseTrainings" WHERE "certificateKey" IS NOT NULL
+            )
+            ${timeClausePg}
+          RETURNING id
+        )
+        SELECT count(*)::int AS count FROM deleted;
+      `);
+      return deleted[0]?.count ?? 0;
+    } catch (err) {
+      console.warn("[Database] purgeOrphanStoredFiles pg query failed:", err);
+    }
+  }
+  try {
+    const sqlite = getSqliteDb();
+    const res = sqlite.prepare(
+      `
+      DELETE FROM storedFiles
+      WHERE key NOT IN (
+          SELECT profilePhotoKey FROM nurses WHERE profilePhotoKey IS NOT NULL
+          UNION
+          SELECT documentKey FROM nurseCredentials WHERE documentKey IS NOT NULL
+          UNION
+          SELECT certificateKey FROM nurseTrainings WHERE certificateKey IS NOT NULL
+        )
+        ${timeClauseSqlite}
+    `
+    ).run();
+    return res.changes;
+  } catch (err) {
+    console.warn("[Database] purgeOrphanStoredFiles sqlite query failed:", err);
+    return 0;
+  }
+}
 var _db, _batchPg, INACTIVE_STATUS_SQL_LIST, normalizeForMatch, _storedFilesTableEnsured;
 var init_db = __esm({
   "server/db.ts"() {
@@ -4430,6 +4506,7 @@ async function runDailyReminderJob(dateKey2 = getManilaDateKey()) {
     const notifications2 = await runDailyReminders(dateKey2);
     const expiryEmails = await runLicenseExpiryEmailPass(dateKey2);
     const outboxResult = await drainTrainingOutbox();
+    const purgedOrphanFiles = await purgeOrphanStoredFiles(2);
     const seminarEmails = { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 };
     return {
       ok: true,
@@ -4437,7 +4514,8 @@ async function runDailyReminderJob(dateKey2 = getManilaDateKey()) {
       notifications: notifications2,
       expiryEmails,
       trainingOutbox: outboxResult,
-      seminarEmails
+      seminarEmails,
+      purgedOrphanFiles
     };
   } finally {
     await releaseReminderLock();
@@ -4805,7 +4883,7 @@ function registerOAuthRoutes(app) {
 }
 
 // server/storage.ts
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 init_db();
 var _client = null;
@@ -4856,6 +4934,24 @@ async function storageGetSignedUrl(relKey) {
     return `/storage/${key}`;
   }
   return getSignedUrl(client, new GetObjectCommand({ Bucket: ENV.s3BucketName, Key: key }), { expiresIn: 300 });
+}
+async function storageDelete(relKey) {
+  if (!relKey) return;
+  const key = normalizeKey(relKey);
+  const client = getClient();
+  if (client && ENV.s3BucketName) {
+    try {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: ENV.s3BucketName,
+          Key: key
+        })
+      );
+    } catch (err) {
+      console.warn("[Storage] S3 DeleteObject failed:", err);
+    }
+  }
+  await deleteStoredFile(key);
 }
 
 // server/_core/storageProxy.ts
@@ -5365,9 +5461,14 @@ var nursesRouter = router({
     if (!mimeCheck.ok) throw new TRPCError2({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError2({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const oldKey = nurse.profilePhotoKey;
     const key = storageKey("profile-photos", input.nurseId, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
     await updateNurse(input.nurseId, { profilePhotoKey: storedKey });
+    if (oldKey && oldKey !== storedKey) {
+      await storageDelete(oldKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: input.nurseId,
@@ -5691,9 +5792,14 @@ var credentialsRouter = router({
     if (!mimeCheck.ok) throw new TRPCError3({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError3({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const oldKey = cred.documentKey;
     const key = storageKey("license-documents", cred.nurseId, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
     await updateCredential(input.credentialId, { documentKey: storedKey });
+    if (oldKey && oldKey !== storedKey) {
+      await storageDelete(oldKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: cred.nurseId,
@@ -6173,6 +6279,10 @@ var trainingsRouter = router({
   deleteRecord: adminProcedure.input(z4.object({ id: z4.number().int().positive() })).mutation(async ({ ctx, input }) => {
     const record = await deleteNurseTraining(input.id);
     if (!record) throw new TRPCError4({ code: "NOT_FOUND", message: "Training record not found." });
+    if (record.certificateKey) {
+      await storageDelete(record.certificateKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: record.nurseId,
@@ -6198,9 +6308,14 @@ var trainingsRouter = router({
     if (!mimeCheck.ok) throw new TRPCError4({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError4({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const oldKey = record.certificateKey;
     const key = storageKey("certificates", record.nurseId, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
     await updateNurseTraining(input.recordId, { certificateKey: storedKey });
+    if (oldKey && oldKey !== storedKey) {
+      await storageDelete(oldKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: record.nurseId,
@@ -9102,6 +9217,10 @@ var seminarsRouter = router({
     }
     const record = await deleteNurseTraining(input.attendanceId);
     if (!record) throw new TRPCError7({ code: "NOT_FOUND", message: "Attendance record not found." });
+    if (record.certificateKey) {
+      await storageDelete(record.certificateKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: record.nurseId,
@@ -9384,9 +9503,14 @@ var staffAccountRouter = router({
     if (!mimeCheck.ok) throw new TRPCError8({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const oldKey = nurse.profilePhotoKey;
     const key = storageKey("profile-photos", nurse.id, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
     await updateNurse(nurse.id, { profilePhotoKey: storedKey });
+    if (oldKey && oldKey !== storedKey) {
+      await storageDelete(oldKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
@@ -9417,9 +9541,14 @@ var staffAccountRouter = router({
     if (!mimeCheck.ok) throw new TRPCError8({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const oldKey = cred.documentKey;
     const key = storageKey("license-documents", nurse.id, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
     await updateCredential(input.credentialId, { documentKey: storedKey });
+    if (oldKey && oldKey !== storedKey) {
+      await storageDelete(oldKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
@@ -9481,9 +9610,14 @@ var staffAccountRouter = router({
     if (!mimeCheck.ok) throw new TRPCError8({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const oldKey = record.certificateKey;
     const key = storageKey("certificates", nurse.id, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
     await updateNurseTraining(input.recordId, { certificateKey: storedKey });
+    if (oldKey && oldKey !== storedKey) {
+      await storageDelete(oldKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
@@ -9592,6 +9726,7 @@ var staffAccountRouter = router({
     if (!mimeCheck.ok) throw new TRPCError8({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const oldKey = resolved.certificateKey;
     const key = storageKey("certificates", ctx.nurseId, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
     await updateNurseTraining(input.assignmentId, {
@@ -9599,6 +9734,10 @@ var staffAccountRouter = router({
       evidenceStatus: "Submitted",
       evidenceSubmittedAt: /* @__PURE__ */ new Date()
     });
+    if (oldKey && oldKey !== storedKey) {
+      await storageDelete(oldKey).catch(() => {
+      });
+    }
     await logActivity({
       supervisorId: null,
       nurseId: ctx.nurseId,

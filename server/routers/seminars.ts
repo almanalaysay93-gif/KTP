@@ -18,6 +18,7 @@ import {
 } from "../../shared/nursetrack";
 import { adminProcedure, router } from "../_core/trpc";
 import { deleteNurseTraining, deleteTrainingEvent, getDb, getNurseTrainingById, logActivity } from "../db";
+import { storageDelete } from "../storage";
 import {
   getLocalSeminarsList,
   getLocalSeminarDetail,
@@ -341,6 +342,9 @@ export const seminarsRouter = router({
       }
       const record = await deleteNurseTraining(input.attendanceId);
       if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "Attendance record not found." });
+      if (record.certificateKey) {
+        await storageDelete(record.certificateKey).catch(() => {});
+      }
       await logActivity({
         supervisorId: ctx.user.id,
         nurseId: record.nurseId,

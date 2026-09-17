@@ -1,6 +1,6 @@
 // File storage via a real S3 (or S3-compatible) bucket with automatic database fallback.
 // When S3 is unconfigured or unavailable, files are persisted directly into the database.
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ENV } from "./_core/env";
 import * as db from "./db";
@@ -70,5 +70,24 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
     return `/storage/${key}`;
   }
   return getSignedUrl(client, new GetObjectCommand({ Bucket: ENV.s3BucketName, Key: key }), { expiresIn: 300 });
+}
+
+export async function storageDelete(relKey: string | null | undefined): Promise<void> {
+  if (!relKey) return;
+  const key = normalizeKey(relKey);
+  const client = getClient();
+  if (client && ENV.s3BucketName) {
+    try {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: ENV.s3BucketName,
+          Key: key,
+        }),
+      );
+    } catch (err) {
+      console.warn("[Storage] S3 DeleteObject failed:", err);
+    }
+  }
+  await db.deleteStoredFile(key);
 }
 

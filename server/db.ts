@@ -2136,3 +2136,97 @@ export async function getStoredFile(
   }
 }
 
+export async function deleteStoredFile(key: string): Promise<void> {
+  await ensureStoredFilesTable();
+  const pg = getBatchClient();
+  if (pg) {
+    try {
+      await pg.unsafe(`DELETE FROM nursetrack."storedFiles" WHERE key = $1`, [key]);
+      return;
+    } catch (err) {
+      console.warn("[Database] deleteStoredFile pg query failed:", err);
+    }
+  }
+
+  const d = await getDb();
+  if (d) {
+    try {
+      await d.delete(storedFiles).where(eq(storedFiles.key, key));
+      return;
+    } catch {
+      // Fall through to sqlite
+    }
+  }
+
+  try {
+    const sqlite = getSqliteDb();
+    sqlite.prepare("DELETE FROM storedFiles WHERE key = ?").run(key);
+  } catch (err) {
+    console.warn("[Database] deleteStoredFile sqlite failed:", err);
+  }
+}
+
+/**
+ * Sweep and delete unreferenced stored files older than the safety threshold (default 2 hours).
+ * Prevents orphaned binary files from accumulating when photos or documents are replaced.
+ */
+export async function purgeOrphanStoredFiles(olderThanHours = 2): Promise<number> {
+  await ensureStoredFilesTable();
+  const timeClausePg =
+    olderThanHours <= 0
+      ? ""
+      : `AND "createdAt" < NOW() - INTERVAL '${Math.max(1, Math.floor(olderThanHours))} hours'`;
+  const timeClauseSqlite =
+    olderThanHours <= 0
+      ? ""
+      : `AND datetime(createdAt) <= datetime('now', '-${Math.max(1, Math.floor(olderThanHours))} hours')`;
+
+  const pg = getBatchClient();
+  if (pg) {
+    try {
+      const deleted = await pg.unsafe<{ count: number }[]>(`
+        WITH deleted AS (
+          DELETE FROM nursetrack."storedFiles"
+          WHERE key NOT IN (
+              SELECT "profilePhotoKey" FROM nursetrack.nurses WHERE "profilePhotoKey" IS NOT NULL
+              UNION
+              SELECT "documentKey" FROM nursetrack."nurseCredentials" WHERE "documentKey" IS NOT NULL
+              UNION
+              SELECT "certificateKey" FROM nursetrack."nurseTrainings" WHERE "certificateKey" IS NOT NULL
+            )
+            ${timeClausePg}
+          RETURNING id
+        )
+        SELECT count(*)::int AS count FROM deleted;
+      `);
+      return deleted[0]?.count ?? 0;
+    } catch (err) {
+      console.warn("[Database] purgeOrphanStoredFiles pg query failed:", err);
+    }
+  }
+
+  try {
+    const sqlite = getSqliteDb();
+    const res = sqlite
+      .prepare(
+        `
+      DELETE FROM storedFiles
+      WHERE key NOT IN (
+          SELECT profilePhotoKey FROM nurses WHERE profilePhotoKey IS NOT NULL
+          UNION
+          SELECT documentKey FROM nurseCredentials WHERE documentKey IS NOT NULL
+          UNION
+          SELECT certificateKey FROM nurseTrainings WHERE certificateKey IS NOT NULL
+        )
+        ${timeClauseSqlite}
+    `,
+      )
+      .run();
+    return res.changes;
+  } catch (err) {
+    console.warn("[Database] purgeOrphanStoredFiles sqlite query failed:", err);
+    return 0;
+  }
+}
+
+

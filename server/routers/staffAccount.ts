@@ -7,7 +7,7 @@ import { checkRateLimit } from "../_core/rateLimit";
 import { sdk } from "../_core/sdk";
 import * as db from "../db";
 import { dateKey, daysUntilExpiry, deriveLicenseStatus, nurseFullName, sanitizeFilename, storageKey, validateMime } from "../../shared/nursetrack";
-import { storagePut } from "../storage";
+import { storageDelete, storagePut } from "../storage";
 import { listResolvedTrainingSchedules, resolveTrainingSchedule } from "../trainingReminders";
 
 const GENERIC_CLAIM_ERROR =
@@ -244,9 +244,13 @@ export const staffAccountRouter = router({
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
 
+      const oldKey = nurse.profilePhotoKey;
       const key = storageKey("profile-photos", nurse.id, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
       await db.updateNurse(nurse.id, { profilePhotoKey: storedKey });
+      if (oldKey && oldKey !== storedKey) {
+        await storageDelete(oldKey).catch(() => {});
+      }
       await db.logActivity({
         supervisorId: ctx.user?.id ?? null,
         nurseId: nurse.id,
@@ -284,9 +288,13 @@ export const staffAccountRouter = router({
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
 
+      const oldKey = cred.documentKey;
       const key = storageKey("license-documents", nurse.id, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
       await db.updateCredential(input.credentialId, { documentKey: storedKey });
+      if (oldKey && oldKey !== storedKey) {
+        await storageDelete(oldKey).catch(() => {});
+      }
       await db.logActivity({
         supervisorId: ctx.user?.id ?? null,
         nurseId: nurse.id,
@@ -360,9 +368,13 @@ export const staffAccountRouter = router({
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
 
+      const oldKey = record.certificateKey;
       const key = storageKey("certificates", nurse.id, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
       await db.updateNurseTraining(input.recordId, { certificateKey: storedKey });
+      if (oldKey && oldKey !== storedKey) {
+        await storageDelete(oldKey).catch(() => {});
+      }
       await db.logActivity({
         supervisorId: ctx.user?.id ?? null,
         nurseId: nurse.id,
@@ -490,6 +502,7 @@ export const staffAccountRouter = router({
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
 
+      const oldKey = (resolved as any).certificateKey;
       const key = storageKey("certificates", ctx.nurseId, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
 
@@ -498,6 +511,9 @@ export const staffAccountRouter = router({
         evidenceStatus: "Submitted",
         evidenceSubmittedAt: new Date(),
       });
+      if (oldKey && oldKey !== storedKey) {
+        await storageDelete(oldKey).catch(() => {});
+      }
 
       await db.logActivity({
         supervisorId: null,

@@ -1,6 +1,6 @@
 import { runDailyReminders } from "./reminders";
 import { runLicenseExpiryEmailPass, type EmailPassResult } from "./email/dispatcher";
-import { acquireReminderLock, releaseReminderLock } from "./db";
+import { acquireReminderLock, purgeOrphanStoredFiles, releaseReminderLock } from "./db";
 import { drainTrainingOutbox } from "./trainingReminders";
 
 /** Computes current date string in Asia/Manila timezone (YYYY-MM-DD). */
@@ -16,6 +16,7 @@ export interface DailyReminderJobResult {
   expiryEmails: EmailPassResult;
   trainingOutbox: { processed: number; sent: number; mockSent: number; failed: number; skipped: number; superseded: number };
   seminarEmails: EmailPassResult;
+  purgedOrphanFiles?: number;
   locked?: boolean;
   message?: string;
 }
@@ -44,6 +45,7 @@ export async function runDailyReminderJob(dateKey = getManilaDateKey()): Promise
     const notifications = await runDailyReminders(dateKey);
     const expiryEmails = await runLicenseExpiryEmailPass(dateKey);
     const outboxResult = await drainTrainingOutbox();
+    const purgedOrphanFiles = await purgeOrphanStoredFiles(2);
     const seminarEmails: EmailPassResult = { processed: 0, sent: 0, mockSent: 0, failed: 0, skipped: 0 };
     return {
       ok: true,
@@ -52,6 +54,7 @@ export async function runDailyReminderJob(dateKey = getManilaDateKey()): Promise
       expiryEmails,
       trainingOutbox: outboxResult,
       seminarEmails,
+      purgedOrphanFiles,
     };
   } finally {
     await releaseReminderLock();

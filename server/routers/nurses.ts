@@ -4,7 +4,7 @@ import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { ASSIGNMENT_TYPES, EMPLOYMENT_STATUSES, STAFF_TYPES, storageKey, validateMime, nurseFullName, dateKey, daysUntilExpiry, deriveLicenseStatus, trainingCompliance } from "../../shared/nursetrack";
 import { sanitizeFilename } from "../../shared/nursetrack";
-import { storagePut } from "../storage";
+import { storageDelete, storagePut } from "../storage";
 
 const dateInput = z.union([z.date(), z.string().datetime()]).transform((d) => (d instanceof Date ? d : new Date(d)));
 const nullableDateInput = z.union([z.date(), z.string().datetime(), z.null()]).transform((d) => (d === null ? null : d instanceof Date ? d : new Date(d))).optional();
@@ -468,9 +468,13 @@ export const nursesRouter = router({
       if (!mimeCheck.ok) throw new TRPCError({ code: "BAD_REQUEST", message: mimeCheck.error });
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+      const oldKey = nurse.profilePhotoKey;
       const key = storageKey("profile-photos", input.nurseId, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
       await db.updateNurse(input.nurseId, { profilePhotoKey: storedKey });
+      if (oldKey && oldKey !== storedKey) {
+        await storageDelete(oldKey).catch(() => {});
+      }
       await db.logActivity({
         supervisorId: ctx.user.id,
         nurseId: input.nurseId,

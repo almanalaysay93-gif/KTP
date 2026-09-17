@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { daysUntilExpiry, deriveLicenseStatus, LICENSE_STATUS_META, nurseFullName, renewalCycleKey, sanitizeFilename, storageKey, validateMime, dateKey } from "../../shared/nursetrack";
-import { storagePut } from "../storage";
+import { storageDelete, storagePut } from "../storage";
 
 const nullableDateInput = z.union([z.date(), z.string().datetime(), z.null()]).transform((d) => (d === null ? null : d instanceof Date ? d : new Date(d))).optional();
 
@@ -177,9 +177,13 @@ export const credentialsRouter = router({
       if (!mimeCheck.ok) throw new TRPCError({ code: "BAD_REQUEST", message: mimeCheck.error });
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+      const oldKey = cred.documentKey;
       const key = storageKey("license-documents", cred.nurseId, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
       await db.updateCredential(input.credentialId, { documentKey: storedKey });
+      if (oldKey && oldKey !== storedKey) {
+        await storageDelete(oldKey).catch(() => {});
+      }
       await db.logActivity({
         supervisorId: ctx.user.id,
         nurseId: cred.nurseId,

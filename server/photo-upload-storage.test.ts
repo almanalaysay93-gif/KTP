@@ -111,5 +111,60 @@ describe("Photo Upload & Storage Fallback", () => {
       expect(stored).not.toBeNull();
       expect(stored?.mimeType).toBe("image/jpeg");
     });
+
+    it("purges the old photo from storage when a new photo is uploaded", async () => {
+      const employeeId = `TEST-REPLACE-${Date.now()}`;
+      const nurseId = await db.createNurse({
+        employeeId,
+        firstName: "Staff",
+        lastName: "Replace",
+        employmentStatus: "Active",
+      });
+
+      const ctx = makeCtx({ claimNurseId: nurseId });
+      const caller = appRouter.createCaller(ctx);
+
+      // Upload first photo
+      await caller.staffAccount.uploadMyPhoto({
+        fileBase64: Buffer.from("photo-v1").toString("base64"),
+        fileName: "v1.webp",
+        mimeType: "image/webp",
+      });
+
+      const nurseAfterV1 = await db.getNurseById(nurseId);
+      const keyV1 = nurseAfterV1!.profilePhotoKey!;
+      expect(await db.getStoredFile(keyV1)).not.toBeNull();
+
+      // Upload second photo replacing first
+      await caller.staffAccount.uploadMyPhoto({
+        fileBase64: Buffer.from("photo-v2").toString("base64"),
+        fileName: "v2.webp",
+        mimeType: "image/webp",
+      });
+
+      const nurseAfterV2 = await db.getNurseById(nurseId);
+      const keyV2 = nurseAfterV2!.profilePhotoKey!;
+      expect(keyV2).not.toBe(keyV1);
+
+      // Old photo should be purged, new photo should exist
+      expect(await db.getStoredFile(keyV1)).toBeNull();
+      expect(await db.getStoredFile(keyV2)).not.toBeNull();
+    });
+  });
+
+  describe("Orphan file garbage collection", () => {
+    it("purges unreferenced stored files older than threshold", async () => {
+      const orphanKey = `orphan-test-${Date.now()}.webp`;
+      await db.saveStoredFile(orphanKey, Buffer.from("orphan-data").toString("base64"), "image/webp", 11);
+
+      expect(await db.getStoredFile(orphanKey)).not.toBeNull();
+
+      // Sweeper with olderThanHours = 0 removes unreferenced file immediately
+      const deletedCount = await db.purgeOrphanStoredFiles(0);
+      expect(deletedCount).toBeGreaterThanOrEqual(1);
+
+      expect(await db.getStoredFile(orphanKey)).toBeNull();
+    });
   });
 });
+
