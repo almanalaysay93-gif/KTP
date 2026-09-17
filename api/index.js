@@ -54,21 +54,6 @@ function daysBetween(start, end, today = todayDate()) {
   if (e < s) return 0;
   return Math.floor((e - s) / 864e5);
 }
-function durationBetween(start, end, today = todayDate()) {
-  if (!start) return "\u2014";
-  const s = parseLocalDate(start).getTime();
-  const e = end ? parseLocalDate(end).getTime() : parseLocalDate(today).getTime();
-  if (e < s) return "\u2014";
-  const diffMs = e - s;
-  const totalDays = Math.floor(diffMs / 864e5);
-  const years = Math.floor(totalDays / 365.25);
-  const months = Math.floor((totalDays - years * 365.25) / 30.44);
-  if (years === 0 && months === 0) return totalDays === 0 ? "Same day" : `${totalDays} day${totalDays === 1 ? "" : "s"}`;
-  const parts = [];
-  if (years > 0) parts.push(`${years} yr${years === 1 ? "" : "s"}`);
-  if (months > 0) parts.push(`${months} mo${months === 1 ? "" : "s"}`);
-  return parts.join(" ");
-}
 function trainingCompliance(params) {
   const { requiredTrainingIds, nurseTrainingRecords, today = todayDate() } = params;
   if (requiredTrainingIds.length === 0) return 100;
@@ -1071,6 +1056,7 @@ function seedFromSeedJson(db) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let totalAttendances = 0;
+  const unresolvedAttendees = /* @__PURE__ */ new Set();
   const insertEventsTx = db.transaction((eventsList) => {
     for (const ev of eventsList) {
       const catId = catIdByName.get(ev.title.trim().toLowerCase());
@@ -1086,9 +1072,10 @@ function seedFromSeedJson(db) {
       );
       const eventId = Number(evRes.lastInsertRowid);
       for (const att of ev.attendees) {
-        let nurseId = nurseIdByEmployeeId.get(att.employeeId) ?? nurseIdByNormName.get(att.normName);
+        const nurseId = nurseIdByEmployeeId.get(att.employeeId) ?? nurseIdByNormName.get(att.normName);
         if (!nurseId) {
-          throw new Error(`Seed attendee did not resolve uniquely: ${att.staffName} (${att.employeeId})`);
+          unresolvedAttendees.add(String(att.staffName));
+          continue;
         }
         insAttend.run(
           nurseId,
@@ -1106,6 +1093,9 @@ function seedFromSeedJson(db) {
     }
   });
   insertEventsTx(data.events);
+  if (unresolvedAttendees.size > 0) {
+    console.warn(`[LocalDB] Seed skipped attendances for ${unresolvedAttendees.size} people who are not in the seed roster.`);
+  }
   db.prepare("INSERT INTO activityLog (actionType, summary) VALUES (?, ?)").run(
     "system.seed.excel",
     `Auto-populated NN LDI Database Summary: ${data.staff.length} staff, ${data.trainingCatalog.length} catalog items, ${data.events.length} events, ${totalAttendances} attendances.`
@@ -1138,6 +1128,7 @@ __export(db_exports, {
   closeAssignment: () => closeAssignment,
   countActiveNurses: () => countActiveNurses,
   countUnreadNotifications: () => countUnreadNotifications,
+  countUnreadNotificationsPg: () => countUnreadNotificationsPg,
   createArea: () => createArea,
   createAssignment: () => createAssignment,
   createCredential: () => createCredential,
@@ -1165,6 +1156,7 @@ __export(db_exports, {
   getAssignmentsForArea: () => getAssignmentsForArea,
   getBatchClient: () => getBatchClient,
   getDb: () => getDb,
+  getLatestLicenseInfoPerNurse: () => getLatestLicenseInfoPerNurse,
   getNotificationLogicalKey: () => getNotificationLogicalKey,
   getNurseByEmployeeId: () => getNurseByEmployeeId,
   getNurseById: () => getNurseById,
@@ -1188,6 +1180,7 @@ __export(db_exports, {
   listNurses: () => listNurses,
   listRecentEmailLogs: () => listRecentEmailLogs,
   listReminders: () => listReminders,
+  listRequiredTrainings: () => listRequiredTrainings,
   listTrainingCatalog: () => listTrainingCatalog,
   logActivity: () => logActivity,
   markAllNotificationsRead: () => markAllNotificationsRead,
@@ -1712,25 +1705,29 @@ async function getNurseLicenseInfo(nurseId) {
 async function getNurseLicenseStatus(nurseId) {
   return (await getNurseLicenseInfo(nurseId)).status;
 }
+async function getLatestLicenseInfoPerNurse(db) {
+  const creds = await db.selectDistinctOn([nurseCredentials.nurseId], {
+    nurseId: nurseCredentials.nurseId,
+    licenseNumber: nurseCredentials.licenseNumber,
+    expiryDate: nurseCredentials.expiryDate,
+    renewalStatus: nurseCredentials.renewalStatus
+  }).from(nurseCredentials).orderBy(nurseCredentials.nurseId, desc(nurseCredentials.expiryDate), desc(nurseCredentials.id));
+  const map = /* @__PURE__ */ new Map();
+  for (const cred of creds) {
+    const expKey = dateKey(cred.expiryDate);
+    map.set(cred.nurseId, {
+      status: deriveLicenseStatusFromCred(cred),
+      licenseNumber: cred.licenseNumber ?? null,
+      expiryDate: expKey || null,
+      daysRemaining: expKey ? daysUntilExpiry(expKey) : null
+    });
+  }
+  return map;
+}
 async function getAllNurseLicenseInfos() {
   const map = /* @__PURE__ */ new Map();
   const db = await getDb();
-  if (db) {
-    const creds2 = await db.select().from(nurseCredentials).orderBy(desc(nurseCredentials.expiryDate));
-    for (const cred of creds2) {
-      if (!map.has(cred.nurseId)) {
-        const expKey = dateKey(cred.expiryDate);
-        const days = expKey ? daysUntilExpiry(expKey) : null;
-        map.set(cred.nurseId, {
-          status: deriveLicenseStatusFromCred(cred),
-          licenseNumber: cred.licenseNumber ?? null,
-          expiryDate: expKey || null,
-          daysRemaining: days
-        });
-      }
-    }
-    return map;
-  }
+  if (db) return getLatestLicenseInfoPerNurse(db);
   const sqlite = getSqliteDb();
   const creds = sqlite.prepare("SELECT * FROM nurseCredentials ORDER BY date(expiryDate) DESC").all();
   for (const cred of creds) {
@@ -2454,6 +2451,14 @@ async function getAreaTrainingRequirementIds(areaId) {
   const rows = sqlite.prepare("SELECT trainingId FROM areaTrainingRequirements WHERE areaId = ? AND required = 1").all(areaId);
   return rows.map((r) => r.trainingId);
 }
+async function listRequiredTrainings() {
+  const db = await getDb();
+  if (db) {
+    return db.select({ areaId: areaTrainingRequirements.areaId, trainingId: areaTrainingRequirements.trainingId }).from(areaTrainingRequirements).where(eq(areaTrainingRequirements.required, true));
+  }
+  const sqlite = getSqliteDb();
+  return sqlite.prepare("SELECT areaId, trainingId FROM areaTrainingRequirements WHERE required = 1").all();
+}
 async function setAreaTrainingRequirement(areaId, trainingId, required) {
   const db = await getDb();
   if (db) {
@@ -2609,15 +2614,15 @@ async function listNotifications(limit = 100) {
   }
   return deduplicated;
 }
+async function countUnreadNotificationsPg(db) {
+  const [row] = await db.select({ count: sql2`count(distinct ${notificationLogicalKeySql})::int` }).from(notifications).where(isNull(notifications.readAt));
+  return Number(row?.count ?? 0);
+}
 async function countUnreadNotifications() {
   const db = await getDb();
-  let unreadRows = [];
-  if (db) {
-    unreadRows = await db.select().from(notifications).where(isNull(notifications.readAt));
-  } else {
-    const sqlite = getSqliteDb();
-    unreadRows = sqlite.prepare("SELECT * FROM notifications WHERE readAt IS NULL").all();
-  }
+  if (db) return countUnreadNotificationsPg(db);
+  const sqlite = getSqliteDb();
+  const unreadRows = sqlite.prepare("SELECT * FROM notifications WHERE readAt IS NULL").all();
   const seen = /* @__PURE__ */ new Set();
   for (const row of unreadRows) {
     const key = getNotificationLogicalKey(row);
@@ -3110,7 +3115,7 @@ async function purgeOrphanStoredFiles(olderThanHours = 2) {
     return 0;
   }
 }
-var _db, _batchPg, INACTIVE_STATUS_SQL_LIST, normalizeForMatch, _storedFilesTableEnsured;
+var _db, _batchPg, INACTIVE_STATUS_SQL_LIST, normalizeForMatch, notificationLogicalKeySql, _storedFilesTableEnsured;
 var init_db = __esm({
   "server/db.ts"() {
     "use strict";
@@ -3122,6 +3127,12 @@ var init_db = __esm({
     _batchPg = null;
     INACTIVE_STATUS_SQL_LIST = INACTIVE_EMPLOYMENT_STATUSES.map((s) => `'${s}'`).join(", ");
     normalizeForMatch = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    notificationLogicalKeySql = sql2`case
+  when ${notifications.type} = 'license.expired' then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', coalesce(${notifications.relatedEntityType}, ''), ':', coalesce(${notifications.relatedEntityId}::text, ''))
+  when ${notifications.type} = 'license.renewalReminder' then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', coalesce(${notifications.relatedEntityType}, ''), ':', coalesce(${notifications.relatedEntityId}::text, ''), ':', btrim(split_part(coalesce(${notifications.title}, ''), ' — ', 1)))
+  when coalesce(${notifications.relatedEntityType}, '') <> '' and coalesce(${notifications.relatedEntityId}, 0) <> 0 then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', ${notifications.relatedEntityType}, ':', ${notifications.relatedEntityId}::text)
+  else concat('notif:', ${notifications.id}::text)
+end`;
     _storedFilesTableEnsured = false;
   }
 });
@@ -4998,7 +5009,18 @@ var t = initTRPC.context().create({
   transformer: superjson
 });
 var router = t.router;
-var publicProcedure = t.procedure;
+var SLOW_PROCEDURE_MS = 1e3;
+var timing = t.middleware(async ({ path: path3, type, next }) => {
+  const started = Date.now();
+  const result = await next();
+  const ms = Date.now() - started;
+  if (ms > SLOW_PROCEDURE_MS) {
+    console.warn(`[tRPC] slow ${type} ${path3} ${ms}ms ok=${result.ok}`);
+  }
+  return result;
+});
+var baseProcedure = t.procedure.use(timing);
+var publicProcedure = baseProcedure;
 var requireUser = t.middleware(async (opts) => {
   const { ctx, next } = opts;
   if (!ctx.user) {
@@ -5011,8 +5033,8 @@ var requireUser = t.middleware(async (opts) => {
     }
   });
 });
-var protectedProcedure = t.procedure.use(requireUser);
-var staffProcedure = t.procedure.use(
+var protectedProcedure = baseProcedure.use(requireUser);
+var staffProcedure = baseProcedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
     if (ctx.user) {
@@ -5033,7 +5055,7 @@ var staffProcedure = t.procedure.use(
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   })
 );
-var adminProcedure = t.procedure.use(
+var adminProcedure = baseProcedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
     if (!ctx.user || !hasFullAccess(ctx.user.email)) {
@@ -6051,8 +6073,8 @@ var trainingsRouter = router({
       completionDate: nullableDateInput3,
       expiryDate: nullableDateInput3,
       provider: z4.string().max(128).optional(),
-      trainingHours: z4.number().int().positive().optional(),
-      cpdUnits: z4.number().int().positive().optional(),
+      trainingHours: z4.number().int().positive().nullable().optional(),
+      cpdUnits: z4.number().int().positive().nullable().optional(),
       certificateNumber: z4.string().max(64).optional(),
       remarks: z4.string().max(2e3).optional(),
       conflictOverrideReason: z4.string().max(1e3).optional()
@@ -6611,6 +6633,86 @@ init_nursetrack();
 
 // server/sqliteHelpers.ts
 init_localDb();
+
+// server/reportBuilders.ts
+init_nursetrack();
+function daysBetween2(start, end, today) {
+  const s = (/* @__PURE__ */ new Date(`${start}T00:00:00`)).getTime();
+  const e = (/* @__PURE__ */ new Date(`${end ?? today}T00:00:00`)).getTime();
+  return e >= s ? Math.floor((e - s) / 864e5) : 0;
+}
+function buildTrainingCompliance(input) {
+  const requiredByArea = /* @__PURE__ */ new Map();
+  for (const r of input.requirements) {
+    if (!requiredByArea.has(r.areaId)) requiredByArea.set(r.areaId, /* @__PURE__ */ new Set());
+    requiredByArea.get(r.areaId).add(r.trainingId);
+  }
+  const staffByArea = /* @__PURE__ */ new Map();
+  for (const n of input.nurses) {
+    if (n.currentAreaId == null) continue;
+    if (!staffByArea.has(n.currentAreaId)) staffByArea.set(n.currentAreaId, []);
+    staffByArea.get(n.currentAreaId).push(n.id);
+  }
+  const current = /* @__PURE__ */ new Set();
+  for (const r of input.completedRecords) {
+    const exp = r.expiryDate ? dateKey(r.expiryDate) : "";
+    if (!exp || exp > input.today) current.add(`${r.nurseId}:${r.trainingId}`);
+  }
+  return input.areas.map((area) => {
+    const required = Array.from(requiredByArea.get(area.id) ?? []);
+    const staff = staffByArea.get(area.id) ?? [];
+    let compliant = 0;
+    for (const nurseId of staff) {
+      for (const trainingId of required) {
+        if (current.has(`${nurseId}:${trainingId}`)) compliant++;
+      }
+    }
+    const total = staff.length * required.length;
+    return {
+      areaName: area.name,
+      requiredTrainings: required.length,
+      staffCount: staff.length,
+      requiredChecks: total,
+      compliantChecks: compliant,
+      compliancePercent: total > 0 ? Math.round(compliant / total * 100) : 100
+    };
+  });
+}
+function buildAreaExposure(rows, today) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    const start = dateKey(r.startDate);
+    if (!start) continue;
+    const end = r.endDate ? dateKey(r.endDate) || null : null;
+    const key = `${r.nurseId}:${r.areaId}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        row: {
+          nurseId: r.nurseId,
+          nurse: nurseFullName(r),
+          licenseNumber: r.licenseNumber || r.employeeId,
+          areaName: r.areaName,
+          firstStart: start,
+          lastEnd: "",
+          assignments: 0,
+          totalDays: 0
+        },
+        open: false,
+        maxEnd: ""
+      };
+      groups.set(key, g);
+    }
+    g.row.assignments += 1;
+    g.row.totalDays += daysBetween2(start, end, today);
+    if (start < g.row.firstStart) g.row.firstStart = start;
+    if (end === null) g.open = true;
+    else if (end > g.maxEnd) g.maxEnd = end;
+  }
+  return Array.from(groups.values()).map((g) => ({ ...g.row, lastEnd: g.open ? "Present" : g.maxEnd })).sort((a, b) => a.nurse.localeCompare(b.nurse) || a.areaName.localeCompare(b.areaName));
+}
+
+// server/sqliteHelpers.ts
 init_nursetrack();
 var INACTIVE_STATUS_SQL_LIST2 = INACTIVE_EMPLOYMENT_STATUSES.map((s) => `'${s}'`).join(", ");
 function getLocalDashboardInitial() {
@@ -6972,27 +7074,27 @@ function getLocalReportData(type) {
       renewalStatus: r.renewalStatus
     }));
   }
+  if (type === "trainingCompliance") {
+    return buildTrainingCompliance({
+      areas: sqlite.prepare("SELECT id, name FROM areas WHERE active = 1 ORDER BY sortOrder ASC, name ASC").all(),
+      requirements: sqlite.prepare("SELECT areaId, trainingId FROM areaTrainingRequirements WHERE required = 1").all(),
+      nurses: sqlite.prepare(`SELECT id, currentAreaId FROM nurses WHERE archivedAt IS NULL AND employmentStatus NOT IN (${INACTIVE_STATUS_SQL_LIST2})`).all(),
+      completedRecords: sqlite.prepare("SELECT nurseId, trainingId, expiryDate FROM nurseTrainings WHERE status = 'Completed'").all(),
+      today
+    });
+  }
   if (type === "areaExposure") {
     const rows = sqlite.prepare(`
-      SELECT n.employeeId,
+      SELECT n.id as nurseId, n.employeeId,
              (SELECT c.licenseNumber FROM nurseCredentials c WHERE c.nurseId = n.id ORDER BY date(c.expiryDate) DESC LIMIT 1) as licenseNumber,
              n.firstName, n.middleName, n.lastName, n.suffix,
-             a.name as areaName, asgn.startDate, asgn.endDate, asgn.assignmentType
+             asgn.areaId, a.name as areaName, asgn.startDate, asgn.endDate
       FROM areaAssignments asgn
       INNER JOIN nurses n ON n.id = asgn.nurseId
       INNER JOIN areas a ON a.id = asgn.areaId
       WHERE n.archivedAt IS NULL
-      ORDER BY n.lastName ASC, n.firstName ASC, date(asgn.startDate) ASC
     `).all();
-    return rows.map((r) => ({
-      nurse: nurseFullName(r),
-      employeeId: r.licenseNumber || r.employeeId,
-      areaName: r.areaName,
-      startDate: dateKey(r.startDate),
-      endDate: r.endDate ? dateKey(r.endDate) : "Present",
-      assignmentType: r.assignmentType ?? "\u2014",
-      durationDays: durationBetween(dateKey(r.startDate), r.endDate ? dateKey(r.endDate) : today)
-    }));
+    return buildAreaExposure(rows, today);
   }
   if (type === "trainingSummary") {
     const rows = sqlite.prepare(`
@@ -7022,7 +7124,7 @@ function getLocalReportData(type) {
   }
   if (type === "transferLog") {
     const rows = sqlite.prepare(`
-      SELECT n.employeeId,
+      SELECT n.id as nurseId, n.employeeId,
              (SELECT c.licenseNumber FROM nurseCredentials c WHERE c.nurseId = n.id ORDER BY date(c.expiryDate) DESC LIMIT 1) as licenseNumber,
              n.firstName, n.middleName, n.lastName, n.suffix,
              a.name as areaName, asgn.startDate, asgn.endDate, asgn.assignmentType, asgn.remarks
@@ -7033,7 +7135,8 @@ function getLocalReportData(type) {
     `).all();
     return rows.map((r) => ({
       nurse: nurseFullName(r),
-      employeeId: r.licenseNumber || r.employeeId,
+      nurseId: r.nurseId,
+      licenseNumber: r.licenseNumber || r.employeeId,
       areaName: r.areaName,
       startDate: dateKey(r.startDate),
       endDate: r.endDate ? dateKey(r.endDate) : "Present",
@@ -7671,7 +7774,7 @@ async function listAreasWithCounts() {
 
 // server/routers/reports.ts
 init_nursetrack();
-import { and as and5, asc as asc3, desc as desc4, eq as eq5, isNull as isNull5, sql as sql6 } from "drizzle-orm";
+import { asc as asc3, desc as desc4, eq as eq5, isNull as isNull5, sql as sql6 } from "drizzle-orm";
 import { z as z9 } from "zod";
 init_db();
 init_schema();
@@ -7686,8 +7789,8 @@ var reportsRouter = router({
         { type: "licenseStatus", label: "License Status Overview", description: "Active license status of all nurses by area", rowHint: activeCount },
         { type: "licenseDue", label: "Licenses Due for Renewal", description: "Licenses expiring within 1 year, sorted by urgency", rowHint: null },
         { type: "trainingCompliance", label: "Training Compliance by Area", description: "Required-training completion per area", rowHint: areaList.length },
-        { type: "areaExposure", label: "Area Exposure Report", description: "Per-nurse time spent in each area across all assignments", rowHint: activeCount },
-        { type: "trainingSummary", label: "Training Summary", description: "Training counts by category, provider, and status", rowHint: null },
+        { type: "areaExposure", label: "Area Exposure Report", description: "Total days each nurse spent in each area across all assignments", rowHint: null },
+        { type: "trainingSummary", label: "Training Summary", description: "Every training record with category, status, dates, hours, and provider", rowHint: null },
         { type: "transferLog", label: "Transfer Log", description: "Complete history of area transfers, oldest to newest", rowHint: null }
       ];
     }
@@ -7695,13 +7798,12 @@ var reportsRouter = router({
     const activeNurseCond = activeNurseCondition();
     const [activeRow] = await db.select({ count: sql6`count(*)` }).from(nurses).where(activeNurseCond);
     const areaCount = (await db.select().from(areas).where(eq5(areas.active, true))).length;
-    const expiredCount = (await db.select({ count: sql6`count(*)` }).from(nurseCredentials).innerJoin(nurses, eq5(nurses.id, nurseCredentials.nurseId)).where(isNull5(nurses.archivedAt))).length;
     return [
       { type: "licenseStatus", label: "License Status Overview", description: "Active license status of all nurses by area", rowHint: activeRow?.count ?? 0 },
       { type: "licenseDue", label: "Licenses Due for Renewal", description: "Licenses expiring within 1 year, sorted by urgency", rowHint: null },
       { type: "trainingCompliance", label: "Training Compliance by Area", description: "Required-training completion per area", rowHint: areaCount },
-      { type: "areaExposure", label: "Area Exposure Report", description: "Per-nurse time spent in each area across all assignments", rowHint: activeRow?.count ?? 0 },
-      { type: "trainingSummary", label: "Training Summary", description: "Training counts by category, provider, and status", rowHint: null },
+      { type: "areaExposure", label: "Area Exposure Report", description: "Total days each nurse spent in each area across all assignments", rowHint: null },
+      { type: "trainingSummary", label: "Training Summary", description: "Every training record with category, status, dates, hours, and provider", rowHint: null },
       { type: "transferLog", label: "Transfer Log", description: "Complete history of area transfers, oldest to newest", rowHint: null }
     ];
   }),
@@ -7775,31 +7877,13 @@ var reportsRouter = router({
       }));
     }
     if (input.type === "trainingCompliance") {
-      const areaRows = await db.select().from(areas);
-      const result = [];
-      for (const area of areaRows) {
-        const requiredIds = await db.select({ trainingId: areaTrainingRequirements.trainingId }).from(areaTrainingRequirements).where(and5(eq5(areaTrainingRequirements.areaId, area.id), eq5(areaTrainingRequirements.required, true)));
-        const required = requiredIds.map((r) => r.trainingId);
-        const staff = await db.select({ id: nurses.id, firstName: nurses.firstName, middleName: nurses.middleName, lastName: nurses.lastName }).from(nurses).where(and5(eq5(nurses.currentAreaId, area.id), isNull5(nurses.archivedAt)));
-        let compliant = 0;
-        let total = 0;
-        for (const n of staff) {
-          total += required.length;
-          for (const tid of required) {
-            const records = await db.select({ status: nurseTrainings.status, expiryDate: nurseTrainings.expiryDate }).from(nurseTrainings).where(and5(eq5(nurseTrainings.nurseId, n.id), eq5(nurseTrainings.trainingId, tid), eq5(nurseTrainings.status, "Completed")));
-            if (records.some((r) => !r.expiryDate || new Date(r.expiryDate) > /* @__PURE__ */ new Date(`${today}T00:00:00`))) compliant++;
-          }
-        }
-        result.push({
-          areaName: area.name,
-          requiredTrainings: required.length,
-          staffCount: staff.length,
-          requiredChecks: total,
-          compliantChecks: compliant,
-          compliancePercent: total > 0 ? Math.round(compliant / total * 100) : 100
-        });
-      }
-      return result;
+      const [areaRows, requirements, staff, completed] = await Promise.all([
+        db.select({ id: areas.id, name: areas.name }).from(areas).where(eq5(areas.active, true)).orderBy(asc3(areas.sortOrder), asc3(areas.name)),
+        db.select({ areaId: areaTrainingRequirements.areaId, trainingId: areaTrainingRequirements.trainingId }).from(areaTrainingRequirements).where(eq5(areaTrainingRequirements.required, true)),
+        db.select({ id: nurses.id, currentAreaId: nurses.currentAreaId }).from(nurses).where(activeNurseCondition()),
+        db.select({ nurseId: nurseTrainings.nurseId, trainingId: nurseTrainings.trainingId, expiryDate: nurseTrainings.expiryDate }).from(nurseTrainings).where(eq5(nurseTrainings.status, "Completed"))
+      ]);
+      return buildTrainingCompliance({ areas: areaRows, requirements, nurses: staff, completedRecords: completed, today });
     }
     if (input.type === "areaExposure") {
       const rows2 = await db.select({
@@ -7808,23 +7892,17 @@ var reportsRouter = router({
         firstName: nurses.firstName,
         middleName: nurses.middleName,
         lastName: nurses.lastName,
+        suffix: nurses.suffix,
         areaId: areaAssignments.areaId,
         areaName: areas.name,
         startDate: areaAssignments.startDate,
-        endDate: areaAssignments.endDate,
-        assignmentType: areaAssignments.assignmentType,
-        archivedAt: nurses.archivedAt
-      }).from(areaAssignments).innerJoin(nurses, eq5(nurses.id, areaAssignments.nurseId)).innerJoin(areas, eq5(areas.id, areaAssignments.areaId)).where(isNull5(nurses.archivedAt)).orderBy(asc3(nurses.lastName), asc3(nurses.firstName), asc3(areaAssignments.startDate));
+        endDate: areaAssignments.endDate
+      }).from(areaAssignments).innerJoin(nurses, eq5(nurses.id, areaAssignments.nurseId)).innerJoin(areas, eq5(areas.id, areaAssignments.areaId)).where(isNull5(nurses.archivedAt));
       const licenseByNurse2 = await latestLicenseNumbersByNurse(db, rows2.map((r) => r.nurseId));
-      return rows2.map((r) => ({
-        nurse: nurseFullName(r),
-        employeeId: licenseByNurse2.get(r.nurseId) || r.employeeId,
-        areaName: r.areaName,
-        startDate: dateKey(r.startDate),
-        endDate: r.endDate ? dateKey(r.endDate) : "Present",
-        assignmentType: r.assignmentType ?? "\u2014",
-        durationDays: daysBetween2(dateKey(r.startDate), r.endDate ? dateKey(r.endDate) : today)
-      }));
+      return buildAreaExposure(
+        rows2.map((r) => ({ ...r, licenseNumber: licenseByNurse2.get(r.nurseId) ?? null })),
+        today
+      );
     }
     if (input.type === "trainingSummary") {
       const rows2 = await db.select({
@@ -7842,10 +7920,9 @@ var reportsRouter = router({
         expiryDate: nurseTrainings.expiryDate,
         trainingHours: nurseTrainings.trainingHours,
         cpdUnits: nurseTrainings.cpdUnits,
-        provider: nurseTrainings.provider,
-        archivedAt: nurses.archivedAt
-      }).from(nurseTrainings).innerJoin(trainingCatalog, eq5(trainingCatalog.id, nurseTrainings.trainingId)).innerJoin(nurses, eq5(nurses.id, nurseTrainings.nurseId)).orderBy(asc3(trainingCatalog.name), desc4(nurseTrainings.scheduledDate));
-      return rows2.filter((r) => !r.archivedAt).map((r) => ({
+        provider: nurseTrainings.provider
+      }).from(nurseTrainings).innerJoin(trainingCatalog, eq5(trainingCatalog.id, nurseTrainings.trainingId)).innerJoin(nurses, eq5(nurses.id, nurseTrainings.nurseId)).where(isNull5(nurses.archivedAt)).orderBy(asc3(trainingCatalog.name), desc4(nurseTrainings.scheduledDate));
+      return rows2.map((r) => ({
         nurse: nurseFullName(r),
         trainingName: r.trainingName,
         category: r.category ?? "\u2014",
@@ -7876,7 +7953,8 @@ var reportsRouter = router({
     const licenseByNurse = await latestLicenseNumbersByNurse(db, rows.map((r) => r.nurseId));
     return rows.map((r) => ({
       nurse: nurseFullName(r),
-      employeeId: licenseByNurse.get(r.nurseId) || r.employeeId,
+      nurseId: r.nurseId,
+      licenseNumber: licenseByNurse.get(r.nurseId) || r.employeeId,
       areaName: r.areaName,
       startDate: dateKey(r.startDate),
       endDate: r.endDate ? dateKey(r.endDate) : "Present",
@@ -7892,18 +7970,13 @@ async function latestLicenseNumbersByNurse(db, nurseIds) {
   const latestByNurse = /* @__PURE__ */ new Map();
   for (const r of rows) {
     const existing = latestByNurse.get(r.nurseId);
-    if (!existing || String(r.expiryDate) > String(existing.expiryDate)) latestByNurse.set(r.nurseId, r);
+    if (!existing || dateKey(r.expiryDate) > dateKey(existing.expiryDate)) latestByNurse.set(r.nurseId, r);
   }
   const result = /* @__PURE__ */ new Map();
   for (const [nurseId, r] of Array.from(latestByNurse)) {
     if (r.licenseNumber) result.set(nurseId, r.licenseNumber);
   }
   return result;
-}
-function daysBetween2(start, end, today = todayDate()) {
-  const s = (/* @__PURE__ */ new Date(`${String(start)}T00:00:00`)).getTime();
-  const e = end === "Present" || !end ? (/* @__PURE__ */ new Date(`${today}T00:00:00`)).getTime() : (/* @__PURE__ */ new Date(`${String(end)}T00:00:00`)).getTime();
-  return e >= s ? Math.floor((e - s) / 864e5) : 0;
 }
 
 // server/routers/settings.ts
@@ -8639,6 +8712,13 @@ async function deduplicateDatabase() {
 }
 
 // server/routers/settings.ts
+function normalizeReminderThresholds(value) {
+  const parts = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  if (parts.length === 0) return null;
+  const nums = parts.map(Number);
+  if (!nums.every((n) => Number.isInteger(n) && n > 0 && n <= 365)) return null;
+  return nums.join(",");
+}
 var settingKey = z10.enum([
   "appTitle",
   "reminderThresholdDays",
@@ -8664,16 +8744,32 @@ var settingsRouter = router({
       contactEmail: byKey.get("contactEmail") ?? ""
     };
   }),
-  update: adminProcedure.input(z10.object({ key: settingKey, value: z10.string().max(5e3).nullable() })).mutation(async ({ input }) => {
+  // All four settings in one request: every value is validated first, then written in one transaction.
+  updateMany: adminProcedure.input(
+    z10.object({
+      appTitle: z10.string().trim().max(5e3).nullable(),
+      orgName: z10.string().trim().max(5e3).nullable(),
+      contactEmail: z10.union([z10.string().trim().email().max(320), z10.literal(""), z10.null()]),
+      reminderThresholdDays: z10.string().max(5e3)
+    })
+  ).mutation(async ({ input }) => {
+    const thresholds = normalizeReminderThresholds(input.reminderThresholdDays);
+    if (!thresholds) {
+      throw new TRPCError6({ code: "BAD_REQUEST", message: "Thresholds must be positive integers up to 365, separated by commas (e.g. 365,180)." });
+    }
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
-    if (input.key === "reminderThresholdDays") {
-      const nums = input.value ? input.value.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0 && n <= 365) : [];
-      if (nums.length === 0) throw new TRPCError6({ code: "BAD_REQUEST", message: "Thresholds must be positive integers up to 365, separated by commas (e.g. 365,180)." });
-      await db.update(appSettings).set({ value: nums.join(",") }).where(eq10(appSettings.key, "reminderThresholdDays"));
-    } else {
-      await db.update(appSettings).set({ value: input.value }).where(eq10(appSettings.key, input.key));
-    }
+    const values = {
+      appTitle: input.appTitle || null,
+      orgName: input.orgName || null,
+      contactEmail: input.contactEmail || null,
+      reminderThresholdDays: thresholds
+    };
+    await db.transaction(async (tx) => {
+      for (const [key, value] of Object.entries(values)) {
+        await tx.insert(appSettings).values({ key, value }).onConflictDoUpdate({ target: appSettings.key, set: { value } });
+      }
+    });
     return { success: true };
   }),
   runRemindersNow: adminProcedure.mutation(async () => {
@@ -10760,160 +10856,117 @@ import { TRPCError as TRPCError11 } from "@trpc/server";
 // server/_core/aiInsights.ts
 init_db();
 init_nursetrack();
-async function buildDataDigest() {
-  const [nurses2, areas2, credentials, trainingRecords, credentialTypes2, trainingCatalog2] = await Promise.all([
+var INSIGHTS_TIMEOUT_MS = 5e3;
+var INSIGHTS_UNAVAILABLE_MESSAGE = "The insights report service is not available. Try again later.";
+var InsightsServiceError = class extends Error {
+};
+async function buildInsightsDigest(today) {
+  const [nurses2, areas2, credentials, trainingRecords, credentialTypes2, trainingCatalog2, requirements] = await Promise.all([
     listNurses(),
     listAreas(false),
     listCredentials(),
     listNurseTrainings(),
     listCredentialTypes(false),
-    listTrainingCatalog(false)
+    listTrainingCatalog(false),
+    listRequiredTrainings()
   ]);
-  const today = todayDate();
-  const areaById = new Map(areas2.map((a) => [a.id, a]));
-  const credTypeById = new Map(credentialTypes2.map((t2) => [t2.id, t2]));
-  const catalogById = new Map(trainingCatalog2.map((t2) => [t2.id, t2]));
-  const credsByNurse = /* @__PURE__ */ new Map();
+  const inactive = new Set(INACTIVE_EMPLOYMENT_STATUSES);
+  const active = nurses2.filter((n) => !n.archivedAt && !inactive.has(n.employmentStatus));
+  const areaName = new Map(areas2.map((a) => [a.id, a.name]));
+  const areaOf = (areaId) => areaId ? areaName.get(areaId) ?? "Unassigned" : "Unassigned";
+  const person = new Map(active.map((n) => [n.id, { name: nurseFullName(n), area: areaOf(n.currentAreaId) }]));
+  const credentialName = new Map(credentialTypes2.map((t2) => [t2.id, t2.name]));
+  const trainingName = new Map(trainingCatalog2.map((t2) => [t2.id, t2.name]));
+  const latest = /* @__PURE__ */ new Map();
   for (const c of credentials) {
-    if (!credsByNurse.has(c.nurseId)) credsByNurse.set(c.nurseId, []);
-    credsByNurse.get(c.nurseId).push(c);
+    if (!person.has(c.nurseId)) continue;
+    const prev = latest.get(c.nurseId);
+    if (!prev || dateKey(c.expiryDate) > dateKey(prev.expiryDate)) latest.set(c.nurseId, c);
   }
-  const trainingsByNurse = /* @__PURE__ */ new Map();
-  for (const t2 of trainingRecords) {
-    if (!trainingsByNurse.has(t2.nurseId)) trainingsByNurse.set(t2.nurseId, []);
-    trainingsByNurse.get(t2.nurseId).push(t2);
-  }
-  const activeNurses = nurses2.filter((n) => !n.archivedAt && n.employmentStatus !== "Archived");
-  const areaCounts = /* @__PURE__ */ new Map();
-  for (const n of activeNurses) {
-    const name = n.currentAreaId ? areaById.get(n.currentAreaId)?.name ?? "Unknown" : "Unassigned";
-    areaCounts.set(name, (areaCounts.get(name) ?? 0) + 1);
-  }
-  const roster = activeNurses.map((n) => {
-    const areaName = n.currentAreaId ? areaById.get(n.currentAreaId)?.name ?? "Unknown" : "Unassigned";
-    const creds = credsByNurse.get(n.id) ?? [];
-    const soonestCred = creds.slice().sort((a, b) => daysUntilExpiry(a.expiryDate, today) - daysUntilExpiry(b.expiryDate, today))[0];
-    const licenseInfo = soonestCred ? `${deriveLicenseStatus(soonestCred.expiryDate, today)} (${daysUntilExpiry(soonestCred.expiryDate, today)}d, ${credTypeById.get(soonestCred.credentialTypeId)?.name ?? "license"})` : "no license on file";
-    const scheduled = (trainingsByNurse.get(n.id) ?? []).filter((t2) => t2.status === "Scheduled" && t2.scheduledDate);
-    return {
-      name: nurseFullName(n),
-      employeeId: n.employeeId,
-      staffType: n.staffType,
-      area: areaName,
-      license: licenseInfo,
-      upcomingTrainings: scheduled.map((t2) => `${catalogById.get(t2.trainingId)?.name ?? "training"} on ${t2.scheduledDate}`)
-    };
+  const licenses = Array.from(latest.values()).flatMap((c) => {
+    const expiry = dateKey(c.expiryDate);
+    if (!expiry) return [];
+    const p = person.get(c.nurseId);
+    return [{ ...p, credential: credentialName.get(c.credentialTypeId) ?? "License", expiry_date: expiry, renewed: c.renewalStatus === "Renewed" }];
   });
-  const expiringSoon = roster.map((r) => ({ ...r })).filter((r) => r.license.startsWith("Expired") || r.license.startsWith("Within 6 Months") || r.license.startsWith("Within 1 Year")).sort((a, b) => a.license < b.license ? -1 : 1);
-  const upcomingEvents = trainingRecords.filter((t2) => t2.status === "Scheduled" && t2.scheduledDate).map((t2) => {
-    const nurse = activeNurses.find((n) => n.id === t2.nurseId);
-    return nurse ? { name: nurseFullName(nurse), training: catalogById.get(t2.trainingId)?.name ?? "training", date: t2.scheduledDate } : null;
-  }).filter((x) => x !== null).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const complianceByArea = {};
-  for (const area of areas2) {
-    const nursesInArea = activeNurses.filter((n) => n.currentAreaId === area.id);
-    if (nursesInArea.length === 0) continue;
-    const records = nursesInArea.flatMap((n) => (trainingsByNurse.get(n.id) ?? []).map((t2) => ({ trainingId: t2.trainingId, status: t2.status, expiryDate: t2.expiryDate, completionDate: t2.completionDate })));
-    const requiredIds = Array.from(new Set(records.map((r) => r.trainingId)));
-    if (requiredIds.length === 0) continue;
-    complianceByArea[area.name] = trainingCompliance({ requiredTrainingIds: requiredIds, nurseTrainingRecords: records, today });
-  }
-  return { today, activeCount: activeNurses.length, areaCounts: Object.fromEntries(areaCounts), roster, expiringSoon, upcomingEvents, complianceByArea };
+  const trainings = trainingRecords.flatMap((t2) => {
+    const p = person.get(t2.nurseId);
+    const date2 = dateKey(t2.scheduledDate);
+    if (!p || t2.status !== "Scheduled" || !date2) return [];
+    return [{ ...p, training: trainingName.get(t2.trainingId) ?? "Training", date: date2 }];
+  });
+  const coverage = buildTrainingCompliance({
+    areas: areas2,
+    requirements,
+    nurses: active,
+    completedRecords: trainingRecords.filter((t2) => t2.status === "Completed"),
+    today
+  }).map((row) => ({ area: row.areaName, required_checks: row.requiredChecks, compliant_checks: row.compliantChecks }));
+  return {
+    today_manila: today,
+    areas: areas2.map((a) => ({ name: a.name })),
+    staff: Array.from(person.values()),
+    licenses,
+    trainings,
+    coverage
+  };
 }
-function formatDigestForReport(d) {
-  const lines = [];
-  lines.push(`Today: ${d.today}. Active staff: ${d.activeCount}.`);
-  lines.push(`Staff by area: ${Object.entries(d.areaCounts).map(([k, v]) => `${k}=${v}`).join(", ")}`);
-  lines.push("");
-  lines.push(`Licenses expired or expiring within 1 year (${d.expiringSoon.length}):`);
-  for (const r of d.expiringSoon.slice(0, 150)) {
-    lines.push(`- ${r.name} (${r.employeeId}, ${r.area}): ${r.license}`);
-  }
-  lines.push("");
-  lines.push(`Scheduled upcoming trainings/seminars (${d.upcomingEvents.length}):`);
-  for (const e of d.upcomingEvents.slice(0, 150)) {
-    lines.push(`- ${e.name}: ${e.training} on ${e.date}`);
-  }
-  if (Object.keys(d.complianceByArea).length) {
-    lines.push("");
-    lines.push("Rough training-record coverage % by area (based on trainings actually on file, not official requirements):");
-    for (const [area, pct] of Object.entries(d.complianceByArea)) lines.push(`- ${area}: ${pct}%`);
-  }
-  return lines.join("\n");
-}
-async function callOpenRouter(messages) {
-  if (!ENV.openRouterApiKey) {
-    throw new Error("AI Insights is not configured: OPENROUTER_API_KEY is missing.");
-  }
+async function requestInsightsReport(digest, options = {}) {
+  const serviceUrl = options.serviceUrl ?? process.env.INQUIRY_SERVICE_URL ?? "http://127.0.0.1:5005";
+  const secret = options.secret ?? process.env.INQUIRY_SERVICE_SECRET;
+  const doFetch = options.fetchImpl ?? fetch;
+  const headers = { "Content-Type": "application/json" };
+  if (secret) headers.Authorization = `Bearer ${secret}`;
   let response;
   try {
-    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    response = await doFetch(`${serviceUrl}/api/insights/report`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${ENV.openRouterApiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ model: ENV.openRouterModel, messages, temperature: 0.3 }),
-      signal: AbortSignal.timeout(1e4)
+      headers,
+      body: JSON.stringify({ digest }),
+      signal: AbortSignal.timeout(options.timeoutMs ?? INSIGHTS_TIMEOUT_MS)
     });
   } catch (err) {
-    if (err instanceof Error && (err.name === "TimeoutError" || err.message.includes("timed out") || err.name === "AbortError")) {
-      throw new Error("AI service request timed out after 10 seconds. Please try again.");
-    }
-    throw new Error(`AI service connection failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    console.warn("[Insights] report service unreachable:", err instanceof Error ? err.message : err);
+    throw new InsightsServiceError(INSIGHTS_UNAVAILABLE_MESSAGE);
   }
-  const rawText = await response.text().catch(() => "");
-  if (!response.ok) {
-    let errorDetail = rawText;
-    try {
-      const errJson = JSON.parse(rawText);
-      errorDetail = errJson?.error?.message ?? errJson?.message ?? rawText;
-    } catch {
-      errorDetail = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 200);
-    }
-    if (response.status === 401) {
-      throw new Error("AI service authorization failed: Invalid or expired OPENROUTER_API_KEY.");
-    }
-    if (response.status === 429) {
-      throw new Error("AI service rate limit exceeded. Please wait a moment and try again.");
-    }
-    throw new Error(`AI request failed (${response.status}): ${errorDetail || response.statusText}`);
-  }
-  let json2;
+  let body;
   try {
-    json2 = JSON.parse(rawText);
+    body = await response.json();
   } catch {
-    const preview = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 150);
-    throw new Error(`AI service returned unexpected non-JSON response: ${preview || "Unknown error"}`);
+    console.warn(`[Insights] report service returned non-JSON (HTTP ${response.status})`);
+    throw new InsightsServiceError(INSIGHTS_UNAVAILABLE_MESSAGE);
   }
-  const content = json2.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    throw new Error("AI request returned an empty or invalid response.");
+  if (!response.ok || !body?.success || !Array.isArray(body.sections)) {
+    console.warn(`[Insights] report service error (HTTP ${response.status}):`, body?.error ?? "no sections");
+    throw new InsightsServiceError(INSIGHTS_UNAVAILABLE_MESSAGE);
   }
-  return content.trim();
+  return {
+    generatedFor: String(body.generated_for ?? digest.today_manila),
+    sections: body.sections.map((s) => ({
+      code: String(s.code),
+      title: String(s.title),
+      lines: Array.isArray(s.lines) ? s.lines.map(String) : []
+    })),
+    text: String(body.text ?? "")
+  };
 }
-async function generateInsightsReport() {
-  const digest = await buildDataDigest();
-  const prompt = `You are a nurse-staffing analyst for a hospital nephrology department. Below is today's roster/license/training data snapshot. Write a concise report (use short headed sections, plain text, no markdown tables) covering:
-1. Urgent license expirations (expired or expiring within 30 days): name each person.
-2. Licenses expiring within 6 months: summarize, group by area if there are many.
-3. Upcoming trainings/seminars in the next 60 days: list them.
-4. Any notable staffing pattern you can see from the area counts (e.g. heavy imbalance between areas), stated as an observation, not a recommendation you're not qualified to make.
-Be factual and specific using only the data given below. If a section has nothing to report, say so briefly.
-
-DATA:
-${formatDigestForReport(digest)}`;
-  return callOpenRouter([{ role: "user", content: prompt }]);
+async function generateInsightsReport(today) {
+  return requestInsightsReport(await buildInsightsDigest(today));
 }
 
 // server/routers/aiInsights.ts
+init_scheduled();
 var aiInsightsRouter = router({
   generateReport: adminProcedure.mutation(async () => {
     try {
-      const report = await generateInsightsReport();
-      return { report, generatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      const report = await generateInsightsReport(getManilaDateKey());
+      return { ...report, generatedAt: (/* @__PURE__ */ new Date()).toISOString() };
     } catch (err) {
-      throw new TRPCError11({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "Failed to generate report." });
+      if (err instanceof InsightsServiceError) {
+        throw new TRPCError11({ code: "SERVICE_UNAVAILABLE", message: err.message });
+      }
+      console.error("[Insights] report failed:", err);
+      throw new TRPCError11({ code: "INTERNAL_SERVER_ERROR", message: "The insights report could not be created. Try again later." });
     }
   }),
   chat: adminProcedure.input(
