@@ -164,5 +164,64 @@ class TestEndpoint(unittest.TestCase):
         self.assertEqual(status, 401)
 
 
+class TestVercelEntry(unittest.TestCase):
+    """api/py.py serves the same routes under the /api/py prefix."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        from chat_service import ThreadedHTTPServer
+
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "api", "py.py")
+        spec = importlib.util.spec_from_file_location("vercel_py_entry", path)
+        cls.entry = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.entry)
+        os.environ["INQUIRY_SERVICE_SECRET"] = "entry-secret-value"
+        cls.server = ThreadedHTTPServer(("127.0.0.1", 0), cls.entry.handler)
+        cls.port = cls.server.server_address[1]
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        os.environ.pop("INQUIRY_SERVICE_SECRET", None)
+
+    def request(self, path, body=None, token="entry-secret-value"):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            data=None if body is None else json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+            method="GET" if body is None else "POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read())
+
+    def test_strip_prefix(self):
+        strip = self.entry.strip_prefix
+        self.assertEqual(strip("/api/py/api/insights/report"), "/api/insights/report")
+        self.assertEqual(strip("/api/py/health?x=1"), "/health?x=1")
+        self.assertEqual(strip("/api/py"), "/")
+        self.assertEqual(strip("/api/pyx/health"), "/api/pyx/health")
+        self.assertEqual(strip("/health"), "/health")
+
+    def test_health_and_report_under_prefix(self):
+        status, data = self.request("/api/py/health", token="")
+        self.assertEqual((status, data["status"]), (200, "ok"))
+        status, data = self.request("/api/py/api/insights/report", {"digest": DIGEST})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["sections"]), 5)
+
+    def test_inquiry_under_prefix_requires_secret(self):
+        status, _ = self.request("/api/py/api/inquiry", {"query": "hello"}, token="wrong")
+        self.assertEqual(status, 401)
+        status, data = self.request("/api/py/api/inquiry", {"query": "hello"})
+        self.assertEqual(status, 200)
+        self.assertIn("answer", data)
+
+
 if __name__ == "__main__":
     unittest.main()
