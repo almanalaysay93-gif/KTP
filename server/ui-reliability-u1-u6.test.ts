@@ -3,8 +3,7 @@ import Database from "better-sqlite3";
 import { appRouter } from "./routers";
 import { getNotificationLogicalKey, listNotifications, countUnreadNotifications, markNotificationRead } from "./db";
 import { runDailyReminders } from "./reminders";
-import { generateInsightsReport } from "./_core/aiInsights";
-import { ENV } from "./_core/env";
+import { INSIGHTS_UNAVAILABLE_MESSAGE, requestInsightsReport } from "./_core/aiInsights";
 
 describe("U1: Export data on-demand and authorization", () => {
   it("rejects unauthorized access for non-admin session", async () => {
@@ -36,73 +35,57 @@ describe("U1: Export data on-demand and authorization", () => {
   });
 });
 
-describe("U2: AI Insights report reliability and error mapping", () => {
-  it("throws clear error when OPENROUTER_API_KEY is missing", async () => {
-    const originalKey = ENV.openRouterApiKey;
-    (ENV as any).openRouterApiKey = "";
-    try {
-      await expect(generateInsightsReport()).rejects.toThrow("OPENROUTER_API_KEY is missing");
-    } finally {
-      (ENV as any).openRouterApiKey = originalKey;
-    }
+describe("U2: Insights report service reliability and error mapping", () => {
+  const digest = { today_manila: "2026-09-17", areas: [], staff: [], licenses: [], trainings: [], coverage: [] };
+  const jsonResponse = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  it("returns the sections from the Python service and sends the secret", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        success: true,
+        generated_for: "2026-09-17",
+        sections: [{ code: "S1", title: "Urgent licenses", lines: ["Nothing to report."] }],
+        text: "report text",
+      }),
+    );
+
+    const report = await requestInsightsReport(digest, { serviceUrl: "http://svc", secret: "s3cret", fetchImpl });
+
+    expect(report).toEqual({
+      generatedFor: "2026-09-17",
+      sections: [{ code: "S1", title: "Urgent licenses", lines: ["Nothing to report."] }],
+      text: "report text",
+    });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("http://svc/api/insights/report");
+    expect(init.headers.Authorization).toBe("Bearer s3cret");
+    expect(JSON.parse(init.body)).toEqual({ digest });
   });
 
-  it("translates 401 unauthorized to user-friendly message", async () => {
-    const originalKey = ENV.openRouterApiKey;
-    (ENV as any).openRouterApiKey = "invalid-test-key";
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      statusText: "Unauthorized",
-      text: async () => JSON.stringify({ error: { message: "Invalid API Key" } }),
-    } as any);
-
-    try {
-      await expect(generateInsightsReport()).rejects.toThrow("Invalid or expired OPENROUTER_API_KEY");
-    } finally {
-      globalThis.fetch = originalFetch;
-      (ENV as any).openRouterApiKey = originalKey;
-    }
+  it("maps an unreachable or slow service to the clear message", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }));
+    await expect(requestInsightsReport(digest, { fetchImpl })).rejects.toThrow(INSIGHTS_UNAVAILABLE_MESSAGE);
   });
 
-  it("translates 429 rate limit to user-friendly message", async () => {
-    const originalKey = ENV.openRouterApiKey;
-    (ENV as any).openRouterApiKey = "rate-limited-key";
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 429,
-      statusText: "Too Many Requests",
-      text: async () => JSON.stringify({ error: { message: "Rate limit exceeded" } }),
-    } as any);
-
-    try {
-      await expect(generateInsightsReport()).rejects.toThrow("AI service rate limit exceeded");
-    } finally {
-      globalThis.fetch = originalFetch;
-      (ENV as any).openRouterApiKey = originalKey;
-    }
+  it("maps a non-JSON response (e.g. a platform error page) to the clear message", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("An error occurred with your deployment", { status: 504 }));
+    await expect(requestInsightsReport(digest, { fetchImpl })).rejects.toThrow(INSIGHTS_UNAVAILABLE_MESSAGE);
   });
 
-  it("rejects empty response content defensively", async () => {
-    const originalKey = ENV.openRouterApiKey;
-    (ENV as any).openRouterApiKey = "valid-mock-key";
-    const originalFetch = globalThis.fetch;
-    const bodyStr = JSON.stringify({ choices: [{ message: { content: "   " } }] });
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () => bodyStr,
-      json: async () => JSON.parse(bodyStr),
-    } as any);
+  it("maps a service error response to the clear message", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(400, { error: "Invalid digest: today_manila" }));
+    await expect(requestInsightsReport(digest, { fetchImpl })).rejects.toThrow(INSIGHTS_UNAVAILABLE_MESSAGE);
+  });
 
-    try {
-      await expect(generateInsightsReport()).rejects.toThrow("empty or invalid response");
-    } finally {
-      globalThis.fetch = originalFetch;
-      (ENV as any).openRouterApiKey = originalKey;
-    }
+  it("aborts a request that runs past the timeout", async () => {
+    const fetchImpl = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    ) as unknown as typeof fetch;
+    await expect(requestInsightsReport(digest, { fetchImpl, timeoutMs: 50 })).rejects.toThrow(INSIGHTS_UNAVAILABLE_MESSAGE);
   });
 });
 

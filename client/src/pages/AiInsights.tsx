@@ -4,14 +4,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { Bot, FileText, Send, Sparkles, User } from "lucide-react";
+import { Bot, Copy, FileText, Send, Sparkles, User } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 type ChatEntry = { role: "user" | "assistant"; content: string };
+type ReportSection = { code: string; title: string; lines: string[] };
+type Report = { generatedFor: string; sections: ReportSection[]; text: string };
 
 export default function AiInsightsPage() {
-  const [report, setReport] = useState<string | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
   const [reportGeneratedAt, setReportGeneratedAt] = useState<string | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatEntry[]>([]);
@@ -22,10 +24,10 @@ export default function AiInsightsPage() {
       setReportError(null);
     },
     onSuccess: (data) => {
-      setReport(data.report);
+      setReport({ generatedFor: data.generatedFor, sections: data.sections, text: data.text });
       setReportGeneratedAt(data.generatedAt);
       setReportError(null);
-      toast.success("AI Insights report generated successfully.");
+      toast.success("Insights report generated.");
     },
     onError: (err) => {
       setReportError(err.message);
@@ -53,10 +55,10 @@ export default function AiInsightsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Bot className="h-5 w-5" /> AI Insights
+            <Bot className="h-5 w-5" /> Insights
           </CardTitle>
           <CardDescription>
-            Nemotron 3 reads your current roster, license, and training data to write reports and answer questions — nothing here changes any records.
+            Rule-based reports from your current roster, license, and training data. No AI model is used, and nothing here changes any records.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -82,8 +84,8 @@ export default function AiInsightsPage() {
             <div className="rounded-lg border bg-muted/40 p-4 flex items-center gap-3">
               <Spinner className="h-5 w-5 text-primary shrink-0" />
               <div>
-                <p className="text-sm font-medium">Analyzing staff records and generating report...</p>
-                <p className="text-xs text-muted-foreground">Evaluating license expirations, training schedules, and area coverage.</p>
+                <p className="text-sm font-medium">Building the report…</p>
+                <p className="text-xs text-muted-foreground">Checking license expirations, training schedules, and area coverage.</p>
               </div>
             </div>
           )}
@@ -91,7 +93,7 @@ export default function AiInsightsPage() {
           {reportError && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 flex items-start justify-between gap-3 text-sm text-destructive">
               <div>
-                <p className="font-semibold">Unable to generate AI report</p>
+                <p className="font-semibold">Unable to generate the report</p>
                 <p className="text-xs mt-1 text-destructive/90">{reportError}</p>
               </div>
               <Button
@@ -107,11 +109,38 @@ export default function AiInsightsPage() {
           )}
 
           {report && (
-            <div className="rounded-lg border bg-muted/30 p-4">
-              {reportGeneratedAt && (
-                <p className="text-xs text-muted-foreground mb-2">Generated {new Date(reportGeneratedAt).toLocaleString()}</p>
-              )}
-              <div className="text-sm whitespace-pre-wrap leading-relaxed">{report}</div>
+            <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Report for {report.generatedFor}
+                  {reportGeneratedAt && ` · generated ${new Date(reportGeneratedAt).toLocaleString()}`}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    navigator.clipboard
+                      .writeText(report.text)
+                      .then(() => toast.success("Report copied."))
+                      .catch(() => toast.error("Could not copy the report."))
+                  }
+                >
+                  <Copy className="h-4 w-4 mr-1" /> Copy
+                </Button>
+              </div>
+              {report.sections.map((section) => (
+                <section key={section.code} aria-labelledby={`insights-${section.code}`}>
+                  <h3 id={`insights-${section.code}`} className="text-sm font-semibold mb-1">
+                    {section.title}
+                  </h3>
+                  <ul className="list-disc pl-5 space-y-0.5 text-sm leading-relaxed">
+                    {section.lines.map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
             </div>
           )}
         </CardContent>

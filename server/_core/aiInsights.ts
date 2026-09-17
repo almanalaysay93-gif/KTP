@@ -1,217 +1,131 @@
-/** AI Insights: Nemotron 3 (via OpenRouter) reads a compact snapshot of the current
- * roster/license/training data and either writes a report or answers a chat question. */
+/** Insights report: Node reads the roster, license, and training data and sends a
+ * digest to the rule-based Python service (inquiry/insights_report.py), which
+ * writes the report. No AI model is called. */
 import * as db from "../db";
-import {
-  daysUntilExpiry,
-  deriveLicenseStatus,
-  nurseFullName,
-  todayDate,
-  trainingCompliance,
-} from "../../shared/nursetrack";
-import { ENV } from "./env";
+import { buildTrainingCompliance } from "../reportBuilders";
+import { dateKey, INACTIVE_EMPLOYMENT_STATUSES, nurseFullName } from "../../shared/nursetrack";
 
-export type ChatMessage = { role: "user" | "assistant"; content: string };
+export const INSIGHTS_TIMEOUT_MS = 5000;
+export const INSIGHTS_UNAVAILABLE_MESSAGE = "The insights report service is not available. Try again later.";
 
-async function buildDataDigest() {
-  const [nurses, areas, credentials, trainingRecords, credentialTypes, trainingCatalog] = await Promise.all([
+export type InsightsSection = { code: string; title: string; lines: string[] };
+export type InsightsReport = { generatedFor: string; sections: InsightsSection[]; text: string };
+
+export type InsightsDigest = {
+  today_manila: string;
+  areas: { name: string }[];
+  staff: { name: string; area: string }[];
+  licenses: { name: string; area: string; credential: string; expiry_date: string; renewed: boolean }[];
+  trainings: { name: string; area: string; training: string; date: string }[];
+  coverage: { area: string; required_checks: number; compliant_checks: number }[];
+};
+
+export class InsightsServiceError extends Error {}
+
+export async function buildInsightsDigest(today: string): Promise<InsightsDigest> {
+  const [nurses, areas, credentials, trainingRecords, credentialTypes, trainingCatalog, requirements] = await Promise.all([
     db.listNurses(),
     db.listAreas(false),
     db.listCredentials(),
     db.listNurseTrainings(),
     db.listCredentialTypes(false),
     db.listTrainingCatalog(false),
+    db.listRequiredTrainings(),
   ]);
 
-  const today = todayDate();
-  const areaById = new Map(areas.map((a) => [a.id, a]));
-  const credTypeById = new Map(credentialTypes.map((t) => [t.id, t]));
-  const catalogById = new Map(trainingCatalog.map((t) => [t.id, t]));
-  const credsByNurse = new Map<number, typeof credentials>();
+  const inactive = new Set<string>(INACTIVE_EMPLOYMENT_STATUSES);
+  const active = nurses.filter((n) => !n.archivedAt && !inactive.has(n.employmentStatus));
+  const areaName = new Map(areas.map((a) => [a.id, a.name]));
+  const areaOf = (areaId: number | null) => (areaId ? areaName.get(areaId) ?? "Unassigned" : "Unassigned");
+  const person = new Map(active.map((n) => [n.id, { name: nurseFullName(n), area: areaOf(n.currentAreaId) }]));
+  const credentialName = new Map(credentialTypes.map((t) => [t.id, t.name]));
+  const trainingName = new Map(trainingCatalog.map((t) => [t.id, t.name]));
+
+  // Latest-expiring credential per person, the same rule as the staff list.
+  const latest = new Map<number, (typeof credentials)[number]>();
   for (const c of credentials) {
-    if (!credsByNurse.has(c.nurseId)) credsByNurse.set(c.nurseId, []);
-    credsByNurse.get(c.nurseId)!.push(c);
+    if (!person.has(c.nurseId)) continue;
+    const prev = latest.get(c.nurseId);
+    if (!prev || dateKey(c.expiryDate) > dateKey(prev.expiryDate)) latest.set(c.nurseId, c);
   }
-  const trainingsByNurse = new Map<number, typeof trainingRecords>();
-  for (const t of trainingRecords) {
-    if (!trainingsByNurse.has(t.nurseId)) trainingsByNurse.set(t.nurseId, []);
-    trainingsByNurse.get(t.nurseId)!.push(t);
-  }
-
-  const activeNurses = nurses.filter((n) => !n.archivedAt && n.employmentStatus !== "Archived");
-
-  const areaCounts = new Map<string, number>();
-  for (const n of activeNurses) {
-    const name = n.currentAreaId ? (areaById.get(n.currentAreaId)?.name ?? "Unknown") : "Unassigned";
-    areaCounts.set(name, (areaCounts.get(name) ?? 0) + 1);
-  }
-
-  const roster = activeNurses.map((n) => {
-    const areaName = n.currentAreaId ? (areaById.get(n.currentAreaId)?.name ?? "Unknown") : "Unassigned";
-    const creds = credsByNurse.get(n.id) ?? [];
-    const soonestCred = creds
-      .slice()
-      .sort((a, b) => daysUntilExpiry(a.expiryDate as string, today) - daysUntilExpiry(b.expiryDate as string, today))[0];
-    const licenseInfo = soonestCred
-      ? `${deriveLicenseStatus(soonestCred.expiryDate as string, today)} (${daysUntilExpiry(soonestCred.expiryDate as string, today)}d, ${credTypeById.get(soonestCred.credentialTypeId)?.name ?? "license"})`
-      : "no license on file";
-    const scheduled = (trainingsByNurse.get(n.id) ?? []).filter((t) => t.status === "Scheduled" && t.scheduledDate);
-    return {
-      name: nurseFullName(n),
-      employeeId: n.employeeId,
-      staffType: n.staffType,
-      area: areaName,
-      license: licenseInfo,
-      upcomingTrainings: scheduled.map((t) => `${catalogById.get(t.trainingId)?.name ?? "training"} on ${t.scheduledDate}`),
-    };
+  const licenses = Array.from(latest.values()).flatMap((c) => {
+    const expiry = dateKey(c.expiryDate);
+    if (!expiry) return [];
+    const p = person.get(c.nurseId)!;
+    return [{ ...p, credential: credentialName.get(c.credentialTypeId) ?? "License", expiry_date: expiry, renewed: c.renewalStatus === "Renewed" }];
   });
 
-  // Near-term focus lists for the report prompt.
-  const expiringSoon = roster
-    .map((r) => ({ ...r }))
-    .filter((r) => r.license.startsWith("Expired") || r.license.startsWith("Within 6 Months") || r.license.startsWith("Within 1 Year"))
-    .sort((a, b) => (a.license < b.license ? -1 : 1));
+  const trainings = trainingRecords.flatMap((t) => {
+    const p = person.get(t.nurseId);
+    const date = dateKey(t.scheduledDate);
+    if (!p || t.status !== "Scheduled" || !date) return [];
+    return [{ ...p, training: trainingName.get(t.trainingId) ?? "Training", date }];
+  });
 
-  const upcomingEvents = trainingRecords
-    .filter((t) => t.status === "Scheduled" && t.scheduledDate)
-    .map((t) => {
-      const nurse = activeNurses.find((n) => n.id === t.nurseId);
-      return nurse
-        ? { name: nurseFullName(nurse), training: catalogById.get(t.trainingId)?.name ?? "training", date: t.scheduledDate }
-        : null;
-    })
-    .filter((x): x is NonNullable<typeof x> => x !== null)
-    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const coverage = buildTrainingCompliance({
+    areas,
+    requirements,
+    nurses: active,
+    completedRecords: trainingRecords.filter((t) => t.status === "Completed"),
+    today,
+  }).map((row) => ({ area: row.areaName, required_checks: row.requiredChecks, compliant_checks: row.compliantChecks }));
 
-  // Simple compliance snapshot per area (only areas with a training requirement set are meaningful,
-  // but we surface active-nurse counts vs completed-training coverage generically here).
-  const complianceByArea: Record<string, number> = {};
-  for (const area of areas) {
-    const nursesInArea = activeNurses.filter((n) => n.currentAreaId === area.id);
-    if (nursesInArea.length === 0) continue;
-    const records = nursesInArea.flatMap((n) => (trainingsByNurse.get(n.id) ?? []).map((t) => ({ trainingId: t.trainingId, status: t.status, expiryDate: t.expiryDate, completionDate: t.completionDate })));
-    const requiredIds = Array.from(new Set(records.map((r) => r.trainingId)));
-    if (requiredIds.length === 0) continue;
-    complianceByArea[area.name] = trainingCompliance({ requiredTrainingIds: requiredIds, nurseTrainingRecords: records, today });
-  }
-
-  return { today, activeCount: activeNurses.length, areaCounts: Object.fromEntries(areaCounts), roster, expiringSoon, upcomingEvents, complianceByArea };
+  return {
+    today_manila: today,
+    areas: areas.map((a) => ({ name: a.name })),
+    staff: Array.from(person.values()),
+    licenses,
+    trainings,
+    coverage,
+  };
 }
 
-function formatDigestForReport(d: Awaited<ReturnType<typeof buildDataDigest>>): string {
-  const lines: string[] = [];
-  lines.push(`Today: ${d.today}. Active staff: ${d.activeCount}.`);
-  lines.push(`Staff by area: ${Object.entries(d.areaCounts).map(([k, v]) => `${k}=${v}`).join(", ")}`);
-  lines.push("");
-  lines.push(`Licenses expired or expiring within 1 year (${d.expiringSoon.length}):`);
-  for (const r of d.expiringSoon.slice(0, 150)) {
-    lines.push(`- ${r.name} (${r.employeeId}, ${r.area}): ${r.license}`);
-  }
-  lines.push("");
-  lines.push(`Scheduled upcoming trainings/seminars (${d.upcomingEvents.length}):`);
-  for (const e of d.upcomingEvents.slice(0, 150)) {
-    lines.push(`- ${e.name}: ${e.training} on ${e.date}`);
-  }
-  if (Object.keys(d.complianceByArea).length) {
-    lines.push("");
-    lines.push("Rough training-record coverage % by area (based on trainings actually on file, not official requirements):");
-    for (const [area, pct] of Object.entries(d.complianceByArea)) lines.push(`- ${area}: ${pct}%`);
-  }
-  return lines.join("\n");
-}
+/** Sends the digest to the Python service. Any failure becomes one clear message. */
+export async function requestInsightsReport(
+  digest: InsightsDigest,
+  options: { serviceUrl?: string; secret?: string; fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+): Promise<InsightsReport> {
+  const serviceUrl = options.serviceUrl ?? process.env.INQUIRY_SERVICE_URL ?? "http://127.0.0.1:5005";
+  const secret = options.secret ?? process.env.INQUIRY_SERVICE_SECRET;
+  const doFetch = options.fetchImpl ?? fetch;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (secret) headers.Authorization = `Bearer ${secret}`;
 
-function formatDigestForChat(d: Awaited<ReturnType<typeof buildDataDigest>>): string {
-  const lines: string[] = [];
-  lines.push(`Today: ${d.today}. Active staff: ${d.activeCount}.`);
-  lines.push(`Staff by area: ${Object.entries(d.areaCounts).map(([k, v]) => `${k}=${v}`).join(", ")}`);
-  lines.push("");
-  lines.push("Full active roster (name | employeeId | staffType | area | license status):");
-  for (const r of d.roster) {
-    lines.push(`- ${r.name} | ${r.employeeId} | ${r.staffType} | ${r.area} | ${r.license}${r.upcomingTrainings.length ? " | upcoming: " + r.upcomingTrainings.join("; ") : ""}`);
-  }
-  return lines.join("\n");
-}
-
-async function callOpenRouter(messages: Array<{ role: string; content: string }>): Promise<string> {
-  if (!ENV.openRouterApiKey) {
-    throw new Error("AI Insights is not configured: OPENROUTER_API_KEY is missing.");
-  }
   let response: Response;
   try {
-    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    response = await doFetch(`${serviceUrl}/api/insights/report`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${ENV.openRouterApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ model: ENV.openRouterModel, messages, temperature: 0.3 }),
-      signal: AbortSignal.timeout(10000),
+      headers,
+      body: JSON.stringify({ digest }),
+      signal: AbortSignal.timeout(options.timeoutMs ?? INSIGHTS_TIMEOUT_MS),
     });
-  } catch (err: unknown) {
-    if (err instanceof Error && (err.name === "TimeoutError" || err.message.includes("timed out") || err.name === "AbortError")) {
-      throw new Error("AI service request timed out after 10 seconds. Please try again.");
-    }
-    throw new Error(`AI service connection failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+  } catch (err) {
+    console.warn("[Insights] report service unreachable:", err instanceof Error ? err.message : err);
+    throw new InsightsServiceError(INSIGHTS_UNAVAILABLE_MESSAGE);
   }
 
-  const rawText = await response.text().catch(() => "");
-  if (!response.ok) {
-    let errorDetail = rawText;
-    try {
-      const errJson = JSON.parse(rawText);
-      errorDetail = errJson?.error?.message ?? errJson?.message ?? rawText;
-    } catch {
-      errorDetail = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 200);
-    }
-    if (response.status === 401) {
-      throw new Error("AI service authorization failed: Invalid or expired OPENROUTER_API_KEY.");
-    }
-    if (response.status === 429) {
-      throw new Error("AI service rate limit exceeded. Please wait a moment and try again.");
-    }
-    throw new Error(`AI request failed (${response.status}): ${errorDetail || response.statusText}`);
-  }
-
-  let json: { choices?: Array<{ message?: { content?: string } }> };
+  let body: any;
   try {
-    json = JSON.parse(rawText);
+    body = await response.json();
   } catch {
-    const preview = rawText.replace(/<[^>]+>/g, " ").trim().slice(0, 150);
-    throw new Error(`AI service returned unexpected non-JSON response: ${preview || "Unknown error"}`);
+    console.warn(`[Insights] report service returned non-JSON (HTTP ${response.status})`);
+    throw new InsightsServiceError(INSIGHTS_UNAVAILABLE_MESSAGE);
   }
-
-  const content = json.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    throw new Error("AI request returned an empty or invalid response.");
+  if (!response.ok || !body?.success || !Array.isArray(body.sections)) {
+    console.warn(`[Insights] report service error (HTTP ${response.status}):`, body?.error ?? "no sections");
+    throw new InsightsServiceError(INSIGHTS_UNAVAILABLE_MESSAGE);
   }
-  return content.trim();
+  return {
+    generatedFor: String(body.generated_for ?? digest.today_manila),
+    sections: body.sections.map((s: any) => ({
+      code: String(s.code),
+      title: String(s.title),
+      lines: Array.isArray(s.lines) ? s.lines.map(String) : [],
+    })),
+    text: String(body.text ?? ""),
+  };
 }
 
-export async function generateInsightsReport(): Promise<string> {
-  const digest = await buildDataDigest();
-  const prompt = `You are a nurse-staffing analyst for a hospital nephrology department. Below is today's roster/license/training data snapshot. Write a concise report (use short headed sections, plain text, no markdown tables) covering:
-1. Urgent license expirations (expired or expiring within 30 days): name each person.
-2. Licenses expiring within 6 months: summarize, group by area if there are many.
-3. Upcoming trainings/seminars in the next 60 days: list them.
-4. Any notable staffing pattern you can see from the area counts (e.g. heavy imbalance between areas), stated as an observation, not a recommendation you're not qualified to make.
-Be factual and specific using only the data given below. If a section has nothing to report, say so briefly.
-
-DATA:
-${formatDigestForReport(digest)}`;
-
-  return callOpenRouter([{ role: "user", content: prompt }]);
-}
-
-export async function answerInsightsChat(question: string, history: ChatMessage[]): Promise<string> {
-  const digest = await buildDataDigest();
-  const systemPrompt = `You are a nurse-staffing data assistant for a hospital nephrology department's tracking app. Answer the supervisor's questions using ONLY the roster/license/training data provided below — never invent people or numbers not present in it. Keep answers short and direct. If the data doesn't contain the answer, say so.
-
-DATA:
-${formatDigestForChat(digest)}`;
-
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
-    { role: "user", content: question },
-  ];
-  return callOpenRouter(messages);
+export async function generateInsightsReport(today: string): Promise<InsightsReport> {
+  return requestInsightsReport(await buildInsightsDigest(today));
 }

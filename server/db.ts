@@ -1525,6 +1525,19 @@ export async function getAreaTrainingRequirementIds(areaId: number) {
   return rows.map((r) => r.trainingId);
 }
 
+/** Every required (area, training) pair. */
+export async function listRequiredTrainings(): Promise<{ areaId: number; trainingId: number }[]> {
+  const db = await getDb();
+  if (db) {
+    return db
+      .select({ areaId: areaTrainingRequirements.areaId, trainingId: areaTrainingRequirements.trainingId })
+      .from(areaTrainingRequirements)
+      .where(eq(areaTrainingRequirements.required, true));
+  }
+  const sqlite = getSqliteDb();
+  return sqlite.prepare("SELECT areaId, trainingId FROM areaTrainingRequirements WHERE required = 1").all() as { areaId: number; trainingId: number }[];
+}
+
 export async function setAreaTrainingRequirement(areaId: number, trainingId: number, required: boolean) {
   const db = await getDb();
   if (db) {
