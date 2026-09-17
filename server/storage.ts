@@ -1,15 +1,15 @@
-// File storage via a real S3 (or S3-compatible) bucket. Uploads go straight to
-// S3 from the server; downloads are served through /storage/{key}, which
-// redirects to a short-lived presigned GET URL so the bucket itself stays private.
+// File storage via a real S3 (or S3-compatible) bucket with automatic database fallback.
+// When S3 is unconfigured or unavailable, files are persisted directly into the database.
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ENV } from "./_core/env";
+import * as db from "./db";
 
 let _client: S3Client | null = null;
 
-function getClient(): S3Client {
+function getClient(): S3Client | null {
   if (!ENV.s3BucketName) {
-    throw new Error("Storage config missing: set S3_BUCKET_NAME (and AWS credentials/region) to enable file storage.");
+    return null;
   }
   if (!_client) {
     _client = new S3Client(ENV.s3Region ? { region: ENV.s3Region } : {});
@@ -33,18 +33,28 @@ export async function storagePut(
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
 ): Promise<{ key: string; url: string }> {
-  const client = getClient();
   const key = appendHashSuffix(normalizeKey(relKey));
+  const buffer = typeof data === "string" ? Buffer.from(data, "utf-8") : Buffer.from(data);
 
-  await client.send(
-    new PutObjectCommand({
-      Bucket: ENV.s3BucketName,
-      Key: key,
-      Body: typeof data === "string" ? Buffer.from(data, "utf-8") : data,
-      ContentType: contentType,
-    }),
-  );
+  const client = getClient();
+  if (client && ENV.s3BucketName) {
+    try {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: ENV.s3BucketName,
+          Key: key,
+          Body: buffer,
+          ContentType: contentType,
+        }),
+      );
+      return { key, url: `/storage/${key}` };
+    } catch (err) {
+      console.warn("[Storage] S3 PutObject failed, falling back to database storage:", err);
+    }
+  }
 
+  // Fallback to database storage
+  await db.saveStoredFile(key, buffer.toString("base64"), contentType, buffer.length);
   return { key, url: `/storage/${key}` };
 }
 
@@ -56,5 +66,9 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const client = getClient();
   const key = normalizeKey(relKey);
+  if (!client || !ENV.s3BucketName) {
+    return `/storage/${key}`;
+  }
   return getSignedUrl(client, new GetObjectCommand({ Bucket: ENV.s3BucketName, Key: key }), { expiresIn: 300 });
 }
+

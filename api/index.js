@@ -91,13 +91,30 @@ function nurseFullName(n) {
   if (n.suffix) parts.push(n.suffix);
   return parts.join(" ");
 }
-function validateMime(mime, kind) {
-  if (!mime) return { ok: false, error: "File type could not be detected." };
+function validateMime(mime, kind, fileName) {
+  let effectiveMime = (mime || "").toLowerCase().trim();
+  if (!effectiveMime || effectiveMime === "application/octet-stream") {
+    if (fileName) {
+      const ext = fileName.split(".").pop()?.toLowerCase();
+      if (ext === "jpg" || ext === "jpeg") effectiveMime = "image/jpeg";
+      else if (ext === "png") effectiveMime = "image/png";
+      else if (ext === "webp") effectiveMime = "image/webp";
+      else if (ext === "gif") effectiveMime = "image/gif";
+      else if (ext === "heic" || ext === "heif") effectiveMime = "image/heic";
+      else if (ext === "pdf") effectiveMime = "application/pdf";
+      else if (ext === "csv") effectiveMime = "text/csv";
+      else if (ext === "xlsx" || ext === "xls")
+        effectiveMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      else if (ext === "docx")
+        effectiveMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    }
+  }
+  if (!effectiveMime) return { ok: false, error: "File type could not be detected." };
   const allowed = kind === "photo" ? ALLOWED_PHOTO_MIMES : kind === "document" ? ALLOWED_DOCUMENT_MIMES : ALLOWED_SMART_IMPORT_MIMES;
-  if (!allowed.includes(mime)) {
+  if (!allowed.includes(effectiveMime)) {
     return {
       ok: false,
-      error: kind === "smartImport" ? "File type not supported. Use JPG, PNG, WEBP, PDF, TXT, CSV, XLS, XLSX or DOCX." : "File type not supported. Use JPG, PNG" + (kind === "document" ? " or PDF" : "") + "."
+      error: kind === "smartImport" ? "File type not supported. Use JPG, PNG, WEBP, PDF, TXT, CSV, XLS, XLSX or DOCX." : "File type not supported. Use JPG, PNG, WEBP" + (kind === "document" ? " or PDF" : "") + "."
     };
   }
   return { ok: true };
@@ -140,8 +157,16 @@ var init_nursetrack = __esm({
     RENEWAL_STATUSES = ["Not Started", "Renewal In Progress", "Submitted", "Renewed"];
     VERIFICATION_STATUSES = ["Unverified", "Pending Verification", "Verified"];
     TRAINING_STATUSES = ["Scheduled", "Completed", "Expired", "Cancelled"];
-    ALLOWED_PHOTO_MIMES = ["image/jpeg", "image/png", "image/jpg"];
-    ALLOWED_DOCUMENT_MIMES = ["image/jpeg", "image/png", "image/jpg", "application/pdf"];
+    ALLOWED_PHOTO_MIMES = [
+      "image/jpeg",
+      "image/png",
+      "image/jpg",
+      "image/webp",
+      "image/gif",
+      "image/heic",
+      "image/heif"
+    ];
+    ALLOWED_DOCUMENT_MIMES = ["image/jpeg", "image/png", "image/jpg", "image/webp", "application/pdf"];
     ALLOWED_SMART_IMPORT_MIMES = [
       "image/jpeg",
       "image/png",
@@ -174,7 +199,7 @@ import {
   uniqueIndex,
   varchar
 } from "drizzle-orm/pg-core";
-var nursetrack, pgTable, touchedOnUpdate, date, users, areas, nurses, areaAssignments, credentialTypes, nurseCredentials, licenseReminders, trainingCatalog, trainingEvents, areaTrainingRequirements, nurseTrainings, customCalendarEvents, notifications, activityLog, appSettings, emailLogs, staffMessages, staffMessageRecipients, staffMessageAcknowledgments, trainingOutbox, trainingActivity;
+var nursetrack, pgTable, touchedOnUpdate, date, users, areas, nurses, areaAssignments, credentialTypes, nurseCredentials, licenseReminders, trainingCatalog, trainingEvents, areaTrainingRequirements, nurseTrainings, customCalendarEvents, notifications, activityLog, appSettings, emailLogs, staffMessages, staffMessageRecipients, staffMessageAcknowledgments, trainingOutbox, trainingActivity, storedFiles;
 var init_schema = __esm({
   "drizzle/schema.ts"() {
     "use strict";
@@ -575,6 +600,18 @@ var init_schema = __esm({
       },
       (t2) => [index("idx_tact_nurse").on(t2.nurseId), index("idx_tact_assignment").on(t2.assignmentId)]
     );
+    storedFiles = pgTable(
+      "storedFiles",
+      {
+        id: serial("id").primaryKey(),
+        key: varchar("key", { length: 512 }).notNull().unique(),
+        data: text("data").notNull(),
+        mimeType: varchar("mimeType", { length: 128 }).notNull(),
+        fileSize: integer("fileSize").notNull(),
+        createdAt: timestamp("createdAt").defaultNow().notNull()
+      },
+      (t2) => [uniqueIndex("uniq_stored_file_key").on(t2.key)]
+    );
   }
 });
 
@@ -897,6 +934,15 @@ function initSchemaAndSeed(db) {
       readAt TEXT,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS storedFiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      data TEXT NOT NULL,
+      mimeType TEXT NOT NULL,
+      fileSize INTEGER NOT NULL,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
   `);
   const cols = db.prepare("PRAGMA table_info(nurses)").all();
   const colSet = new Set(cols.map((c) => c.name));
@@ -1126,6 +1172,7 @@ __export(db_exports, {
   getNurseLicenseStatus: () => getNurseLicenseStatus,
   getNurseTrainingById: () => getNurseTrainingById,
   getSetting: () => getSetting,
+  getStoredFile: () => getStoredFile,
   getUserByOpenId: () => getUserByOpenId,
   isEmailDuplicate: () => isEmailDuplicate,
   isNurseClaimable: () => isNurseClaimable,
@@ -1148,6 +1195,7 @@ __export(db_exports, {
   recordEmailLog: () => recordEmailLog,
   releaseReminderLock: () => releaseReminderLock,
   saveClaimEmail: () => saveClaimEmail,
+  saveStoredFile: () => saveStoredFile,
   searchNurses: () => searchNurses,
   setAreaTrainingRequirement: () => setAreaTrainingRequirement,
   setSetting: () => setSetting,
@@ -2863,7 +2911,130 @@ async function releaseReminderLock() {
   const sqlite = getSqliteDb();
   sqlite.prepare("DELETE FROM appSettings WHERE key = ?").run("reminder_lock");
 }
-var _db, _batchPg, INACTIVE_STATUS_SQL_LIST, normalizeForMatch;
+async function ensureStoredFilesTable() {
+  if (_storedFilesTableEnsured) return;
+  const pg = getBatchClient();
+  if (pg) {
+    try {
+      await pg.unsafe(`
+        CREATE TABLE IF NOT EXISTS nursetrack."storedFiles" (
+          id SERIAL PRIMARY KEY,
+          key VARCHAR(512) NOT NULL UNIQUE,
+          data TEXT NOT NULL,
+          "mimeType" VARCHAR(128) NOT NULL,
+          "fileSize" INTEGER NOT NULL,
+          "createdAt" TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+      `);
+      _storedFilesTableEnsured = true;
+      return;
+    } catch (e) {
+      console.warn("[Database] Could not create nursetrack.storedFiles table:", e);
+    }
+  }
+  const sqlite = getSqliteDb();
+  if (sqlite) {
+    try {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS storedFiles (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          key TEXT NOT NULL UNIQUE,
+          data TEXT NOT NULL,
+          mimeType TEXT NOT NULL,
+          fileSize INTEGER NOT NULL,
+          createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+        );
+      `);
+      _storedFilesTableEnsured = true;
+    } catch (e) {
+      console.warn("[Database] Could not create sqlite storedFiles table:", e);
+    }
+  }
+}
+async function saveStoredFile(key, base64Data, mimeType, fileSize) {
+  await ensureStoredFilesTable();
+  const pg = getBatchClient();
+  if (pg) {
+    await pg.unsafe(
+      `
+      INSERT INTO nursetrack."storedFiles" (key, data, "mimeType", "fileSize", "createdAt")
+      VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (key) DO UPDATE
+      SET data = EXCLUDED.data,
+          "mimeType" = EXCLUDED."mimeType",
+          "fileSize" = EXCLUDED."fileSize",
+          "createdAt" = NOW()
+    `,
+      [key, base64Data, mimeType, fileSize]
+    );
+    return;
+  }
+  const d = await getDb();
+  if (d) {
+    try {
+      await d.insert(storedFiles).values({
+        key,
+        data: base64Data,
+        mimeType,
+        fileSize
+      }).onConflictDoUpdate({
+        target: storedFiles.key,
+        set: {
+          data: base64Data,
+          mimeType,
+          fileSize,
+          createdAt: /* @__PURE__ */ new Date()
+        }
+      });
+      return;
+    } catch {
+    }
+  }
+  const sqlite = getSqliteDb();
+  sqlite.prepare(
+    `INSERT INTO storedFiles (key, data, mimeType, fileSize, createdAt)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET data = excluded.data, mimeType = excluded.mimeType, fileSize = excluded.fileSize, createdAt = CURRENT_TIMESTAMP`
+  ).run(key, base64Data, mimeType, fileSize);
+}
+async function getStoredFile(key) {
+  await ensureStoredFilesTable();
+  const pg = getBatchClient();
+  if (pg) {
+    try {
+      const rows = await pg.unsafe(
+        `SELECT key, data, "mimeType", "fileSize" FROM nursetrack."storedFiles" WHERE key = $1 LIMIT 1`,
+        [key]
+      );
+      if (rows && rows.length > 0) return rows[0];
+    } catch (err) {
+      console.warn("[Database] getStoredFile pg query failed:", err);
+    }
+  }
+  const d = await getDb();
+  if (d) {
+    try {
+      const rows = await d.select().from(storedFiles).where(eq(storedFiles.key, key)).limit(1);
+      if (rows && rows.length > 0) {
+        return {
+          key: rows[0].key,
+          data: rows[0].data,
+          mimeType: rows[0].mimeType,
+          fileSize: rows[0].fileSize
+        };
+      }
+    } catch {
+    }
+  }
+  try {
+    const sqlite = getSqliteDb();
+    const row = sqlite.prepare(`SELECT key, data, mimeType, fileSize FROM storedFiles WHERE key = ? LIMIT 1`).get(key);
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+var _db, _batchPg, INACTIVE_STATUS_SQL_LIST, normalizeForMatch, _storedFilesTableEnsured;
 var init_db = __esm({
   "server/db.ts"() {
     "use strict";
@@ -2875,6 +3046,7 @@ var init_db = __esm({
     _batchPg = null;
     INACTIVE_STATUS_SQL_LIST = INACTIVE_EMPLOYMENT_STATUSES.map((s) => `'${s}'`).join(", ");
     normalizeForMatch = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    _storedFilesTableEnsured = false;
   }
 });
 
@@ -4635,10 +4807,11 @@ function registerOAuthRoutes(app) {
 // server/storage.ts
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+init_db();
 var _client = null;
 function getClient() {
   if (!ENV.s3BucketName) {
-    throw new Error("Storage config missing: set S3_BUCKET_NAME (and AWS credentials/region) to enable file storage.");
+    return null;
   }
   if (!_client) {
     _client = new S3Client(ENV.s3Region ? { region: ENV.s3Region } : {});
@@ -4655,25 +4828,38 @@ function appendHashSuffix(relKey) {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 async function storagePut(relKey, data, contentType = "application/octet-stream") {
-  const client = getClient();
   const key = appendHashSuffix(normalizeKey(relKey));
-  await client.send(
-    new PutObjectCommand({
-      Bucket: ENV.s3BucketName,
-      Key: key,
-      Body: typeof data === "string" ? Buffer.from(data, "utf-8") : data,
-      ContentType: contentType
-    })
-  );
+  const buffer = typeof data === "string" ? Buffer.from(data, "utf-8") : Buffer.from(data);
+  const client = getClient();
+  if (client && ENV.s3BucketName) {
+    try {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: ENV.s3BucketName,
+          Key: key,
+          Body: buffer,
+          ContentType: contentType
+        })
+      );
+      return { key, url: `/storage/${key}` };
+    } catch (err) {
+      console.warn("[Storage] S3 PutObject failed, falling back to database storage:", err);
+    }
+  }
+  await saveStoredFile(key, buffer.toString("base64"), contentType, buffer.length);
   return { key, url: `/storage/${key}` };
 }
 async function storageGetSignedUrl(relKey) {
   const client = getClient();
   const key = normalizeKey(relKey);
+  if (!client || !ENV.s3BucketName) {
+    return `/storage/${key}`;
+  }
   return getSignedUrl(client, new GetObjectCommand({ Bucket: ENV.s3BucketName, Key: key }), { expiresIn: 300 });
 }
 
 // server/_core/storageProxy.ts
+init_db();
 function registerStorageProxy(app) {
   app.get("/storage/*", async (req, res) => {
     const key = req.params[0];
@@ -4682,9 +4868,21 @@ function registerStorageProxy(app) {
       return;
     }
     try {
-      const url = await storageGetSignedUrl(key);
-      res.set("Cache-Control", "no-store");
-      res.redirect(307, url);
+      const stored = await getStoredFile(key);
+      if (stored) {
+        res.setHeader("Content-Type", stored.mimeType || "application/octet-stream");
+        res.setHeader("Content-Length", stored.fileSize || Buffer.byteLength(stored.data, "base64"));
+        res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+        return res.send(Buffer.from(stored.data, "base64"));
+      }
+      if (ENV.s3BucketName) {
+        const url = await storageGetSignedUrl(key);
+        if (url !== `/storage/${key}`) {
+          res.set("Cache-Control", "no-store");
+          return res.redirect(307, url);
+        }
+      }
+      res.status(404).send("File not found");
     } catch (err) {
       console.error("[StorageProxy] failed:", err);
       res.status(502).send("Storage proxy error");
@@ -5168,8 +5366,8 @@ var nursesRouter = router({
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError2({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
     const key = storageKey("profile-photos", input.nurseId, sanitizeFilename(input.fileName));
-    const { url } = await storagePut(key, buffer, input.mimeType);
-    await updateNurse(input.nurseId, { profilePhotoKey: key });
+    const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+    await updateNurse(input.nurseId, { profilePhotoKey: storedKey });
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: input.nurseId,
@@ -5494,8 +5692,8 @@ var credentialsRouter = router({
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError3({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
     const key = storageKey("license-documents", cred.nurseId, sanitizeFilename(input.fileName));
-    const { url } = await storagePut(key, buffer, input.mimeType);
-    await updateCredential(input.credentialId, { documentKey: key });
+    const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+    await updateCredential(input.credentialId, { documentKey: storedKey });
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: cred.nurseId,
@@ -6001,8 +6199,8 @@ var trainingsRouter = router({
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError4({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
     const key = storageKey("certificates", record.nurseId, sanitizeFilename(input.fileName));
-    const { url } = await storagePut(key, buffer, input.mimeType);
-    await updateNurseTraining(input.recordId, { certificateKey: key });
+    const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+    await updateNurseTraining(input.recordId, { certificateKey: storedKey });
     await logActivity({
       supervisorId: ctx.user.id,
       nurseId: record.nurseId,
@@ -9187,8 +9385,8 @@ var staffAccountRouter = router({
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
     const key = storageKey("profile-photos", nurse.id, sanitizeFilename(input.fileName));
-    const { url } = await storagePut(key, buffer, input.mimeType);
-    await updateNurse(nurse.id, { profilePhotoKey: key });
+    const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+    await updateNurse(nurse.id, { profilePhotoKey: storedKey });
     await logActivity({
       supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
@@ -9220,8 +9418,8 @@ var staffAccountRouter = router({
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
     const key = storageKey("license-documents", nurse.id, sanitizeFilename(input.fileName));
-    const { url } = await storagePut(key, buffer, input.mimeType);
-    await updateCredential(input.credentialId, { documentKey: key });
+    const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+    await updateCredential(input.credentialId, { documentKey: storedKey });
     await logActivity({
       supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
@@ -9284,8 +9482,8 @@ var staffAccountRouter = router({
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
     const key = storageKey("certificates", nurse.id, sanitizeFilename(input.fileName));
-    const { url } = await storagePut(key, buffer, input.mimeType);
-    await updateNurseTraining(input.recordId, { certificateKey: key });
+    const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+    await updateNurseTraining(input.recordId, { certificateKey: storedKey });
     await logActivity({
       supervisorId: ctx.user?.id ?? null,
       nurseId: nurse.id,
@@ -9395,9 +9593,9 @@ var staffAccountRouter = router({
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
     const key = storageKey("certificates", ctx.nurseId, sanitizeFilename(input.fileName));
-    const { url } = await storagePut(key, buffer, input.mimeType);
+    const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
     await updateNurseTraining(input.assignmentId, {
-      certificateKey: key,
+      certificateKey: storedKey,
       evidenceStatus: "Submitted",
       evidenceSubmittedAt: /* @__PURE__ */ new Date()
     });

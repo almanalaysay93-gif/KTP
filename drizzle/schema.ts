@@ -510,3 +510,18 @@ export const trainingActivity = pgTable(
   (t) => [index("idx_tact_nurse").on(t.nurseId), index("idx_tact_assignment").on(t.assignmentId)],
 );
 export type TrainingActivityItem = typeof trainingActivity.$inferSelect;
+
+/** Database storage fallback for uploaded photos and documents when S3 is unconfigured. */
+export const storedFiles = pgTable(
+  "storedFiles",
+  {
+    id: serial("id").primaryKey(),
+    key: varchar("key", { length: 512 }).notNull().unique(),
+    data: text("data").notNull(),
+    mimeType: varchar("mimeType", { length: 128 }).notNull(),
+    fileSize: integer("fileSize").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uniq_stored_file_key").on(t.key)],
+);
+export type StoredFile = typeof storedFiles.$inferSelect;

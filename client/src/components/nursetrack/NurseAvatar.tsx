@@ -28,7 +28,16 @@ export function NurseAvatar({
   return (
     <Avatar className={cn(sizeClasses[size], "border bg-muted", className)}>
       {nurse.profilePhotoKey ? (
-        <AvatarImage src={`/storage/${nurse.profilePhotoKey}`} alt={`${nurse.firstName} ${nurse.lastName}`} />
+        <AvatarImage
+          src={
+            nurse.profilePhotoKey.startsWith("data:") ||
+            nurse.profilePhotoKey.startsWith("http://") ||
+            nurse.profilePhotoKey.startsWith("https://")
+              ? nurse.profilePhotoKey
+              : `/storage/${nurse.profilePhotoKey}`
+          }
+          alt={`${nurse.firstName} ${nurse.lastName}`}
+        />
       ) : null}
       <AvatarFallback className="font-medium">{initials.toUpperCase()}</AvatarFallback>
     </Avatar>

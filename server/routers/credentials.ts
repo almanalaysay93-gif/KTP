@@ -178,8 +178,8 @@ export const credentialsRouter = router({
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
       const key = storageKey("license-documents", cred.nurseId, sanitizeFilename(input.fileName));
-      const { url } = await storagePut(key, buffer, input.mimeType);
-      await db.updateCredential(input.credentialId, { documentKey: key });
+      const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+      await db.updateCredential(input.credentialId, { documentKey: storedKey });
       await db.logActivity({
         supervisorId: ctx.user.id,
         nurseId: cred.nurseId,

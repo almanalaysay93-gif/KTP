@@ -228,8 +228,16 @@ export const TRAINING_CATEGORIES = [
   "Other",
 ] as const;
 
-export const ALLOWED_PHOTO_MIMES = ["image/jpeg", "image/png", "image/jpg"];
-export const ALLOWED_DOCUMENT_MIMES = ["image/jpeg", "image/png", "image/jpg", "application/pdf"];
+export const ALLOWED_PHOTO_MIMES = [
+  "image/jpeg",
+  "image/png",
+  "image/jpg",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+];
+export const ALLOWED_DOCUMENT_MIMES = ["image/jpeg", "image/png", "image/jpg", "image/webp", "application/pdf"];
 export const ALLOWED_SMART_IMPORT_MIMES = [
   "image/jpeg",
   "image/png",
@@ -245,17 +253,43 @@ export const ALLOWED_SMART_IMPORT_MIMES = [
 ];
 export const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 
-/** Basic MIME validation for uploads. */
-export function validateMime(mime: string | undefined, kind: "photo" | "document" | "smartImport"): { ok: boolean; error?: string } {
-  if (!mime) return { ok: false, error: "File type could not be detected." };
-  const allowed = kind === "photo" ? ALLOWED_PHOTO_MIMES : kind === "document" ? ALLOWED_DOCUMENT_MIMES : ALLOWED_SMART_IMPORT_MIMES;
-  if (!allowed.includes(mime)) {
+/** Basic MIME validation for uploads with extension-based inference fallback. */
+export function validateMime(
+  mime: string | undefined,
+  kind: "photo" | "document" | "smartImport",
+  fileName?: string,
+): { ok: boolean; error?: string } {
+  let effectiveMime = (mime || "").toLowerCase().trim();
+  if (!effectiveMime || effectiveMime === "application/octet-stream") {
+    if (fileName) {
+      const ext = fileName.split(".").pop()?.toLowerCase();
+      if (ext === "jpg" || ext === "jpeg") effectiveMime = "image/jpeg";
+      else if (ext === "png") effectiveMime = "image/png";
+      else if (ext === "webp") effectiveMime = "image/webp";
+      else if (ext === "gif") effectiveMime = "image/gif";
+      else if (ext === "heic" || ext === "heif") effectiveMime = "image/heic";
+      else if (ext === "pdf") effectiveMime = "application/pdf";
+      else if (ext === "csv") effectiveMime = "text/csv";
+      else if (ext === "xlsx" || ext === "xls")
+        effectiveMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      else if (ext === "docx")
+        effectiveMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    }
+  }
+  if (!effectiveMime) return { ok: false, error: "File type could not be detected." };
+  const allowed =
+    kind === "photo"
+      ? ALLOWED_PHOTO_MIMES
+      : kind === "document"
+        ? ALLOWED_DOCUMENT_MIMES
+        : ALLOWED_SMART_IMPORT_MIMES;
+  if (!allowed.includes(effectiveMime)) {
     return {
       ok: false,
       error:
         kind === "smartImport"
           ? "File type not supported. Use JPG, PNG, WEBP, PDF, TXT, CSV, XLS, XLSX or DOCX."
-          : "File type not supported. Use JPG, PNG" + (kind === "document" ? " or PDF" : "") + ".",
+          : "File type not supported. Use JPG, PNG, WEBP" + (kind === "document" ? " or PDF" : "") + ".",
     };
   }
   return { ok: true };

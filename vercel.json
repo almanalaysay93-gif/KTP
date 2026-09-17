@@ -20,7 +20,11 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/((?!api/|images/|manus-storage/|assets/).*)",
+      "source": "/storage/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/((?!api/|storage/|images/|manus-storage/|assets/).*)",
       "destination": "/index.html"
     }
   ]

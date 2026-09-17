@@ -21,6 +21,7 @@ import {
   nurseCredentials,
   nurseTrainings,
   nurses,
+  storedFiles,
   trainingCatalog,
   trainingEvents,
   users,
@@ -1987,3 +1988,151 @@ export async function releaseReminderLock(): Promise<void> {
   const sqlite = getSqliteDb();
   sqlite.prepare("DELETE FROM appSettings WHERE key = ?").run("reminder_lock");
 }
+
+let _storedFilesTableEnsured = false;
+async function ensureStoredFilesTable(): Promise<void> {
+  if (_storedFilesTableEnsured) return;
+  const pg = getBatchClient();
+  if (pg) {
+    try {
+      await pg.unsafe(`
+        CREATE TABLE IF NOT EXISTS nursetrack."storedFiles" (
+          id SERIAL PRIMARY KEY,
+          key VARCHAR(512) NOT NULL UNIQUE,
+          data TEXT NOT NULL,
+          "mimeType" VARCHAR(128) NOT NULL,
+          "fileSize" INTEGER NOT NULL,
+          "createdAt" TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+      `);
+      _storedFilesTableEnsured = true;
+      return;
+    } catch (e) {
+      console.warn("[Database] Could not create nursetrack.storedFiles table:", e);
+    }
+  }
+  const sqlite = getSqliteDb();
+  if (sqlite) {
+    try {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS storedFiles (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          key TEXT NOT NULL UNIQUE,
+          data TEXT NOT NULL,
+          mimeType TEXT NOT NULL,
+          fileSize INTEGER NOT NULL,
+          createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+        );
+      `);
+      _storedFilesTableEnsured = true;
+    } catch (e) {
+      console.warn("[Database] Could not create sqlite storedFiles table:", e);
+    }
+  }
+}
+
+export async function saveStoredFile(
+  key: string,
+  base64Data: string,
+  mimeType: string,
+  fileSize: number,
+): Promise<void> {
+  await ensureStoredFilesTable();
+  const pg = getBatchClient();
+  if (pg) {
+    await pg.unsafe(
+      `
+      INSERT INTO nursetrack."storedFiles" (key, data, "mimeType", "fileSize", "createdAt")
+      VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (key) DO UPDATE
+      SET data = EXCLUDED.data,
+          "mimeType" = EXCLUDED."mimeType",
+          "fileSize" = EXCLUDED."fileSize",
+          "createdAt" = NOW()
+    `,
+      [key, base64Data, mimeType, fileSize],
+    );
+    return;
+  }
+
+  const d = await getDb();
+  if (d) {
+    try {
+      await d
+        .insert(storedFiles)
+        .values({
+          key,
+          data: base64Data,
+          mimeType,
+          fileSize,
+        })
+        .onConflictDoUpdate({
+          target: storedFiles.key,
+          set: {
+            data: base64Data,
+            mimeType,
+            fileSize,
+            createdAt: new Date(),
+          },
+        });
+      return;
+    } catch {
+      // Fallback to SQLite
+    }
+  }
+
+  const sqlite = getSqliteDb();
+  sqlite
+    .prepare(
+      `INSERT INTO storedFiles (key, data, mimeType, fileSize, createdAt)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET data = excluded.data, mimeType = excluded.mimeType, fileSize = excluded.fileSize, createdAt = CURRENT_TIMESTAMP`,
+    )
+    .run(key, base64Data, mimeType, fileSize);
+}
+
+export async function getStoredFile(
+  key: string,
+): Promise<{ key: string; data: string; mimeType: string; fileSize: number } | null> {
+  await ensureStoredFilesTable();
+  const pg = getBatchClient();
+  if (pg) {
+    try {
+      const rows = await pg.unsafe<{ key: string; data: string; mimeType: string; fileSize: number }[]>(
+        `SELECT key, data, "mimeType", "fileSize" FROM nursetrack."storedFiles" WHERE key = $1 LIMIT 1`,
+        [key],
+      );
+      if (rows && rows.length > 0) return rows[0];
+    } catch (err) {
+      console.warn("[Database] getStoredFile pg query failed:", err);
+    }
+  }
+
+  const d = await getDb();
+  if (d) {
+    try {
+      const rows = await d.select().from(storedFiles).where(eq(storedFiles.key, key)).limit(1);
+      if (rows && rows.length > 0) {
+        return {
+          key: rows[0].key,
+          data: rows[0].data,
+          mimeType: rows[0].mimeType,
+          fileSize: rows[0].fileSize,
+        };
+      }
+    } catch {
+      // Fallback to SQLite
+    }
+  }
+
+  try {
+    const sqlite = getSqliteDb();
+    const row = sqlite
+      .prepare(`SELECT key, data, mimeType, fileSize FROM storedFiles WHERE key = ? LIMIT 1`)
+      .get(key) as { key: string; data: string; mimeType: string; fileSize: number } | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+

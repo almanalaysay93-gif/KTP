@@ -548,8 +548,8 @@ export const trainingsRouter = router({
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
       const key = storageKey("certificates", record.nurseId, sanitizeFilename(input.fileName));
-      const { url } = await storagePut(key, buffer, input.mimeType);
-      await db.updateNurseTraining(input.recordId, { certificateKey: key });
+      const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
+      await db.updateNurseTraining(input.recordId, { certificateKey: storedKey });
       await db.logActivity({
         supervisorId: ctx.user.id,
         nurseId: record.nurseId,

@@ -306,6 +306,15 @@ function initSchemaAndSeed(db: Database.Database) {
       readAt TEXT,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS storedFiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      data TEXT NOT NULL,
+      mimeType TEXT NOT NULL,
+      fileSize INTEGER NOT NULL,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
   `);
 
   // Migrate existing SQLite schema if missing newly added columns
