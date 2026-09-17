@@ -44,3 +44,6 @@ pnpm test:inquiry
   Returns list of all 8 core approved topics.
 - `POST /api/inquiry` (Protected if secret set):
   Accepts `{ query?: string, topic_id?: string, context?: object }` and returns verified answer payload without any model or LLM calls.
+- `POST /api/insights/report` (Protected if secret set):
+  Accepts `{ digest: object }` from the Node server and returns the rule-based Insights report sections S1 to S5 (`inquiry/insights_report.py`).
+  It makes no model call, and it returns HTTP 400 for a digest with the wrong shape.

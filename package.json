@@ -11,7 +11,7 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:inquiry": "python inquiry/test_inquiry.py",
+    "test:inquiry": "python inquiry/test_inquiry.py && python inquiry/test_insights_report.py",
     "inquiry:start": "python inquiry/chat_service.py",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "seed:excel": "tsx server/seedExcel.ts",

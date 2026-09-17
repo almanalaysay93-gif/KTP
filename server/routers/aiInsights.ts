@@ -1,15 +1,20 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
-import { generateInsightsReport } from "../_core/aiInsights";
+import { generateInsightsReport, InsightsServiceError } from "../_core/aiInsights";
+import { getManilaDateKey } from "../scheduled";
 
 export const aiInsightsRouter = router({
   generateReport: adminProcedure.mutation(async () => {
     try {
-      const report = await generateInsightsReport();
-      return { report, generatedAt: new Date().toISOString() };
+      const report = await generateInsightsReport(getManilaDateKey());
+      return { ...report, generatedAt: new Date().toISOString() };
     } catch (err) {
-      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "Failed to generate report." });
+      if (err instanceof InsightsServiceError) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
+      }
+      console.error("[Insights] report failed:", err);
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The insights report could not be created. Try again later." });
     }
   }),
 

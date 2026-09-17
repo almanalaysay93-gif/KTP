@@ -79,7 +79,7 @@ export const NAV_ITEMS: NavItem[] = [
   { icon: CalendarDays, label: "Calendar", path: "/calendar" },
   { icon: FileBarChart, label: "Reports", path: "/reports" },
   { icon: Sparkles, label: "Smart Import", path: "/smart-import" },
-  { icon: Bot, label: "AI Insights", path: "/ai-insights" },
+  { icon: Bot, label: "Insights", path: "/ai-insights" },
   { icon: Settings, label: "Settings", path: "/settings" },
   {
     icon: BedDouble,

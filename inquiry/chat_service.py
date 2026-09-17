@@ -19,6 +19,7 @@ if BASE_DIR not in sys.path:
 
 from match_inquiry import InquiryMatcher, load_faq
 from responses import format_inquiry_response, build_topic_pill
+from insights_report import DigestError, build_report
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -99,9 +100,9 @@ class InquiryRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"error": "Not Found"}).encode("utf-8"))
 
     def do_POST(self):
-        """Handle POST inquiry chat requests."""
+        """Handle POST inquiry chat and insights report requests."""
         path = self.path.split("?")[0]
-        if path not in ("/api/inquiry", "/chat", "/api/inquiry/chat"):
+        if path not in ("/api/inquiry", "/chat", "/api/inquiry/chat", "/api/insights/report"):
             self._set_cors_headers(404)
             self.wfile.write(json.dumps({"error": f"Endpoint {path} not found"}).encode("utf-8"))
             return
@@ -112,7 +113,9 @@ class InquiryRequestHandler(BaseHTTPRequestHandler):
             return
 
         content_length = int(self.headers.get("Content-Length", 0))
-        if content_length > 100000:
+        # A roster digest is larger than a chat message.
+        max_length = 2_000_000 if path == "/api/insights/report" else 100000
+        if content_length > max_length:
             self._set_cors_headers(413)
             self.wfile.write(json.dumps({"error": "Payload too large"}).encode("utf-8"))
             return
@@ -123,6 +126,17 @@ class InquiryRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._set_cors_headers(400)
             self.wfile.write(json.dumps({"error": f"Invalid JSON body: {str(e)}"}).encode("utf-8"))
+            return
+
+        if path == "/api/insights/report":
+            try:
+                report = build_report(body.get("digest"))
+            except DigestError as e:
+                self._set_cors_headers(400)
+                self.wfile.write(json.dumps({"error": f"Invalid digest: {e}"}).encode("utf-8"))
+                return
+            self._set_cors_headers(200)
+            self.wfile.write(json.dumps(report, ensure_ascii=False).encode("utf-8"))
             return
 
         # Extract fields
@@ -165,7 +179,7 @@ def run_server(host: str = "0.0.0.0", port: int = 5005, faq_path: Optional[str] 
     server_address = (host, port)
     httpd = ThreadedHTTPServer(server_address, InquiryRequestHandler)
     print(f"[InquiryService] Running on http://{host}:{port}/")
-    print(f"[InquiryService] Endpoints: POST /api/inquiry, GET /health, GET /api/inquiry/topics")
+    print(f"[InquiryService] Endpoints: POST /api/inquiry, POST /api/insights/report, GET /health, GET /api/inquiry/topics")
     if os.getenv("INQUIRY_SERVICE_SECRET"):
         print("[InquiryService] Service authentication enabled (INQUIRY_SERVICE_SECRET is set).")
     try:

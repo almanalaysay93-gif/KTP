@@ -6,6 +6,10 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 15
+    },
+    "api/py.py": {
+      "maxDuration": 10,
+      "excludeFiles": "{node_modules,client,dist,server,shared,drizzle,docs,scripts,data_import,graphify-out,patches,attached_assets}/**"
     }
   },
   "crons": [
@@ -15,6 +19,10 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/api/py/(.*)",
+      "destination": "/api/py"
+    },
     {
       "source": "/api/(.*)",
       "destination": "/api/index.js"
