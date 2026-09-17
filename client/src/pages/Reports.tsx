@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryErrorState } from "@/components/nursetrack/QueryErrorState";
 import { trpc } from "@/lib/trpc";
 import { BarChart3, Download, FileSpreadsheet, Printer } from "lucide-react";
 import { useState } from "react";
@@ -46,12 +47,12 @@ const COLUMNS: Partial<Record<ReportType, { key: string; label: string }[]>> = {
   ],
   areaExposure: [
     { key: "nurse", label: "Nurse" },
-    { key: "employeeId", label: "License Number" },
     { key: "areaName", label: "Area" },
-    { key: "startDate", label: "Start" },
-    { key: "endDate", label: "End" },
-    { key: "assignmentType", label: "Type" },
-    { key: "durationDays", label: "Days" },
+    { key: "totalDays", label: "Total Days" },
+    { key: "assignments", label: "Assignments" },
+    { key: "firstStart", label: "First Start" },
+    { key: "lastEnd", label: "Last End" },
+    { key: "licenseNumber", label: "License Number" },
   ],
   trainingSummary: [
     { key: "nurse", label: "Nurse" },
@@ -68,7 +69,7 @@ const COLUMNS: Partial<Record<ReportType, { key: string; label: string }[]>> = {
   ],
   transferLog: [
     { key: "nurse", label: "Nurse" },
-    { key: "employeeId", label: "License Number" },
+    { key: "licenseNumber", label: "License Number" },
     { key: "areaName", label: "Area" },
     { key: "startDate", label: "Start" },
     { key: "endDate", label: "End" },
@@ -80,7 +81,8 @@ const COLUMNS: Partial<Record<ReportType, { key: string; label: string }[]>> = {
 export default function Reports() {
   const [, navigate] = useLocation();
   const [activeType, setActiveType] = useState<ReportType | null>(null);
-  const { data: catalog, isLoading } = trpc.reports.list.useQuery();
+  const { data: catalog, isLoading, error, refetch, isFetching } = trpc.reports.list.useQuery();
+  const activeLabel = catalog?.find((r) => r.type === activeType)?.label ?? "Report";
 
   return (
     <div className="space-y-4">
@@ -95,38 +97,45 @@ export default function Reports() {
 
       {!activeType ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {isLoading ? (
+          {error && !catalog ? (
+            <div className="col-span-full">
+              <QueryErrorState title="Could not load reports" error={error} onRetry={() => refetch()} retrying={isFetching} />
+            </div>
+          ) : isLoading ? (
             Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-32" />)
           ) : (
             (catalog ?? []).map((r) => (
-              <Card
+              <button
                 key={r.type}
-                className="cursor-pointer hover:border-primary transition-colors"
+                type="button"
+                className="text-left rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => setActiveType(r.type)}
               >
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <BarChart3 className="h-4 w-4" />
-                    {r.label}
-                  </CardTitle>
-                  <CardDescription className="text-xs">{r.description}</CardDescription>
-                </CardHeader>
-                <CardContent className="pt-0 text-xs text-muted-foreground">
-                  {r.rowHint !== null ? `${r.rowHint} rows expected` : "On-demand"}
-                </CardContent>
-              </Card>
+                <Card className="h-full cursor-pointer hover:border-primary transition-colors">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <BarChart3 className="h-4 w-4" />
+                      {r.label}
+                    </CardTitle>
+                    <CardDescription className="text-xs">{r.description}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0 text-xs text-muted-foreground">
+                    {r.rowHint !== null ? `${r.rowHint} rows expected` : "On-demand"}
+                  </CardContent>
+                </Card>
+              </button>
             ))
           )}
         </div>
       ) : (
-        <ReportView type={activeType} onBack={() => setActiveType(null)} />
+        <ReportView key={activeType} type={activeType} title={activeLabel} onBack={() => setActiveType(null)} />
       )}
     </div>
   );
 }
 
-function ReportView({ type, onBack }: { type: ReportType; onBack: () => void }) {
-  const { data: rows, isLoading } = trpc.reports.generate.useQuery({ type });
+function ReportView({ type, title, onBack }: { type: ReportType; title: string; onBack: () => void }) {
+  const { data: rows, isLoading, error, refetch, isFetching } = trpc.reports.generate.useQuery({ type });
   const cols = COLUMNS[type];
   const report = (rows ?? []) as Record<string, unknown>[];
 
@@ -160,6 +169,7 @@ function ReportView({ type, onBack }: { type: ReportType; onBack: () => void }) 
       <CardContent className="pt-5 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={onBack}>← All Reports</Button>
+          <h2 className="text-base font-semibold mr-auto">{title}</h2>
           <Button variant="outline" size="sm" onClick={() => window.print()} disabled={!report.length}>
             <Printer className="h-4 w-4 mr-1" />
             Print
@@ -169,8 +179,13 @@ function ReportView({ type, onBack }: { type: ReportType; onBack: () => void }) 
             Export CSV
           </Button>
         </div>
-        {isLoading ? (
-          <Skeleton className="h-64 w-full" />
+        {error && !rows ? (
+          <QueryErrorState title={`Could not load ${title}`} error={error} onRetry={() => refetch()} retrying={isFetching} />
+        ) : isLoading ? (
+          <div className="space-y-2" aria-busy="true">
+            <p className="text-sm text-muted-foreground">Loading {title}…</p>
+            <Skeleton className="h-64 w-full" />
+          </div>
         ) : !cols || report.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-10">No data for this report yet.</p>
         ) : (
