@@ -10,11 +10,11 @@ import { Upload } from "lucide-react";
 const SMART_IMPORT_ACCEPT =
   "image/jpeg,image/png,image/webp,application/pdf,text/plain,text/csv,.csv,.xlsx,.xls,.docx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-/** Compress image using HTML Canvas to 320px WebP (<15KB) for maximum memory & storage savings. */
-async function compressPhoto(
+/** Compress image using HTML Canvas to reduce resolution and file size. */
+async function compressImage(
   file: File,
-  maxDim = 320,
-  quality = 0.8,
+  maxDim: number,
+  quality: number,
 ): Promise<{ fileBase64: string; fileName: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -128,13 +128,25 @@ export function pickFile(
 
       if (kind === "photo") {
         try {
-          const compressed = await compressPhoto(file);
+          const compressed = await compressImage(file, 320, 0.8);
           resolve(compressed);
         } catch {
           toast.error("Could not process the photo.");
           resolve(null);
         }
         return;
+      }
+
+      // Document photos (e.g. smartphone snapshots of certificates/licenses): downscale to 1600px WebP
+      const isImage = (file.type && file.type.startsWith("image/")) || /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(file.name);
+      if (isImage) {
+        try {
+          const compressed = await compressImage(file, 1600, 0.82);
+          resolve(compressed);
+          return;
+        } catch {
+          // Fall through to raw reader if canvas compression fails
+        }
       }
 
       if (file.size > MAX_FILE_BYTES) {
