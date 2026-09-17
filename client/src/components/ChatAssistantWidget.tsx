@@ -6,23 +6,25 @@ import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import {
+  AlertTriangle,
   ArrowLeft,
-  Building2,
+  ArrowRight,
+  Award,
+  BarChart3,
+  Bot,
+  Calendar,
+  CalendarCheck,
   Clock,
-  HelpCircle,
-  Mail,
-  Receipt,
+  Layers,
   RotateCcw,
   Send,
-  Stethoscope,
   User,
+  Users,
   X,
-  FileCheck2,
-  GraduationCap,
-  Layers,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 
 export interface TopicPill {
   id: string;
@@ -43,25 +45,27 @@ export type ChatEntry = {
   isError?: boolean;
   retryQuery?: string;
   retryTopicId?: string;
+  actionLinks?: Array<{ label: string; url: string }>;
 };
 
-const DEFAULT_TOPICS: Array<{ id: string; name: string; short_desc: string; icon: typeof Stethoscope }> = [
-  { id: "services", name: "Services", short_desc: "Dialysis & Transplant", icon: Stethoscope },
-  { id: "hours", name: "Hours", short_desc: "Clinic & 24/7 Shifts", icon: Clock },
-  { id: "location", name: "Location", short_desc: "SPMC Bajada Campus", icon: Building2 },
-  { id: "requirements", name: "Requirements", short_desc: "Abstracts & Clearances", icon: FileCheck2 },
-  { id: "fees", name: "Fees", short_desc: "PhilHealth 156 Sessions", icon: Receipt },
-  { id: "trainings", name: "Seminars", short_desc: "Live Training Calendar", icon: GraduationCap },
-  { id: "areas", name: "Units", short_desc: "Live Clinical Areas", icon: Layers },
-  { id: "contact", name: "Contact", short_desc: "Trunkline & Locals", icon: Mail },
+const DEFAULT_TOPICS: Array<{ id: string; name: string; short_desc: string; icon: typeof AlertTriangle }> = [
+  { id: "needs_attention", name: "Needs Attention", short_desc: "Expiring & overdue records", icon: AlertTriangle },
+  { id: "find_staff", name: "Find Staff", short_desc: "Nurses & attendants", icon: Users },
+  { id: "license_status", name: "License Status", short_desc: "Expiry & renewal", icon: Award },
+  { id: "training_followup", name: "Training Follow-up", short_desc: "Pending & missing evidence", icon: Clock },
+  { id: "upcoming_seminars", name: "Upcoming Seminars", short_desc: "Seminars & LDI", icon: CalendarCheck },
+  { id: "area_assignments", name: "Area Assignments", short_desc: "Staff by clinical unit", icon: Layers },
+  { id: "calendar", name: "Calendar", short_desc: "Events & scheduled training", icon: Calendar },
+  { id: "reports", name: "Reports", short_desc: "Choose & export reports", icon: BarChart3 },
 ];
 
-/** Floating General Inquiries rule-based assistant mounted once in DashboardLayout. */
+/** Floating NurseTrack Assistant mounted in supervisor DashboardLayout. */
 export function ChatAssistantWidget() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [historyStack, setHistoryStack] = useState<ChatEntry[][]>([]);
   const [question, setQuestion] = useState("");
+  const [, navigate] = useLocation();
   const isMobile = useIsMobile();
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSentRef = useRef<{ q?: string; tId?: string }>({});
@@ -83,6 +87,7 @@ export function ChatAssistantWidget() {
           isError: !data.success,
           retryQuery: lastSentRef.current.q,
           retryTopicId: lastSentRef.current.tId,
+          actionLinks: data.action_links,
         },
       ]);
     },
@@ -92,10 +97,11 @@ export function ChatAssistantWidget() {
         ...prev,
         {
           role: "assistant",
-          content: err.message || "Inquiry service connection failed. Please retry or contact SPMC SKTI at (082) 227-2731.",
+          content: err.message || "Inquiry service connection failed. Please retry or open module directly.",
           isError: true,
           retryQuery: lastSentRef.current.q,
           retryTopicId: lastSentRef.current.tId,
+          actionLinks: [{ label: "Open Dashboard", url: "/dashboard" }],
         },
       ]);
     },
@@ -108,41 +114,48 @@ export function ChatAssistantWidget() {
 
   function sendQuestion(customQuery?: string, topicId?: string) {
     const q = (customQuery ?? question).trim();
-    if ((!q && !topicId) || inquiry.isPending) return;
+    if (!q && !topicId) return;
 
     lastSentRef.current = { q, tId: topicId };
-    const displayLabel = q || topicId || "Inquiry";
+
+    // Record user bubble
+    const userMsg: ChatEntry = {
+      role: "user",
+      content: topicId
+        ? DEFAULT_TOPICS.find((t) => t.id === topicId)?.name || topicId
+        : q,
+      topicId: topicId || null,
+    };
+
     setHistoryStack((prev) => [...prev, messages]);
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "user",
-        content: displayLabel,
-      },
-    ]);
+    setMessages((prev) => [...prev, userMsg]);
+    setQuestion("");
+
+    // Send to tRPC inquiry router
+    const historyPayload = messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
 
     inquiry.mutate({
       question: q,
-      topicId: topicId || undefined,
+      topicId: topicId || null,
+      history: historyPayload.slice(-10),
     });
-
-    if (!customQuery) {
-      setQuestion("");
-    }
   }
 
-  function handleSelectTopic(tId: string, label?: string) {
-    sendQuestion(label, tId);
+  function handleSelectTopic(topicId: string, topicName: string) {
+    sendQuestion("", topicId);
   }
 
   function handleBack() {
     if (historyStack.length === 0) return;
-    const previous = historyStack[historyStack.length - 1];
+    const prevMessages = historyStack[historyStack.length - 1];
     setHistoryStack((prev) => prev.slice(0, -1));
-    setMessages(previous);
+    setMessages(prevMessages);
   }
 
-  function handleStartOver() {
+  function handleReset() {
     setHistoryStack([]);
     setMessages([]);
     setQuestion("");
@@ -150,44 +163,45 @@ export function ChatAssistantWidget() {
 
   return (
     <>
-      <Button
-        type="button"
-        size="icon"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "Close General Inquiries" : "Open General Inquiries"}
-        className={cn(
-          "fixed right-5 z-50 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all",
-          isMobile ? "bottom-20" : "bottom-6"
-        )}
-      >
-        {open ? (
-          <X className="h-6 w-6" />
-        ) : (
-          <img
-            src="/branding/spmc-nephro-cluster.jpg"
-            alt="General Inquiries"
-            className="h-11 w-11 object-contain rounded-full bg-white"
-          />
-        )}
-      </Button>
+      {/* Floating launcher button */}
+      <div className="fixed bottom-5 right-5 z-40">
+        <Button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          size="icon"
+          className="h-12 w-12 rounded-full shadow-lg transition-transform duration-200 active:scale-95 bg-primary text-primary-foreground hover:bg-primary/90"
+          aria-label={open ? "Close NurseTrack Assistant" : "Open NurseTrack Assistant"}
+        >
+          {open ? <X className="h-5 w-5" /> : <Bot className="h-6 w-6" />}
+        </Button>
+      </div>
 
+      {/* Floating Chat Modal Card */}
       {open && (
         <Card
           className={cn(
-            "fixed z-50 flex flex-col shadow-2xl border-2 bg-background",
-            isMobile ? "bottom-36 right-3 left-3 h-[70vh]" : "bottom-24 right-5 w-96 h-[34rem]"
+            "fixed z-50 flex flex-col shadow-2xl border bg-background/95 backdrop-blur-md transition-all duration-200",
+            isMobile
+              ? "inset-x-3 bottom-20 top-16 max-h-[85vh] rounded-xl"
+              : "bottom-20 right-5 w-[420px] h-[580px] rounded-xl"
           )}
         >
           {/* Header */}
-          <CardHeader className="py-2.5 px-3 border-b shrink-0 flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-              <img
-                src="/branding/spmc-nephro-cluster.jpg"
-                alt=""
-                className="h-5 w-5 object-contain rounded-full bg-white border"
-              />
-              <span>General Inquiries</span>
-            </CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between border-b px-4 py-3 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <Bot className="h-4 w-4" />
+              </div>
+              <div className="flex flex-col">
+                <CardTitle className="text-sm font-semibold leading-tight">
+                  NurseTrack Assistant
+                </CardTitle>
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  <span>Supervisor Task Assistant</span>
+                </div>
+              </div>
+            </div>
 
             <div className="flex items-center gap-1">
               {messages.length > 0 && (
@@ -195,26 +209,24 @@ export function ChatAssistantWidget() {
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="icon"
                     onClick={handleBack}
-                    disabled={historyStack.length === 0 || inquiry.isPending}
-                    title="Back to previous topic"
-                    className="h-7 px-2 text-xs flex items-center gap-1"
+                    title="Back to previous question"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    aria-label="Back"
                   >
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Back</span>
+                    <ArrowLeft className="h-4 w-4" />
                   </Button>
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
-                    onClick={handleStartOver}
-                    disabled={inquiry.isPending}
+                    size="icon"
+                    onClick={handleReset}
                     title="Start over"
-                    className="h-7 px-2 text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    aria-label="Start over"
                   >
-                    <RotateCcw className="h-3 w-3" />
-                    <span className="hidden sm:inline">Start over</span>
+                    <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </>
               )}
@@ -254,19 +266,20 @@ export function ChatAssistantWidget() {
           <CardContent className="flex-1 flex flex-col gap-2.5 p-3 min-h-0">
             <div ref={scrollRef} className="flex-1 overflow-y-auto -mx-1 px-1">
               {messages.length === 0 ? (
-                <div className="py-4 px-1 text-center space-y-3">
+                <div className="py-3 px-1 text-center space-y-3">
                   <div className="mx-auto w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                    <HelpCircle className="h-5 w-5" />
+                    <Bot className="h-5 w-5" />
                   </div>
                   <div className="space-y-1">
-                    <h4 className="text-sm font-semibold">SPMC SKTI Inquiries</h4>
+                    <h4 className="text-sm font-semibold">NurseTrack Assistant</h4>
                     <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                      Official information on dialysis shifts, kidney transplant evaluation, clinic hours, location,
-                      and PhilHealth benefits.
+                      Operational summaries, staff lookups, license compliance, seminar schedules,
+                      and export shortcuts for supervisors.
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-2 text-left">
+                  {/* 2-column, 8-button layout */}
+                  <div className="grid grid-cols-2 gap-2 pt-1 text-left">
                     {DEFAULT_TOPICS.map((topic) => {
                       const Icon = topic.icon;
                       return (
@@ -275,11 +288,11 @@ export function ChatAssistantWidget() {
                           type="button"
                           onClick={() => handleSelectTopic(topic.id, topic.name)}
                           disabled={inquiry.isPending}
-                          className="flex flex-col p-2 rounded-lg border bg-card hover:bg-accent/60 transition-colors text-left group"
+                          className="flex flex-col p-2.5 rounded-lg border bg-card hover:bg-accent/60 transition-colors text-left group shadow-xs"
                         >
                           <div className="flex items-center gap-1.5 font-medium text-xs text-foreground group-hover:text-primary">
-                            <Icon className="h-3.5 w-3.5 text-primary" />
-                            {topic.name}
+                            <Icon className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="truncate">{topic.name}</span>
                           </div>
                           <span className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5">
                             {topic.short_desc}
@@ -296,10 +309,10 @@ export function ChatAssistantWidget() {
                       key={i}
                       className={`flex flex-col gap-1.5 ${m.role === "user" ? "items-end" : "items-start"}`}
                     >
-                      <div className="flex gap-2 max-w-[88%]">
+                      <div className="flex gap-2 max-w-[90%]">
                         {m.role === "assistant" && (
                           <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5 text-primary">
-                            <HelpCircle className="h-3.5 w-3.5" />
+                            <Bot className="h-3.5 w-3.5" />
                           </div>
                         )}
                         <div
@@ -318,6 +331,23 @@ export function ChatAssistantWidget() {
                           </div>
                         )}
                       </div>
+
+                      {/* Action Links Buttons */}
+                      {m.role === "assistant" && m.actionLinks && m.actionLinks.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pl-8 pt-0.5">
+                          {m.actionLinks.map((act, actIdx) => (
+                            <button
+                              key={actIdx}
+                              type="button"
+                              onClick={() => navigate(act.url)}
+                              className="inline-flex items-center gap-1 rounded-md bg-primary/10 hover:bg-primary/20 border border-primary/30 px-2.5 py-1 text-xs font-medium text-primary transition-colors active:scale-95"
+                            >
+                              <span>{act.label}</span>
+                              <ArrowRight className="h-3 w-3" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Interactive candidate topic buttons for multiple matches */}
                       {m.role === "assistant" && m.candidateTopics && m.candidateTopics.length > 0 && (
@@ -377,10 +407,10 @@ export function ChatAssistantWidget() {
                   {inquiry.isPending && (
                     <div className="flex gap-2 items-center">
                       <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-primary">
-                        <HelpCircle className="h-3.5 w-3.5" />
+                        <Bot className="h-3.5 w-3.5" />
                       </div>
                       <div className="rounded-lg px-3 py-2 text-xs bg-muted flex items-center gap-2 text-muted-foreground">
-                        <Spinner className="h-3 w-3" /> Checking approved records…
+                        <Spinner className="h-3 w-3" /> Querying NurseTrack records…
                       </div>
                     </div>
                   )}
@@ -399,7 +429,7 @@ export function ChatAssistantWidget() {
                     sendQuestion();
                   }
                 }}
-                placeholder="Ask about services, hours, fees, location…"
+                placeholder="Ask about staff, licenses, trainings, seminars, areas…"
                 className="min-h-[38px] max-h-24 resize-none text-xs"
                 rows={1}
               />

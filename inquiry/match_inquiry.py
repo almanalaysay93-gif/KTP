@@ -22,49 +22,36 @@ GREETINGS: Set[str] = {
     "greetings", "kumusta", "kamusta", "morning", "afternoon", "evening",
 }
 
-# Domain entities present across the entire facility
+# Domain context words that appear across hospital operations
 DOMAIN_CONTEXT_WORDS: Set[str] = {
-    "spmc", "skti", "dialysis", "hemodialysis", "kidney", "nephrology",
-    "clinic", "center", "hospital", "patient", "care"
+    "spmc", "skti", "nursetrack", "hospital", "supervisor", "nurse", "nurses", "staff"
 }
 
 # Strong primary intent triggers per topic (whole word matches only)
 INTENT_TRIGGERS: Dict[str, Set[str]] = {
-    "services": {
-        "service", "services", "offer", "offers", "treatment", "treatments",
-        "procedure", "procedures", "peritoneal", "pd", "capd", "transplant",
-        "transplantation", "crrt", "inpatient", "outpatient"
+    "needs_attention": {
+        "attention", "urgent", "alert", "alerts", "overdue", "critical", "priority", "remediation"
     },
-    "hours": {
-        "hour", "hours", "schedule", "schedules", "shift", "shifts", "when",
-        "open", "opening", "closed", "closing", "weekend", "weekends", "sunday",
-        "saturday", "night", "time", "times"
+    "find_staff": {
+        "staff", "nurse", "nurses", "attendant", "attendants", "roster", "lookup", "directory", "employee"
     },
-    "location": {
-        "location", "locations", "address", "where", "direction", "directions",
-        "building", "floor", "annex", "complex", "bajada", "locate", "map",
-        "pavilion", "wayfinding"
+    "license_status": {
+        "license", "licenses", "prc", "renewal", "renewals", "credential", "credentials", "expired", "expiring"
     },
-    "requirements": {
-        "requirement", "requirements", "document", "documents", "paper", "papers",
-        "abstract", "clearance", "prescription", "lab", "labs", "laboratory",
-        "needed", "prerequisite", "prerequisites", "mdr", "hepa", "hbsag", "hcv"
+    "training_followup": {
+        "evidence", "certificate", "certificates", "followup", "pending", "attendance", "submitted"
     },
-    "fees": {
-        "fee", "fees", "cost", "costs", "philhealth", "156", "payment", "pay",
-        "copay", "assistance", "malasakit", "mss", "discount", "covered", "coverage", "free"
+    "upcoming_seminars": {
+        "seminar", "seminars", "workshop", "workshops", "ldi", "venue", "venues"
     },
-    "contact": {
-        "contact", "contacts", "phone", "telephone", "trunkline", "call",
-        "number", "numbers", "email", "hotline", "extension", "local"
+    "area_assignments": {
+        "area", "areas", "unit", "units", "ward", "wards", "assignment", "assignments", "station", "stations"
     },
-    "trainings": {
-        "training", "trainings", "seminar", "seminars", "workshop", "workshops",
-        "bls", "acls", "course", "courses", "class", "classes", "cme"
+    "calendar": {
+        "calendar", "event", "events", "today", "tomorrow", "week", "month"
     },
-    "areas": {
-        "unit", "units", "area", "areas", "ward", "wards", "department",
-        "departments", "station", "stations", "section", "sections"
+    "reports": {
+        "report", "reports", "export", "exports", "excel", "spreadsheet", "download", "masterlist"
     }
 }
 
@@ -104,50 +91,39 @@ class InquiryMatcher:
                 else:
                     single_word_keywords.add(norm_kw)
 
-            multi_word_keywords.sort(key=lambda s: len(s), reverse=True)
+            # Sort multi-word keywords by descending length for greedy phrase matching
+            multi_word_keywords.sort(key=len, reverse=True)
 
             self.normalized_topics[t_id] = {
-                "id": t_id,
-                "name": topic["name"],
+                "raw": topic,
                 "norm_name": norm_name,
                 "norm_questions": norm_questions,
                 "multi_word_keywords": multi_word_keywords,
                 "single_word_keywords": single_word_keywords,
-                "raw": topic,
             }
 
-    def match(self, query: Optional[str] = None, topic_id: Optional[str] = None) -> Dict[str, Any]:
+    def match(self, query: str, topic_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Evaluate inquiry against rules:
-        1. Topic button click (topic_id) -> EXACT_TOPIC
-        2. Empty/whitespace input -> EMPTY_QUERY
-        3. Greetings detection -> GREETING
-        4. Short unsupported text (< 3 chars) -> NO_MATCH
-        5. Exact question or topic name -> EXACT_PHRASE
-        6. Whole-word keyword & Intent scoring -> SINGLE_MATCH, MULTIPLE_MATCHES, or NO_MATCH
+        Evaluate user input against FAQ knowledge base.
+        Returns match dict with:
+        - match_type
+        - confidence (float)
+        - topic (dict or None)
+        - candidate_topics (list of dicts)
+        - matched_keywords (list of str)
         """
-        # 1. Topic button click (highest priority)
+        # 1. Direct Topic Button Click
         if topic_id:
-            cleaned_topic_id = topic_id.strip().lower()
-            if cleaned_topic_id in self.topics_by_id:
-                topic = self.topics_by_id[cleaned_topic_id]
+            cleaned_id = topic_id.strip()
+            if cleaned_id in self.topics_by_id:
+                topic = self.topics_by_id[cleaned_id]
                 return {
                     "match_type": self.MATCH_EXACT_TOPIC,
                     "confidence": 1.0,
                     "topic": topic,
                     "candidate_topics": [topic],
-                    "matched_keywords": [cleaned_topic_id],
+                    "matched_keywords": [topic["name"]],
                 }
-
-        # 2. Empty query check
-        if not query or not query.strip():
-            return {
-                "match_type": self.MATCH_EMPTY,
-                "confidence": 0.0,
-                "topic": None,
-                "candidate_topics": self.topics,
-                "matched_keywords": [],
-            }
 
         norm_query = normalize_text(query)
         if not norm_query:
@@ -203,7 +179,7 @@ class InquiryMatcher:
                 }
             for q in indexed["norm_questions"]:
                 # Exact normalized match or query contains the complete question phrase with word boundaries
-                if norm_query == q or (len(q) >= 15 and f" {q} " in padded_query):
+                if norm_query == q or (len(q) >= 12 and f" {q} " in padded_query):
                     return {
                         "match_type": self.MATCH_EXACT_PHRASE,
                         "confidence": 0.98,
@@ -211,6 +187,23 @@ class InquiryMatcher:
                         "candidate_topics": [indexed["raw"]],
                         "matched_keywords": [q],
                     }
+
+        # Special query heuristics:
+        # "find nurse ...", "search nurse ...", "who is nurse ...", "look up staff ..."
+        if (norm_query.startswith("find nurse") or
+            norm_query.startswith("search nurse") or
+            norm_query.startswith("find staff") or
+            norm_query.startswith("look up nurse") or
+            norm_query.startswith("look up staff") or
+            norm_query.startswith("search staff")):
+            topic = self.topics_by_id["find_staff"]
+            return {
+                "match_type": self.MATCH_SINGLE,
+                "confidence": 0.95,
+                "topic": topic,
+                "candidate_topics": [topic],
+                "matched_keywords": ["find staff"],
+            }
 
         # 7. Whole-word Keyword and Intent scoring
         scores: Dict[str, float] = {t["id"]: 0.0 for t in self.topics}
@@ -237,9 +230,8 @@ class InquiryMatcher:
             # Check single word keywords (skip if already scored as intent trigger)
             for token in tokens:
                 if token in indexed["single_word_keywords"] and token not in matched_kw_map[t_id]:
-                    # General domain words (like "dialysis") shouldn't skew towards 'services'
-                    # when a specific intent like 'hours' or 'location' was explicitly matched
-                    if token in DOMAIN_CONTEXT_WORDS and t_id == "services" and any(k != "services" for k in matched_intents):
+                    # General domain words (like "nurse") shouldn't over-skew if other intents present
+                    if token in DOMAIN_CONTEXT_WORDS and t_id == "find_staff" and any(k != "find_staff" for k in matched_intents):
                         continue
                     scores[t_id] += 1.8
                     matched_kw_map[t_id].append(token)
@@ -251,7 +243,6 @@ class InquiryMatcher:
             reverse=True,
         )
 
-        # No match or out of scope
         if not ranked:
             return {
                 "match_type": self.MATCH_NONE,
@@ -262,28 +253,29 @@ class InquiryMatcher:
             }
 
         top_id, top_score = ranked[0]
-        top_topic = self.topics_by_id[top_id]
 
-        # Check for ambiguity: multiple matches with close high scores
-        # e.g., second candidate is within 75% of top candidate
+        # Check for ambiguity / close tie (within 1.0 point and >= 2 candidates)
         close_candidates = [
-            self.topics_by_id[r[0]] for r in ranked if r[1] >= max(3.0, top_score * 0.75)
+            self.topics_by_id[t_id]
+            for t_id, s in ranked
+            if (top_score - s) <= 1.0 and s >= 3.0
         ]
 
         if len(close_candidates) > 1:
             return {
                 "match_type": self.MATCH_MULTIPLE,
-                "confidence": round(top_score / (top_score + ranked[1][1]), 2),
+                "confidence": float(round(top_score / 10.0, 2)),
                 "topic": None,
                 "candidate_topics": close_candidates,
-                "matched_keywords": matched_kw_map[top_id] + matched_kw_map[ranked[1][0]],
+                "matched_keywords": matched_kw_map[top_id],
             }
 
-        # Clear single match
+        # Clear winner
+        matched_topic = self.topics_by_id[top_id]
         return {
             "match_type": self.MATCH_SINGLE,
-            "confidence": min(1.0, round(top_score / 5.0, 2)),
-            "topic": top_topic,
-            "candidate_topics": [top_topic],
+            "confidence": min(1.0, float(round(top_score / 10.0, 2))),
+            "topic": matched_topic,
+            "candidate_topics": [matched_topic],
             "matched_keywords": matched_kw_map[top_id],
         }

@@ -153,6 +153,13 @@ def create_service(faq_path: Optional[str] = None):
     return matcher, faq_data
 
 
+def create_server(host: str = "127.0.0.1", port: int = 5005, faq_path: Optional[str] = None, secret: Optional[str] = None):
+    create_service(faq_path)
+    if secret is not None:
+        os.environ["INQUIRY_SERVICE_SECRET"] = secret
+    return ThreadedHTTPServer((host, port), InquiryRequestHandler)
+
+
 def run_server(host: str = "0.0.0.0", port: int = 5005, faq_path: Optional[str] = None):
     create_service(faq_path)
     server_address = (host, port)

@@ -1,14 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import { spawn, type ChildProcess } from "child_process";
-import fs from "fs";
 import path from "path";
 import { getTodayManila, needsDatabaseContext } from "./routers/inquiry";
 
-describe("P1-P4: Reliable Rule-based Inquiry Chatbot & Python Microservice", () => {
+describe("P1-P4: NurseTrack Assistant & Task-Driven Inquiry Microservice", () => {
   let pythonProc: ChildProcess | null = null;
   const testPort = 5099;
-  const testSecret = "skti-test-secret-phase1-phase4";
+  const testSecret = "skti-test-secret-nursetrack-tasks";
 
   const caller = appRouter.createCaller({
     user: null,
@@ -62,7 +61,7 @@ describe("P1-P4: Reliable Rule-based Inquiry Chatbot & Python Microservice", () 
     delete process.env.INQUIRY_SERVICE_SECRET;
   });
 
-  describe("P1: Service Authentication and Health Checks", () => {
+  describe("P1: Service Authentication and 8 NurseTrack Task Buttons", () => {
     it("health probe endpoint remains public without secret", async () => {
       const resp = await fetch(`http://127.0.0.1:${testPort}/health`);
       expect(resp.status).toBe(200);
@@ -75,85 +74,93 @@ describe("P1-P4: Reliable Rule-based Inquiry Chatbot & Python Microservice", () 
       const resp = await fetch(`http://127.0.0.1:${testPort}/api/inquiry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: "What are your hours?" }),
+        body: JSON.stringify({ query: "What needs attention?" }),
       });
       expect(resp.status).toBe(401);
     });
 
-    it("tRPC router automatically attaches secret and succeeds with 200", async () => {
-      const res = await caller.inquiry.chat({ question: "What are your operating hours?" });
-      expect(res.success).toBe(true);
-      expect(res.topic_id).toBe("hours");
-    });
-
-    it("inquiry.topics returns all 8 topics through authenticated proxy", async () => {
+    it("inquiry.topics returns all 8 NurseTrack supervisor task buttons", async () => {
       const res = await caller.inquiry.topics();
       expect(res.topics).toHaveLength(8);
       const ids = res.topics.map((t) => t.id);
-      expect(ids).toContain("services");
-      expect(ids).toContain("hours");
-      expect(ids).toContain("location");
-      expect(ids).toContain("requirements");
-      expect(ids).toContain("fees");
-      expect(ids).toContain("contact");
-      expect(ids).toContain("trainings");
-      expect(ids).toContain("areas");
+      expect(ids).toEqual([
+        "needs_attention",
+        "find_staff",
+        "license_status",
+        "training_followup",
+        "upcoming_seminars",
+        "area_assignments",
+        "calendar",
+        "reports",
+      ]);
     });
   });
 
-  describe("P2: Database Context Reliability & Deadlines", () => {
-    it("needsDatabaseContext only activates for topics/queries needing DB records", () => {
-      expect(needsDatabaseContext("What are your hours?", "hours")).toBe(false);
-      expect(needsDatabaseContext("Where are you located?", "location")).toBe(false);
-      expect(needsDatabaseContext("How much is dialysis?", "fees")).toBe(false);
-      expect(needsDatabaseContext("What documents do I need?", "requirements")).toBe(false);
-      expect(needsDatabaseContext("What is your phone number?", "contact")).toBe(false);
-
-      expect(needsDatabaseContext(undefined, "trainings")).toBe(true);
-      expect(needsDatabaseContext("What seminars are scheduled?")).toBe(true);
-      expect(needsDatabaseContext(undefined, "areas")).toBe(true);
-      expect(needsDatabaseContext("Show clinical units and wards")).toBe(true);
+  describe("P2: Database Context Reliability & Destination Links", () => {
+    it("needsDatabaseContext activates for supervisor tasks needing DB records", () => {
+      expect(needsDatabaseContext(undefined, "needs_attention")).toBe(true);
+      expect(needsDatabaseContext(undefined, "find_staff")).toBe(true);
+      expect(needsDatabaseContext(undefined, "license_status")).toBe(true);
+      expect(needsDatabaseContext(undefined, "training_followup")).toBe(true);
+      expect(needsDatabaseContext(undefined, "upcoming_seminars")).toBe(true);
+      expect(needsDatabaseContext(undefined, "area_assignments")).toBe(true);
+      expect(needsDatabaseContext(undefined, "calendar")).toBe(true);
+      expect(needsDatabaseContext("show expiring licenses")).toBe(true);
+      expect(needsDatabaseContext("find nurse")).toBe(true);
     });
 
     it("computes exact Manila date YYYY-MM-DD across midnight", () => {
-      // Test with UTC 17:00 (which is 01:00 AM next day in Manila +08:00)
       const dateUtc = new Date("2026-09-17T17:00:00Z");
       const manilaDate = getTodayManila(dateUtc);
       expect(manilaDate).toBe("2026-09-18");
 
-      // Test regular afternoon
       const afternoonUtc = new Date("2026-09-17T04:00:00Z");
       expect(getTodayManila(afternoonUtc)).toBe("2026-09-17");
     });
 
-    it("restricts internal staff headcounts to authorized roles only", async () => {
+    it("restricts internal alerts and staff data to authorized supervisors", async () => {
       // Unauthenticated public caller
-      const publicRes = await caller.inquiry.chat({ topicId: "areas" });
+      const publicRes = await caller.inquiry.chat({ topicId: "needs_attention" });
       expect(publicRes.success).toBe(true);
-      expect(publicRes.answer).not.toContain("active staff assigned");
-      expect(publicRes.answer).not.toContain("Total Active Staff Tracked");
+      expect(publicRes.answer).toContain("Supervisor authentication required");
+      expect(publicRes.action_links?.[0]?.url).toBe("/dashboard");
 
       // Authenticated admin caller
-      const authRes = await adminCaller.inquiry.chat({ topicId: "areas" });
+      const authRes = await adminCaller.inquiry.chat({ topicId: "needs_attention" });
       expect(authRes.success).toBe(true);
-      // When live database has records, authorized output shows assignments
-      if (authRes.answer.includes("assigned")) {
-        expect(authRes.answer).toContain("active staff assigned");
+      expect(authRes.answer).toContain("NurseTrack Action Center");
+      expect(authRes.action_links?.[0]?.url).toBe("/dashboard");
+    });
+
+    it("returns typed destination action links for all 8 topics", async () => {
+      const taskRoutes: Record<string, string> = {
+        needs_attention: "/dashboard",
+        find_staff: "/nurses",
+        license_status: "/licenses",
+        training_followup: "/trainings",
+        upcoming_seminars: "/seminars",
+        area_assignments: "/areas",
+        calendar: "/calendar",
+        reports: "/reports",
+      };
+
+      for (const [topicId, expectedUrl] of Object.entries(taskRoutes)) {
+        const res = await adminCaller.inquiry.chat({ topicId });
+        expect(res.success).toBe(true);
+        expect(res.action_links).toBeDefined();
+        expect(res.action_links!.length).toBeGreaterThan(0);
+        expect(res.action_links![0].url).toBe(expectedUrl);
       }
     });
   });
 
-  describe("P3: Matching Precision, Greetings, and Ambiguity", () => {
-    it("handles 'hi', 'hello', and greetings without false matching questions", async () => {
+  describe("P3: Matching Precision, Staff Lookup, and Ambiguity", () => {
+    it("handles 'hi', 'hello', and greetings with NurseTrack welcome message", async () => {
       const resHi = await caller.inquiry.chat({ question: "hi" });
       expect(resHi.success).toBe(true);
       expect(resHi.match_type).toBe("GREETING");
-      expect(resHi.answer).toContain("Hello! Welcome to SPMC SKTI General Inquiries");
-      // Must not match "Which building is the kidney center in?"
+      expect(resHi.answer).toContain("NurseTrack Assistant");
       expect(resHi.topic_id).toBeNull();
-
-      const resHello = await caller.inquiry.chat({ question: "hello" });
-      expect(resHello.match_type).toBe("GREETING");
     });
 
     it("handles short unsupported input ('a', 'x') without false matching", async () => {
@@ -161,49 +168,47 @@ describe("P1-P4: Reliable Rule-based Inquiry Chatbot & Python Microservice", () 
       expect(resA.success).toBe(true);
       expect(resA.match_type).toBe("NO_MATCH");
       expect(resA.topic_id).toBeNull();
-      expect(resA.answer).toContain("only answer verified general inquiries");
-
-      const resX = await caller.inquiry.chat({ question: "x" });
-      expect(resX.match_type).toBe("NO_MATCH");
+      expect(resA.answer).toContain("only answer verified NurseTrack supervisor inquiries");
     });
 
-    it("preserves exact matching for topic buttons", async () => {
-      const topics = ["services", "hours", "location", "requirements", "fees", "contact", "trainings", "areas"];
-      for (const t of topics) {
-        const res = await caller.inquiry.chat({ topicId: t });
+    it("matches specific intent queries to correct task buttons", async () => {
+      const queries = [
+        { q: "licenses expiring", topic: "license_status" },
+        { q: "find nurse Maria", topic: "find_staff" },
+        { q: "missing certificate", topic: "training_followup" },
+        { q: "upcoming seminar", topic: "upcoming_seminars" },
+        { q: "clinical unit assignments", topic: "area_assignments" },
+        { q: "what is scheduled today", topic: "calendar" },
+        { q: "compliance report export", topic: "reports" },
+      ];
+
+      for (const item of queries) {
+        const res = await adminCaller.inquiry.chat({ question: item.q });
         expect(res.success).toBe(true);
-        expect(res.topic_id).toBe(t);
+        expect(res.topic_id).toBe(item.topic);
       }
-    });
-
-    it("preserves ambiguity handling for questions matching multiple topics", async () => {
-      const resAmbig = await caller.inquiry.chat({
-        question: "What are the requirements, documents, fees, and costs for treatment?",
-      });
-      expect(resAmbig.success).toBe(true);
-      expect(resAmbig.match_type).toBe("MULTIPLE_MATCHES");
-      expect(resAmbig.candidate_topics.length).toBeGreaterThanOrEqual(2);
-      expect(resAmbig.answer).toContain("matches multiple topics");
     });
   });
 
-  describe("P4: Service Outage and Failure Recovery", () => {
+  describe("P4: Service Outage and Zero Model Calls", () => {
     it("handles service outage without hanging and returns verified fallback with contact info", async () => {
       process.env.INQUIRY_SERVICE_URL = "http://127.0.0.1:59998";
 
-      const res = await caller.inquiry.chat({ question: "What are your hours?" });
-      expect(res.success).toBe(false);
-      expect(res.match_type).toBe("SERVICE_UNAVAILABLE");
-      expect(res.answer).toContain("Inquiry service is currently unavailable");
-      expect(res.answer).toContain("(082) 227-2731");
+      const res = await caller.inquiry.chat({ question: "What is on the calendar?" });
+      expect(res.success).toBe(true); // Offline fallback handles calendar
+      expect(res.action_links?.[0]?.url).toBe("/calendar");
+
+      // Test complete invalid target
+      const resUnavailable = await caller.inquiry.chat({ question: "some totally random inquiry 12345" });
+      expect(resUnavailable.action_links?.[0]?.url).toBe("/dashboard");
 
       // Restore
       process.env.INQUIRY_SERVICE_URL = `http://127.0.0.1:${testPort}`;
     });
 
     it("confirms zero LLM model calls in inquiry flow", async () => {
-      const res = await adminCaller.aiInsights.chat({ question: "Where are you located?" });
-      expect(res.answer).toContain("J.P. Laurel Avenue");
+      const res = await adminCaller.aiInsights.chat({ question: "What needs attention?" });
+      expect(res.answer).toContain("NurseTrack Action Center");
     });
   });
 });

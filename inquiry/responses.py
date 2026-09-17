@@ -1,7 +1,7 @@
 """
-Response formatting module for rule-based inquiry chatbot.
-Returns approved answers, dynamic web app database records, and uncertainty fallbacks.
-Never invents answers.
+Response formatting module for rule-based NurseTrack Assistant.
+Returns operational summaries, staff lookups, license compliance, seminar schedules,
+and export shortcuts for supervisors. Never invents answers.
 """
 from typing import Dict, Any, List, Optional
 
@@ -30,6 +30,7 @@ def format_inquiry_response(
     - candidate_topics (list of pills)
     - match_type (str)
     - live_synced (bool)
+    - action_links (list of {"label": str, "url": str})
     """
     match_type = match_result.get("match_type")
     topics_by_id = {t["id"]: t for t in all_topics}
@@ -37,44 +38,46 @@ def format_inquiry_response(
     is_authorized = bool(ctx.get("is_authorized", False))
 
     contact_snippet = (
-        "SPMC Trunkline: (082) 227-2731 | Dialysis Local: 4128/4129 | Clinic Local: 4135"
+        "SKTI Nursing Office: (082) 227-2731 local 4135 | Dialysis Unit: local 4128/4129"
     )
 
     # 1. Empty Query
     if match_type == "EMPTY_QUERY":
         default_msg = faq_meta.get(
             "default_message",
-            "Welcome to SPMC Kidney Transplant Institute (SKTI) General Inquiries. Please select a topic below:",
+            "Welcome to NurseTrack Assistant. Please select an operational task below:",
         )
         return {
             "success": True,
             "answer": default_msg,
             "topic_id": None,
-            "title": "General Inquiries",
+            "title": "NurseTrack Assistant",
             "match_type": match_type,
             "related_topics": [build_topic_pill(t) for t in all_topics],
             "candidate_topics": [build_topic_pill(t) for t in all_topics],
             "contact_snippet": contact_snippet,
             "live_synced": False,
+            "action_links": [],
         }
 
     # 2. Greeting
     if match_type == "GREETING":
         greeting_text = (
-            "Hello! Welcome to SPMC SKTI General Inquiries. "
-            "Please select a topic below or type your question regarding our services, operating hours, "
-            "facility location, admission requirements, PhilHealth coverage, contact details, clinical units, or seminars."
+            "Hello! Welcome to NurseTrack Assistant. "
+            "Select a task button below or ask about dashboard alerts, staff profiles, "
+            "PRC license status, training follow-up, upcoming seminars, clinical units, calendar events, or reports."
         )
         return {
             "success": True,
             "answer": greeting_text,
             "topic_id": None,
-            "title": "General Inquiries",
+            "title": "NurseTrack Assistant",
             "match_type": match_type,
             "related_topics": [build_topic_pill(t) for t in all_topics],
             "candidate_topics": [build_topic_pill(t) for t in all_topics],
             "contact_snippet": contact_snippet,
             "live_synced": False,
+            "action_links": [],
         }
 
     # 3. Exact or Single Match
@@ -83,86 +86,286 @@ def format_inquiry_response(
         t_id = topic["id"]
         answer = topic["answer"]
         live_synced = False
+        action_links = list(topic.get("action_links", []))
 
-        # Dynamic enrichment from live database context (Option D1)
-        if t_id == "trainings":
-            status = ctx.get("trainings_status")
+        # Check authorization requirement for internal staff & compliance topics
+        # Public callers cannot read supervisor data
+        if not is_authorized and t_id in ("needs_attention", "find_staff", "license_status", "training_followup"):
+            return {
+                "success": True,
+                "answer": (
+                    f"{topic['name']}: Supervisor authentication required to view internal staff and compliance records. "
+                    "Please sign in with an authorized SPMC SKTI supervisor account."
+                ),
+                "topic_id": t_id,
+                "title": topic["name"],
+                "match_type": match_type,
+                "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != t_id],
+                "candidate_topics": [],
+                "contact_snippet": contact_snippet,
+                "live_synced": False,
+                "action_links": [{"label": "Supervisor Sign In", "url": "/dashboard"}],
+            }
+
+        # Dynamic enrichment from database context
+        if t_id == "needs_attention":
+            alerts_data = ctx.get("alerts_summary")
+            status = ctx.get("alerts_status")
             if status == "failed":
                 return {
                     "success": False,
-                    "answer": "Live training database records are currently unavailable. Please check the Training Calendar in the portal or contact the SKTI Training Coordinator.",
-                    "topic_id": "trainings",
-                    "title": "Seminars & Trainings",
+                    "answer": "Dashboard alert records are currently unavailable. Please open the Dashboard Action Center directly.",
+                    "topic_id": "needs_attention",
+                    "title": "Needs Attention",
                     "match_type": "DB_UNAVAILABLE",
-                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "trainings"],
+                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "needs_attention"],
                     "candidate_topics": [],
                     "contact_snippet": contact_snippet,
                     "live_synced": False,
+                    "action_links": [{"label": "Open Dashboard", "url": "/dashboard"}],
                 }
+            if status == "success" and alerts_data:
+                live_synced = True
+                total = alerts_data.get("total", 0)
+                lic_urgent = alerts_data.get("licenseUrgent", 0)
+                train_urgent = alerts_data.get("trainingUrgent", 0)
+                items = alerts_data.get("topItems", [])
 
-            upcoming = ctx.get("upcoming_trainings") or ctx.get("upcomingTrainings") or []
+                lines = [
+                    f"NurseTrack Action Center ({total} item{'s' if total != 1 else ''} need attention):",
+                    f"• Licenses expired or expiring soon: {lic_urgent}",
+                    f"• Overdue or expired trainings: {train_urgent}",
+                ]
+                if items:
+                    lines.append("\nTop urgent alerts:")
+                    for item in items[:5]:
+                        lines.append(f"• {item.get('title', '')}")
+                else:
+                    lines.append("\nAll credentials and scheduled trainings are currently in good standing.")
+                answer = "\n".join(lines)
+
+        elif t_id == "find_staff":
+            staff_data = ctx.get("staff_summary")
+            matched_staff = ctx.get("matched_staff")
+            status = ctx.get("staff_status")
+            if status == "failed":
+                return {
+                    "success": False,
+                    "answer": "Staff roster database is currently unavailable. Please view Staff Directory directly.",
+                    "topic_id": "find_staff",
+                    "title": "Find Staff",
+                    "match_type": "DB_UNAVAILABLE",
+                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "find_staff"],
+                    "candidate_topics": [],
+                    "contact_snippet": contact_snippet,
+                    "live_synced": False,
+                    "action_links": [{"label": "Open Staff Directory", "url": "/nurses"}],
+                }
             if status == "success":
                 live_synced = True
-                if upcoming:
-                    lines = [
-                        "SPMC SKTI Seminars & Staff Trainings (Live Database):",
-                        "",
-                    ]
-                    for item in upcoming:
-                        t_name = item.get("trainingName") or item.get("name") or "Training"
-                        t_date = item.get("scheduledDate") or item.get("date") or "TBD"
-                        lines.append(f"• {t_name} — Scheduled: {t_date}")
-                    lines.append("")
-                    lines.append("Source: NurseTrack live seminar and training catalog.")
+                if matched_staff is not None:
+                    # User searched a specific name or query
+                    if matched_staff:
+                        lines = [f"Found {len(matched_staff)} matching staff member(s):", ""]
+                        for s in matched_staff[:5]:
+                            area_part = f" — {s.get('areaName')}" if s.get("areaName") else ""
+                            prc_part = f" [PRC: {s.get('prcLicenseNumber')}]" if s.get("prcLicenseNumber") else ""
+                            lines.append(f"• {s.get('name')} ({s.get('staffType', 'Staff')}){area_part}{prc_part}")
+                        lines.append("\nClick below to open profile in Staff Directory.")
+                        answer = "\n".join(lines)
+                    else:
+                        answer = (
+                            "No active staff found matching your search. "
+                            "Please check spelling or open the Staff Directory to view all profiles."
+                        )
+                elif staff_data:
+                    total = staff_data.get("total", 0)
+                    rn_count = staff_data.get("rnCount", 0)
+                    na_count = staff_data.get("naCount", 0)
+                    answer = (
+                        f"Active Staff Roster Overview:\n"
+                        f"• Total active staff: {total}\n"
+                        f"• Registered Nurses (RN): {rn_count}\n"
+                        f"• Nursing Attendants (NA): {na_count}\n\n"
+                        f"Type a staff name (e.g., 'find nurse Maria' or 'search Dela Cruz') to inspect individual profiles."
+                    )
+
+        elif t_id == "license_status":
+            lic_data = ctx.get("licenses_summary")
+            status = ctx.get("licenses_status")
+            if status == "failed":
+                return {
+                    "success": False,
+                    "answer": "License records are currently unavailable. Please open License Registry.",
+                    "topic_id": "license_status",
+                    "title": "License Status",
+                    "match_type": "DB_UNAVAILABLE",
+                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "license_status"],
+                    "candidate_topics": [],
+                    "contact_snippet": contact_snippet,
+                    "live_synced": False,
+                    "action_links": [{"label": "Open License Registry", "url": "/licenses"}],
+                }
+            if status == "success" and lic_data:
+                live_synced = True
+                expired = lic_data.get("expired", 0)
+                within_6m = lic_data.get("within6Months", 0)
+                within_1y = lic_data.get("within1Year", 0)
+                valid = lic_data.get("valid", 0)
+                total = lic_data.get("total", 0)
+                urgent_items = lic_data.get("urgentItems", [])
+
+                lines = [
+                    f"PRC License Compliance Overview ({total} total active credentials):",
+                    f"• Expired: {expired}",
+                    f"• Within 6 Months: {within_6m}",
+                    f"• Within 1 Year: {within_1y}",
+                    f"• Valid: {valid}",
+                ]
+                if urgent_items:
+                    lines.append("\nPriority Renewal Watch List:")
+                    for it in urgent_items[:5]:
+                        lines.append(f"• {it.get('nurseName')}: {it.get('status')} ({it.get('daysText')})")
+                answer = "\n".join(lines)
+
+        elif t_id == "training_followup":
+            followup_data = ctx.get("followup_summary")
+            status = ctx.get("followup_status")
+            if status == "failed":
+                return {
+                    "success": False,
+                    "answer": "Training follow-up database is currently unavailable. Please check the Trainings tab.",
+                    "topic_id": "training_followup",
+                    "title": "Training Follow-up",
+                    "match_type": "DB_UNAVAILABLE",
+                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "training_followup"],
+                    "candidate_topics": [],
+                    "contact_snippet": contact_snippet,
+                    "live_synced": False,
+                    "action_links": [{"label": "Open Training Follow-up", "url": "/trainings"}],
+                }
+            if status == "success" and followup_data:
+                live_synced = True
+                counts = followup_data.get("counts", {})
+                pending_resp = counts.get("pendingResponse", 0)
+                evidence_rev = counts.get("evidenceReview", 0)
+                cannot_att = counts.get("cannotAttend", 0)
+                missing_email = counts.get("missingEmail", 0)
+                missed = counts.get("missed", 0)
+                total = counts.get("total", 0)
+
+                lines = [
+                    f"Training Follow-up & Reminders ({total} total assigned):",
+                    f"• Pending Staff Response: {pending_resp}",
+                    f"• Evidence Review (Certificates Uploaded): {evidence_rev}",
+                    f"• Cannot Attend Conflicts: {cannot_att}",
+                    f"• Missing Email (Undeliverable): {missing_email}",
+                    f"• Missed Attendance: {missed}",
+                    "",
+                    "Open Training Follow-up tab to record attendance or review submitted certificates."
+                ]
+                answer = "\n".join(lines)
+
+        elif t_id == "upcoming_seminars":
+            status = ctx.get("seminars_status")
+            if status == "failed":
+                return {
+                    "success": False,
+                    "answer": "Upcoming seminar schedule is currently unavailable. Please open Seminars page.",
+                    "topic_id": "upcoming_seminars",
+                    "title": "Upcoming Seminars",
+                    "match_type": "DB_UNAVAILABLE",
+                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "upcoming_seminars"],
+                    "candidate_topics": [],
+                    "contact_snippet": contact_snippet,
+                    "live_synced": False,
+                    "action_links": [{"label": "Open Seminars", "url": "/seminars"}],
+                }
+            seminars = ctx.get("seminar_events") or []
+            if status == "success":
+                live_synced = True
+                if seminars:
+                    lines = ["Upcoming Scheduled Seminars & LDI Events:", ""]
+                    for ev in seminars[:5]:
+                        venue_str = f" @ {ev.get('venue')}" if ev.get("venue") else ""
+                        dates_str = ev.get("dateStr", "TBD")
+                        enrolled = ev.get("enrolledCount", 0)
+                        lines.append(f"• {ev.get('title')} — {dates_str}{venue_str} ({enrolled} enrolled)")
                     answer = "\n".join(lines)
                 else:
                     answer = (
-                        "SPMC SKTI Seminars & Staff Trainings:\n\n"
-                        "There are currently no upcoming seminars or group training events scheduled in the database. "
-                        "Please check the Training Calendar in the supervisor portal or inquire with the training coordinator."
+                        "Upcoming Seminars & LDI:\n\n"
+                        "There are currently no upcoming hospital seminars or workshops scheduled in the database. "
+                        "You can create new events in the Seminars module."
                     )
 
-        elif t_id == "areas":
+        elif t_id == "area_assignments":
             status = ctx.get("areas_status")
             if status == "failed":
                 return {
                     "success": False,
-                    "answer": "Clinical area database records are currently unavailable. Please contact the SKTI Nursing Office at local 4135.",
-                    "topic_id": "areas",
-                    "title": "Clinical Units & Areas",
+                    "answer": "Clinical area database records are currently unavailable. Please open Areas page.",
+                    "topic_id": "area_assignments",
+                    "title": "Area Assignments",
                     "match_type": "DB_UNAVAILABLE",
-                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "areas"],
+                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "area_assignments"],
                     "candidate_topics": [],
                     "contact_snippet": contact_snippet,
                     "live_synced": False,
+                    "action_links": [{"label": "Manage Clinical Units", "url": "/areas"}],
                 }
-
-            active_areas = ctx.get("active_areas") or ctx.get("activeAreas") or []
-            total_staff = ctx.get("total_active_staff") or ctx.get("totalActiveStaff") or 0
+            active_areas = ctx.get("active_areas") or []
+            total_staff = ctx.get("total_active_staff") or 0
             if status == "success":
                 live_synced = True
                 if active_areas:
-                    lines = [
-                        "SPMC SKTI Clinical Units & Areas (Live Database):",
-                        "",
-                    ]
+                    lines = ["SPMC SKTI Staff Allocation by Clinical Unit:", ""]
                     for a in active_areas:
-                        # Internal staff counts restricted to authorized sessions only
                         staff_cnt = a.get("staffCount")
-                        count_suffix = f" ({staff_cnt} active staff assigned)" if (is_authorized and staff_cnt is not None) else ""
-                        lines.append(f"• {a['name']}{count_suffix}")
-
+                        cnt_str = f" — {staff_cnt} active staff" if (is_authorized and staff_cnt is not None) else ""
+                        lines.append(f"• {a['name']}{cnt_str}")
                     if is_authorized and total_staff:
                         lines.append(f"\nTotal Active Staff Tracked: {total_staff}")
-                    lines.append("\nSource: NurseTrack active area assignments.")
                     answer = "\n".join(lines)
 
-        elif t_id == "services":
-            active_areas = ctx.get("active_areas") or ctx.get("activeAreas") or []
-            if active_areas:
-                area_names = [a["name"] for a in active_areas[:6]]
-                answer += "\n\nClinical Units currently active in hospital:\n" + "\n".join(f"• {name}" for name in area_names)
+        elif t_id == "calendar":
+            cal_data = ctx.get("calendar_summary")
+            status = ctx.get("calendar_status")
+            if status == "failed":
+                return {
+                    "success": False,
+                    "answer": "Calendar records are currently unavailable. Please open Master Calendar.",
+                    "topic_id": "calendar",
+                    "title": "Calendar",
+                    "match_type": "DB_UNAVAILABLE",
+                    "related_topics": [build_topic_pill(t) for t in all_topics if t["id"] != "calendar"],
+                    "candidate_topics": [],
+                    "contact_snippet": contact_snippet,
+                    "live_synced": False,
+                    "action_links": [{"label": "Open Master Calendar", "url": "/calendar"}],
+                }
+            if status == "success" and cal_data:
                 live_synced = True
+                today_items = cal_data.get("todayEvents", [])
+                week_items = cal_data.get("weekEvents", [])
+
+                lines = [
+                    "Master Calendar Schedule Summary:",
+                    f"• Scheduled Today ({len(today_items)} event{'s' if len(today_items) != 1 else ''})",
+                ]
+                for it in today_items[:3]:
+                    lines.append(f"  - {it.get('title')}")
+                if not today_items:
+                    lines.append("  - No events scheduled for today.")
+
+                lines.append(f"• Scheduled This Week ({len(week_items)} event{'s' if len(week_items) != 1 else ''})")
+                for it in week_items[:4]:
+                    lines.append(f"  - {it.get('date')}: {it.get('title')}")
+                if not week_items:
+                    lines.append("  - No upcoming events this week.")
+
+                lines.append("\nOpen Master Calendar to review full month view and add events.")
+                answer = "\n".join(lines)
 
         related_ids = topic.get("related_topics", [])
         related_pills = [
@@ -181,6 +384,7 @@ def format_inquiry_response(
             "candidate_topics": [],
             "contact_snippet": contact_snippet,
             "live_synced": live_synced,
+            "action_links": action_links,
         }
 
     # 4. Ambiguous / Multiple Matches
@@ -189,7 +393,7 @@ def format_inquiry_response(
         candidate_pills = [build_topic_pill(c) for c in candidates]
         ambig_text = faq_meta.get(
             "ambiguous_message",
-            "Your question matches multiple topics. Please select the specific topic you would like to know about:",
+            "Your question matches multiple NurseTrack tasks. Please select the specific area you would like to view:",
         )
         lines = [ambig_text, ""]
         for c in candidates:
@@ -205,29 +409,31 @@ def format_inquiry_response(
             "candidate_topics": candidate_pills,
             "contact_snippet": contact_snippet,
             "live_synced": False,
+            "action_links": [],
         }
 
     # 5. No Match / Unsupported Question
     fallback_text = faq_meta.get(
         "fallback_message",
-        "I can only answer verified general inquiries about SPMC SKTI services, hours, location, requirements, fees, contact details, areas, and scheduled trainings. Please select one of the topics below or reach out to our staff directly.",
+        "I can only answer verified NurseTrack supervisor inquiries. Please select one of the task buttons below.",
     )
     all_pills = [build_topic_pill(t) for t in all_topics]
     full_answer = (
         f"{fallback_text}\n\n"
-        f"Available topics:\n"
-        + "\n".join(f"• {t['name']}" for t in all_topics)
-        + f"\n\nDirect Assistance:\n• {contact_snippet}\n• Location: SPMC Dialysis Complex, J.P. Laurel Ave, Bajada, Davao City"
+        f"Available NurseTrack Tasks:\n"
+        + "\n".join(f"• {t['name']} ({t.get('short_desc', '')})" for t in all_topics)
+        + f"\n\nDirect Nursing Office: {contact_snippet}"
     )
 
     return {
         "success": True,
         "answer": full_answer,
         "topic_id": None,
-        "title": "General Inquiries",
+        "title": "NurseTrack Assistant",
         "match_type": "NO_MATCH",
         "related_topics": all_pills,
         "candidate_topics": all_pills,
         "contact_snippet": contact_snippet,
         "live_synced": False,
+        "action_links": [],
     }

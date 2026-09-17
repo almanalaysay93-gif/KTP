@@ -10932,7 +10932,7 @@ var aiInsightsRouter = router({
       const resp = await fetch(`${serviceUrl}/api/inquiry`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ query: input.question }),
+        body: JSON.stringify({ query: input.question, context: { is_authorized: true } }),
         signal: AbortSignal.timeout(4e3)
       });
       if (resp.ok) {
@@ -10953,18 +10953,18 @@ init_db();
 init_schema();
 init_nursetrack();
 init_localDb();
-import { and as and10, asc as asc5, eq as eq14, gte as gte4, isNotNull as isNotNull3, sql as sql12 } from "drizzle-orm";
+import { and as and10, asc as asc5, eq as eq14, isNull as isNull11, sql as sql12 } from "drizzle-orm";
 var FALLBACK_TOPICS = [
-  { id: "services", name: "Services Offered", short_desc: "Hemodialysis, peritoneal dialysis, transplant" },
-  { id: "hours", name: "Hours & Schedule", short_desc: "Clinic hours and 24/7 dialysis shifts" },
-  { id: "location", name: "Location & Directions", short_desc: "SPMC Bajada Dialysis Complex" },
-  { id: "requirements", name: "Requirements & Documents", short_desc: "Medical abstract, clearances, PhilHealth" },
-  { id: "fees", name: "Fees & PhilHealth", short_desc: "156 sessions coverage and financial aid" },
-  { id: "contact", name: "Contact & Inquiries", short_desc: "Trunkline (082) 227-2731 and direct locals" },
-  { id: "trainings", name: "Seminars & Trainings", short_desc: "Training calendar and upcoming seminars" },
-  { id: "areas", name: "Clinical Units & Areas", short_desc: "Active clinical units and hospital stations" }
+  { id: "needs_attention", name: "Needs Attention", short_desc: "Expiring & overdue records" },
+  { id: "find_staff", name: "Find Staff", short_desc: "Nurses & attendants" },
+  { id: "license_status", name: "License Status", short_desc: "Expiry & renewal" },
+  { id: "training_followup", name: "Training Follow-up", short_desc: "Pending & missing evidence" },
+  { id: "upcoming_seminars", name: "Upcoming Seminars", short_desc: "Seminars & LDI" },
+  { id: "area_assignments", name: "Area Assignments", short_desc: "Staff by clinical unit" },
+  { id: "calendar", name: "Calendar", short_desc: "Events & scheduled training" },
+  { id: "reports", name: "Reports", short_desc: "Choose & export reports" }
 ];
-var SERVICE_UNAVAILABLE_ANSWER = "Inquiry service is currently unavailable. For general inquiries regarding SPMC SKTI services, hours, location, requirements, or fees, please contact the SPMC SKTI Information Desk directly at (082) 227-2731 (local 4128/4129) or visit the SPMC Dialysis Complex in Bajada, Davao City.";
+var SERVICE_UNAVAILABLE_ANSWER = "NurseTrack inquiry service is currently unavailable. For assistance with staff assignments, license registry, or training schedules, please open the respective dashboard module or contact the SKTI Nursing Office at (082) 227-2731 (local 4135).";
 function getTodayManila(date2 = /* @__PURE__ */ new Date()) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Manila",
@@ -10975,31 +10975,55 @@ function getTodayManila(date2 = /* @__PURE__ */ new Date()) {
 }
 function needsDatabaseContext(question, topicId) {
   const tId = topicId?.trim().toLowerCase();
-  if (tId === "trainings" || tId === "areas") return true;
+  const validTaskIds = [
+    "needs_attention",
+    "find_staff",
+    "license_status",
+    "training_followup",
+    "upcoming_seminars",
+    "area_assignments",
+    "calendar",
+    "reports",
+    "trainings",
+    "areas"
+  ];
+  if (tId && validTaskIds.includes(tId)) return true;
   if (!question) return false;
   const q = question.toLowerCase();
   const triggers = [
+    "attention",
+    "urgent",
+    "alert",
+    "alerts",
+    "overdue",
+    "staff",
+    "nurse",
+    "nurses",
+    "attendant",
+    "license",
+    "licenses",
+    "prc",
+    "renewal",
+    "followup",
+    "certificate",
+    "certificates",
+    "evidence",
     "seminar",
     "seminars",
-    "training",
-    "trainings",
     "workshop",
-    "course",
-    "courses",
-    "bls",
-    "acls",
     "area",
     "areas",
     "unit",
     "units",
     "ward",
-    "wards",
-    "department",
-    "departments",
-    "station",
-    "stations",
-    "roster",
-    "staffing"
+    "calendar",
+    "event",
+    "events",
+    "today",
+    "report",
+    "reports",
+    "export",
+    "excel"
   ];
   return triggers.some((t2) => q.includes(t2));
 }
@@ -11008,6 +11032,36 @@ function withTimeout(promise, ms, errorMsg) {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
   ]);
+}
+function detectTargetTopic(question, topicId) {
+  if (topicId) return topicId.trim().toLowerCase();
+  if (!question) return "needs_attention";
+  const q = question.toLowerCase();
+  if (q.includes("attention") || q.includes("urgent") || q.includes("alert") || q.includes("overdue")) {
+    return "needs_attention";
+  }
+  if (q.includes("find") || q.includes("search") || q.includes("who is") || q.includes("staff") || q.includes("nurse") || q.includes("attendant")) {
+    return "find_staff";
+  }
+  if (q.includes("license") || q.includes("prc") || q.includes("credential")) {
+    return "license_status";
+  }
+  if (q.includes("followup") || q.includes("follow-up") || q.includes("evidence") || q.includes("missing certificate")) {
+    return "training_followup";
+  }
+  if (q.includes("seminar") || q.includes("workshop") || q.includes("ldi")) {
+    return "upcoming_seminars";
+  }
+  if (q.includes("area") || q.includes("unit") || q.includes("ward") || q.includes("station")) {
+    return "area_assignments";
+  }
+  if (q.includes("calendar") || q.includes("today") || q.includes("this week") || q.includes("scheduled")) {
+    return "calendar";
+  }
+  if (q.includes("report") || q.includes("export") || q.includes("excel")) {
+    return "reports";
+  }
+  return "needs_attention";
 }
 async function getAreaCountsSummary(isAuthorized = false) {
   try {
@@ -11071,64 +11125,481 @@ async function getAreaCountsSummary(isAuthorized = false) {
     return { status: "failed", areas: [] };
   }
 }
-async function getUpcomingTrainingsSummary(todayManila) {
+async function getAlertsSummary(todayManila) {
   try {
-    const fetchTrainings = async () => {
+    const fetchAlerts = async () => {
+      const dbConn = await getDb();
+      let topItems = [];
+      let licenseUrgent = 0;
+      let trainingUrgent = 0;
+      if (dbConn) {
+        const creds = await dbConn.select({
+          id: nurseCredentials.id,
+          expiryDate: nurseCredentials.expiryDate,
+          renewalStatus: nurseCredentials.renewalStatus,
+          firstName: nurses.firstName,
+          lastName: nurses.lastName
+        }).from(nurseCredentials).innerJoin(nurses, eq14(nurseCredentials.nurseId, nurses.id)).where(isNull11(nurses.archivedAt));
+        for (const c of creds) {
+          const d = dateKey(c.expiryDate);
+          const status = deriveLicenseStatus(d, todayManila);
+          const days = daysUntilExpiry(d, todayManila);
+          if (status === "Expired" || status === "Within 6 Months") {
+            licenseUrgent++;
+            if (topItems.length < 4) {
+              topItems.push({
+                title: `${c.firstName} ${c.lastName} \u2014 license ${status === "Expired" ? "expired" : `expires in ${days}d`} (${c.renewalStatus || "Not Started"})`,
+                severity: status === "Expired" ? "urgent" : "attention"
+              });
+            }
+          }
+        }
+        const trainings = await dbConn.select({
+          id: nurseTrainings.id,
+          scheduledDate: nurseTrainings.scheduledDate,
+          expiryDate: nurseTrainings.expiryDate,
+          status: nurseTrainings.status,
+          trainingName: trainingCatalog.name,
+          firstName: nurses.firstName,
+          lastName: nurses.lastName
+        }).from(nurseTrainings).innerJoin(nurses, eq14(nurseTrainings.nurseId, nurses.id)).innerJoin(trainingCatalog, eq14(nurseTrainings.trainingId, trainingCatalog.id)).where(isNull11(nurses.archivedAt));
+        for (const t2 of trainings) {
+          const schedDate = dateKey(t2.scheduledDate);
+          const expDate = dateKey(t2.expiryDate);
+          let urgent = false;
+          let label = "";
+          if (t2.status === "Scheduled" && schedDate && schedDate <= todayManila) {
+            urgent = true;
+            label = `${t2.firstName} ${t2.lastName} \u2014 overdue training ${t2.trainingName} (was ${schedDate})`;
+          } else if (t2.status === "Completed" && expDate && daysUntilExpiry(expDate, todayManila) <= 0) {
+            urgent = true;
+            label = `${t2.firstName} ${t2.lastName} \u2014 certification expired for ${t2.trainingName}`;
+          }
+          if (urgent) {
+            trainingUrgent++;
+            if (topItems.length < 6) {
+              topItems.push({ title: label, severity: "attention" });
+            }
+          }
+        }
+      } else {
+        const sqlite = getSqliteDb();
+        if (sqlite) {
+          const credRows = sqlite.prepare(
+            `SELECT nc.id, nc.expiryDate, nc.renewalStatus, n.firstName, n.lastName
+             FROM nurseCredentials nc
+             JOIN nurses n ON nc.nurseId = n.id
+             WHERE n.archivedAt IS NULL`
+          ).all();
+          for (const c of credRows) {
+            const d = dateKey(c.expiryDate);
+            const status = deriveLicenseStatus(d, todayManila);
+            const days = daysUntilExpiry(d, todayManila);
+            if (status === "Expired" || status === "Within 6 Months") {
+              licenseUrgent++;
+              if (topItems.length < 4) {
+                topItems.push({
+                  title: `${c.firstName} ${c.lastName} \u2014 license ${status === "Expired" ? "expired" : `expires in ${days}d`}`,
+                  severity: status === "Expired" ? "urgent" : "attention"
+                });
+              }
+            }
+          }
+          const trainRows = sqlite.prepare(
+            `SELECT nt.id, nt.scheduledDate, nt.expiryDate, nt.status, tc.name as trainingName, n.firstName, n.lastName
+             FROM nurseTrainings nt
+             JOIN nurses n ON nt.nurseId = n.id
+             JOIN trainingCatalog tc ON nt.trainingId = tc.id
+             WHERE n.archivedAt IS NULL`
+          ).all();
+          for (const t2 of trainRows) {
+            const schedDate = dateKey(t2.scheduledDate);
+            const expDate = dateKey(t2.expiryDate);
+            if (t2.status === "Scheduled" && schedDate && schedDate <= todayManila) {
+              trainingUrgent++;
+              if (topItems.length < 6) {
+                topItems.push({
+                  title: `${t2.firstName} ${t2.lastName} \u2014 overdue training ${t2.trainingName} (${schedDate})`,
+                  severity: "attention"
+                });
+              }
+            } else if (t2.status === "Completed" && expDate && daysUntilExpiry(expDate, todayManila) <= 0) {
+              trainingUrgent++;
+              if (topItems.length < 6) {
+                topItems.push({
+                  title: `${t2.firstName} ${t2.lastName} \u2014 cert expired for ${t2.trainingName}`,
+                  severity: "attention"
+                });
+              }
+            }
+          }
+        }
+      }
+      return {
+        status: "success",
+        alerts: {
+          total: licenseUrgent + trainingUrgent,
+          licenseUrgent,
+          trainingUrgent,
+          topItems
+        }
+      };
+    };
+    return await withTimeout(fetchAlerts(), 3e3, "Alerts database query timed out");
+  } catch {
+    return { status: "failed" };
+  }
+}
+async function getStaffSummaryOrSearch(isAuthorized, queryTerm) {
+  if (!isAuthorized) {
+    return { status: "success" };
+  }
+  try {
+    const fetchStaff = async () => {
+      const qClean = queryTerm?.trim().toLowerCase();
+      const cleanedSearch = qClean ? qClean.replace(/^(find|search|look up|who is)\s+(nurse|staff|attendant)?\s*/i, "").trim() : "";
+      const dbConn = await getDb();
+      if (dbConn) {
+        const activeCondition = and10(isNull11(nurses.archivedAt), activeNurseCondition());
+        if (cleanedSearch && cleanedSearch.length >= 2) {
+          const matched = await dbConn.select({
+            id: nurses.id,
+            firstName: nurses.firstName,
+            lastName: nurses.lastName,
+            staffType: nurses.staffType,
+            employeeId: nurses.employeeId,
+            areaName: areas.name
+          }).from(nurses).leftJoin(areas, eq14(nurses.currentAreaId, areas.id)).where(
+            and10(
+              activeCondition,
+              sql12`lower(${nurses.firstName} || ' ' || ${nurses.lastName}) LIKE ${`%${cleanedSearch}%`} OR lower(${nurses.employeeId}) LIKE ${`%${cleanedSearch}%`}`
+            )
+          ).limit(5);
+          return {
+            status: "success",
+            matchedStaff: matched.map((m) => ({
+              name: nurseFullName(m),
+              staffType: m.staffType || "Staff",
+              areaName: m.areaName || void 0
+            }))
+          };
+        }
+        const allActive = await dbConn.select({ staffType: nurses.staffType }).from(nurses).where(activeCondition);
+        const rnCount = allActive.filter((n) => n.staffType === "Registered Nurse").length;
+        const naCount = allActive.filter((n) => n.staffType === "Nursing Attendant").length;
+        return {
+          status: "success",
+          staffSummary: {
+            total: allActive.length,
+            rnCount,
+            naCount
+          }
+        };
+      }
+      const sqlite = getSqliteDb();
+      if (sqlite) {
+        if (cleanedSearch && cleanedSearch.length >= 2) {
+          const matched = sqlite.prepare(
+            `SELECT n.id, n.firstName, n.lastName, n.staffType, n.employeeId, a.name as areaName
+             FROM nurses n
+             LEFT JOIN areas a ON n.currentAreaId = a.id
+             WHERE n.archivedAt IS NULL AND (lower(n.firstName || ' ' || n.lastName) LIKE ? OR lower(n.employeeId) LIKE ?)
+             LIMIT 5`
+          ).all(`%${cleanedSearch}%`, `%${cleanedSearch}%`);
+          return {
+            status: "success",
+            matchedStaff: matched.map((m) => ({
+              name: nurseFullName(m),
+              staffType: m.staffType || "Staff",
+              areaName: m.areaName || void 0
+            }))
+          };
+        }
+        const counts = sqlite.prepare(
+          `SELECT staffType, COUNT(*) as count FROM nurses WHERE archivedAt IS NULL GROUP BY staffType`
+        ).all();
+        let rnCount = 0;
+        let naCount = 0;
+        let total = 0;
+        for (const c of counts) {
+          const cnt = Number(c.count);
+          total += cnt;
+          if (c.staffType === "Registered Nurse") rnCount += cnt;
+          if (c.staffType === "Nursing Attendant") naCount += cnt;
+        }
+        return {
+          status: "success",
+          staffSummary: { total, rnCount, naCount }
+        };
+      }
+      return { status: "success" };
+    };
+    return await withTimeout(fetchStaff(), 3e3, "Staff database query timed out");
+  } catch {
+    return { status: "failed" };
+  }
+}
+async function getLicensesSummary(todayManila) {
+  try {
+    const fetchLicenses = async () => {
+      const dbConn = await getDb();
+      let expired = 0;
+      let within6Months = 0;
+      let within1Year = 0;
+      let valid = 0;
+      let total = 0;
+      const urgentItems = [];
+      if (dbConn) {
+        const rows = await dbConn.select({
+          id: nurseCredentials.id,
+          expiryDate: nurseCredentials.expiryDate,
+          firstName: nurses.firstName,
+          lastName: nurses.lastName
+        }).from(nurseCredentials).innerJoin(nurses, eq14(nurseCredentials.nurseId, nurses.id)).where(isNull11(nurses.archivedAt));
+        total = rows.length;
+        for (const r of rows) {
+          const d = dateKey(r.expiryDate);
+          const status = deriveLicenseStatus(d, todayManila);
+          const days = daysUntilExpiry(d, todayManila);
+          if (status === "Expired") {
+            expired++;
+            if (urgentItems.length < 5) {
+              urgentItems.push({ nurseName: `${r.firstName} ${r.lastName}`, status, daysText: "Expired" });
+            }
+          } else if (status === "Within 6 Months") {
+            within6Months++;
+            if (urgentItems.length < 5) {
+              urgentItems.push({ nurseName: `${r.firstName} ${r.lastName}`, status, daysText: `expires in ${days} days` });
+            }
+          } else if (status === "Within 1 Year") {
+            within1Year++;
+          } else {
+            valid++;
+          }
+        }
+      } else {
+        const sqlite = getSqliteDb();
+        if (sqlite) {
+          const rows = sqlite.prepare(
+            `SELECT nc.id, nc.expiryDate, n.firstName, n.lastName
+             FROM nurseCredentials nc
+             JOIN nurses n ON nc.nurseId = n.id
+             WHERE n.archivedAt IS NULL`
+          ).all();
+          total = rows.length;
+          for (const r of rows) {
+            const d = dateKey(r.expiryDate);
+            const status = deriveLicenseStatus(d, todayManila);
+            const days = daysUntilExpiry(d, todayManila);
+            if (status === "Expired") {
+              expired++;
+              if (urgentItems.length < 5) {
+                urgentItems.push({ nurseName: `${r.firstName} ${r.lastName}`, status, daysText: "Expired" });
+              }
+            } else if (status === "Within 6 Months") {
+              within6Months++;
+              if (urgentItems.length < 5) {
+                urgentItems.push({ nurseName: `${r.firstName} ${r.lastName}`, status, daysText: `expires in ${days} days` });
+              }
+            } else if (status === "Within 1 Year") {
+              within1Year++;
+            } else {
+              valid++;
+            }
+          }
+        }
+      }
+      return {
+        status: "success",
+        licenses: {
+          expired,
+          within6Months,
+          within1Year,
+          valid,
+          total,
+          urgentItems
+        }
+      };
+    };
+    return await withTimeout(fetchLicenses(), 3e3, "License database query timed out");
+  } catch {
+    return { status: "failed" };
+  }
+}
+async function getTrainingFollowupSummary() {
+  try {
+    const fetchFollowup = async () => {
+      const dbConn = await getDb();
+      let total = 0;
+      let pendingResponse = 0;
+      let cannotAttend = 0;
+      let missingEmail = 0;
+      let evidenceReview = 0;
+      let missed = 0;
+      if (dbConn) {
+        const rows = await dbConn.select({
+          id: nurseTrainings.id,
+          status: nurseTrainings.status,
+          staffResponse: nurseTrainings.staffResponse,
+          evidenceStatus: nurseTrainings.evidenceStatus,
+          attendanceOutcome: nurseTrainings.attendanceOutcome,
+          accountEmail: nurses.accountEmail
+        }).from(nurseTrainings).innerJoin(nurses, eq14(nurseTrainings.nurseId, nurses.id)).where(and10(isNull11(nurses.archivedAt), sql12`${nurseTrainings.status} != 'Cancelled'`));
+        total = rows.length;
+        for (const r of rows) {
+          if (!r.staffResponse || r.staffResponse === "Pending") pendingResponse++;
+          if (r.staffResponse === "Cannot attend") cannotAttend++;
+          if (!r.accountEmail) missingEmail++;
+          if (r.evidenceStatus === "Submitted") evidenceReview++;
+          if (r.attendanceOutcome === "Missed") missed++;
+        }
+      } else {
+        const sqlite = getSqliteDb();
+        if (sqlite) {
+          const rows = sqlite.prepare(
+            `SELECT nt.id, nt.status, nt.staffResponse, nt.evidenceStatus, nt.attendanceOutcome, n.accountEmail
+             FROM nurseTrainings nt
+             JOIN nurses n ON nt.nurseId = n.id
+             WHERE n.archivedAt IS NULL AND nt.status != 'Cancelled'`
+          ).all();
+          total = rows.length;
+          for (const r of rows) {
+            if (!r.staffResponse || r.staffResponse === "Pending") pendingResponse++;
+            if (r.staffResponse === "Cannot attend") cannotAttend++;
+            if (!r.accountEmail) missingEmail++;
+            if (r.evidenceStatus === "Submitted") evidenceReview++;
+            if (r.attendanceOutcome === "Missed" || r.attendanceOutcome === "missed") missed++;
+          }
+        }
+      }
+      return {
+        status: "success",
+        followup: {
+          counts: {
+            total,
+            pendingResponse,
+            cannotAttend,
+            missingEmail,
+            evidenceReview,
+            missed
+          }
+        }
+      };
+    };
+    return await withTimeout(fetchFollowup(), 3e3, "Training follow-up query timed out");
+  } catch {
+    return { status: "failed" };
+  }
+}
+async function getUpcomingSeminarsSummary(todayManila) {
+  try {
+    const fetchSeminars = async () => {
       const dbConn = await getDb();
       if (dbConn) {
         const rows = await dbConn.select({
-          trainingName: trainingCatalog.name,
-          scheduledDate: nurseTrainings.scheduledDate
-        }).from(nurseTrainings).innerJoin(trainingCatalog, eq14(nurseTrainings.trainingId, trainingCatalog.id)).where(
-          and10(
-            eq14(nurseTrainings.status, "Scheduled"),
-            isNotNull3(nurseTrainings.scheduledDate),
-            gte4(nurseTrainings.scheduledDate, sql12`(${todayManila})::date`)
-          )
-        ).orderBy(asc5(nurseTrainings.scheduledDate)).limit(20);
-        const seen = /* @__PURE__ */ new Set();
-        const results = [];
-        for (const r of rows) {
-          const d = dateKey(r.scheduledDate);
-          if (!d || d < todayManila) continue;
-          const key = `${r.trainingName}::${d}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            results.push({ trainingName: r.trainingName, scheduledDate: d });
+          id: trainingEvents.id,
+          venue: trainingEvents.venue,
+          startDate: trainingEvents.startDate,
+          endDate: trainingEvents.endDate,
+          title: trainingCatalog.name
+        }).from(trainingEvents).innerJoin(trainingCatalog, eq14(trainingCatalog.id, trainingEvents.trainingId)).where(sql12`(${trainingEvents.endDate} >= (${todayManila})::date OR ${trainingEvents.startDate} >= (${todayManila})::date)`).orderBy(asc5(trainingEvents.startDate)).limit(5);
+        const eventIds = rows.map((r) => r.id);
+        const countMap = /* @__PURE__ */ new Map();
+        if (eventIds.length > 0) {
+          const counts = await dbConn.select({ eventId: nurseTrainings.eventId, count: sql12`count(*)::int` }).from(nurseTrainings).where(sql12`${nurseTrainings.eventId} IN (${sql12.join(eventIds.map((id) => sql12`${id}`), sql12`, `)})`).groupBy(nurseTrainings.eventId);
+          for (const c of counts) {
+            if (c.eventId) countMap.set(c.eventId, Number(c.count));
           }
-          if (results.length >= 10) break;
         }
-        return { status: "success", upcoming: results };
+        return {
+          status: "success",
+          seminars: rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            dateStr: dateKey(r.startDate),
+            venue: r.venue || void 0,
+            enrolledCount: countMap.get(r.id) ?? 0
+          }))
+        };
       }
       const sqlite = getSqliteDb();
       if (sqlite) {
         const rows = sqlite.prepare(
-          `SELECT c.name as trainingName, nt.scheduledDate as scheduledDate
-           FROM nurseTrainings nt
-           JOIN trainingCatalog c ON nt.trainingId = c.id
-           WHERE nt.status = 'Scheduled' AND nt.scheduledDate >= ?
-           ORDER BY nt.scheduledDate ASC
-           LIMIT 20`
-        ).all(todayManila);
-        const seen = /* @__PURE__ */ new Set();
-        const results = [];
-        for (const r of rows) {
-          const d = dateKey(r.scheduledDate);
-          if (!d || d < todayManila) continue;
-          const key = `${r.trainingName}::${d}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            results.push({ trainingName: r.trainingName, scheduledDate: d });
-          }
-          if (results.length >= 10) break;
-        }
-        return { status: "success", upcoming: results };
+          `SELECT te.id, te.venue, te.startDate, te.endDate, tc.name as title
+           FROM trainingEvents te
+           JOIN trainingCatalog tc ON te.trainingId = tc.id
+           WHERE te.endDate >= ? OR te.startDate >= ?
+           ORDER BY te.startDate ASC
+           LIMIT 5`
+        ).all(todayManila, todayManila);
+        return {
+          status: "success",
+          seminars: rows.map((r) => ({
+            id: r.id,
+            title: r.title,
+            dateStr: dateKey(r.startDate),
+            venue: r.venue || void 0,
+            enrolledCount: 0
+          }))
+        };
       }
-      return { status: "success", upcoming: [] };
+      return { status: "success", seminars: [] };
     };
-    return await withTimeout(fetchTrainings(), 3e3, "Training database query timed out");
+    return await withTimeout(fetchSeminars(), 3e3, "Seminars query timed out");
   } catch {
-    return { status: "failed", upcoming: [] };
+    return { status: "failed", seminars: [] };
+  }
+}
+async function getCalendarSummary(todayManila) {
+  try {
+    const fetchCalendar = async () => {
+      const todayDateObj = /* @__PURE__ */ new Date(`${todayManila}T00:00:00`);
+      const weekEndDateObj = new Date(todayDateObj.getTime() + 7 * 864e5);
+      const weekEndStr = getTodayManila(weekEndDateObj);
+      const dbConn = await getDb();
+      const todayEvents = [];
+      const weekEvents = [];
+      if (dbConn) {
+        const seminars = await dbConn.select({ title: trainingCatalog.name, startDate: trainingEvents.startDate, venue: trainingEvents.venue }).from(trainingEvents).innerJoin(trainingCatalog, eq14(trainingEvents.trainingId, trainingCatalog.id)).where(sql12`(${trainingEvents.startDate} >= (${todayManila})::date AND ${trainingEvents.startDate} <= (${weekEndStr})::date)`).limit(10);
+        for (const s of seminars) {
+          const d = dateKey(s.startDate);
+          if (d === todayManila) {
+            todayEvents.push({ title: `Seminar: ${s.title}${s.venue ? ` @ ${s.venue}` : ""}` });
+          } else {
+            weekEvents.push({ title: `Seminar: ${s.title}`, date: d });
+          }
+        }
+      } else {
+        const sqlite = getSqliteDb();
+        if (sqlite) {
+          const rows = sqlite.prepare(
+            `SELECT tc.name as title, te.startDate, te.venue
+             FROM trainingEvents te
+             JOIN trainingCatalog tc ON te.trainingId = tc.id
+             WHERE te.startDate >= ? AND te.startDate <= ?
+             LIMIT 10`
+          ).all(todayManila, weekEndStr);
+          for (const s of rows) {
+            const d = dateKey(s.startDate);
+            if (d === todayManila) {
+              todayEvents.push({ title: `Seminar: ${s.title}${s.venue ? ` @ ${s.venue}` : ""}` });
+            } else {
+              weekEvents.push({ title: `Seminar: ${s.title}`, date: d });
+            }
+          }
+        }
+      }
+      return {
+        status: "success",
+        calendar: {
+          todayEvents,
+          weekEvents
+        }
+      };
+    };
+    return await withTimeout(fetchCalendar(), 3e3, "Calendar query timed out");
+  } catch {
+    return { status: "failed" };
   }
 }
 var inquiryRouter = router({
@@ -11171,22 +11642,51 @@ var inquiryRouter = router({
     let dbReadAttempted = false;
     if (needsDatabaseContext(input.question, input.topicId)) {
       dbReadAttempted = true;
-      const [areasRes, trainingsRes] = await Promise.all([
-        getAreaCountsSummary(isAuthorized),
-        getUpcomingTrainingsSummary(todayManila)
-      ]);
-      const areasSuccess = areasRes.status === "success";
-      const trainingsSuccess = trainingsRes.status === "success";
-      dbReadSucceeded = areasSuccess && trainingsSuccess;
+      const target2 = detectTargetTopic(input.question, input.topicId);
       liveContext = {
         today_manila: todayManila,
-        is_authorized: isAuthorized,
-        active_areas: areasRes.areas,
-        areas_status: areasRes.status,
-        total_active_staff: areasRes.totalStaff,
-        upcoming_trainings: trainingsRes.upcoming,
-        trainings_status: trainingsRes.status
+        is_authorized: isAuthorized
       };
+      if (target2 === "needs_attention") {
+        const res = await getAlertsSummary(todayManila);
+        liveContext.alerts_status = res.status;
+        liveContext.alerts_summary = res.alerts;
+        dbReadSucceeded = res.status === "success";
+      } else if (target2 === "find_staff") {
+        const res = await getStaffSummaryOrSearch(isAuthorized, input.question);
+        liveContext.staff_status = res.status;
+        liveContext.staff_summary = res.staffSummary;
+        liveContext.matched_staff = res.matchedStaff;
+        dbReadSucceeded = res.status === "success";
+      } else if (target2 === "license_status") {
+        const res = await getLicensesSummary(todayManila);
+        liveContext.licenses_status = res.status;
+        liveContext.licenses_summary = res.licenses;
+        dbReadSucceeded = res.status === "success";
+      } else if (target2 === "training_followup") {
+        const res = await getTrainingFollowupSummary();
+        liveContext.followup_status = res.status;
+        liveContext.followup_summary = res.followup;
+        dbReadSucceeded = res.status === "success";
+      } else if (target2 === "upcoming_seminars" || target2 === "trainings") {
+        const res = await getUpcomingSeminarsSummary(todayManila);
+        liveContext.seminars_status = res.status;
+        liveContext.seminar_events = res.seminars;
+        dbReadSucceeded = res.status === "success";
+      } else if (target2 === "area_assignments" || target2 === "areas") {
+        const res = await getAreaCountsSummary(isAuthorized);
+        liveContext.areas_status = res.status;
+        liveContext.active_areas = res.areas;
+        liveContext.total_active_staff = res.totalStaff;
+        dbReadSucceeded = res.status === "success";
+      } else if (target2 === "calendar") {
+        const res = await getCalendarSummary(todayManila);
+        liveContext.calendar_status = res.status;
+        liveContext.calendar_summary = res.calendar;
+        dbReadSucceeded = res.status === "success";
+      } else {
+        dbReadSucceeded = true;
+      }
     }
     const headers = { "Content-Type": "application/json" };
     if (process.env.INQUIRY_SERVICE_SECRET) {
@@ -11207,89 +11707,147 @@ var inquiryRouter = router({
       if (resp.ok) {
         const json2 = await resp.json();
         return {
-          success: true,
+          success: Boolean(json2.success ?? true),
           answer: json2.answer || "",
           topic_id: json2.topic_id ?? null,
-          title: json2.title || "General Inquiries",
+          title: json2.title || "NurseTrack Assistant",
           match_type: json2.match_type || "UNKNOWN",
           related_topics: json2.related_topics || [],
           candidate_topics: json2.candidate_topics || [],
           contact_snippet: json2.contact_snippet,
-          live_synced: dbReadAttempted ? dbReadSucceeded : false
+          live_synced: dbReadAttempted ? dbReadSucceeded : false,
+          action_links: json2.action_links || []
         };
       }
     } catch {
     }
-    const tId = input.topicId?.trim().toLowerCase();
-    const qLower = (input.question || "").toLowerCase();
-    if (tId === "trainings" || qLower.includes("seminar") || qLower.includes("training")) {
-      if (liveContext && liveContext.trainings_status === "failed") {
-        return {
-          success: false,
-          answer: "Live training database records are currently unavailable. Please check the Training Calendar in the portal or contact the SKTI Training Coordinator.",
-          topic_id: "trainings",
-          title: "Seminars & Trainings",
-          match_type: "DB_UNAVAILABLE",
-          related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "trainings"),
-          candidate_topics: [],
-          live_synced: false
-        };
-      }
-      const upcoming = liveContext?.upcoming_trainings || [];
-      let answer = "SPMC SKTI Seminars & Staff Trainings (Live Database):\n\n";
-      if (upcoming.length > 0) {
-        answer += upcoming.map((u) => `\u2022 ${u.trainingName} \u2014 Scheduled: ${u.scheduledDate}`).join("\n");
-      } else {
-        answer += "There are currently no upcoming seminars or trainings scheduled in the database.";
-      }
+    const target = detectTargetTopic(input.question, input.topicId);
+    if (!isAuthorized && ["needs_attention", "find_staff", "license_status", "training_followup"].includes(target)) {
       return {
         success: true,
-        answer,
-        topic_id: "trainings",
-        title: "Seminars & Trainings",
-        match_type: "EXACT_TOPIC",
-        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "trainings"),
+        answer: "Supervisor authentication required to view internal staff and compliance records. Please sign in to NurseTrack.",
+        topic_id: target,
+        title: "Authentication Required",
+        match_type: "UNAUTHORIZED",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== target),
         candidate_topics: [],
-        live_synced: Boolean(liveContext && liveContext.trainings_status === "success")
+        live_synced: false,
+        action_links: [{ label: "Supervisor Sign In", url: "/dashboard" }]
       };
     }
-    if (tId === "areas" || qLower.includes("area") || qLower.includes("unit")) {
-      if (liveContext && liveContext.areas_status === "failed") {
-        return {
-          success: false,
-          answer: "Clinical area database records are currently unavailable. Please contact the SKTI Nursing Office at local 4135.",
-          topic_id: "areas",
-          title: "Clinical Units & Areas",
-          match_type: "DB_UNAVAILABLE",
-          related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "areas"),
-          candidate_topics: [],
-          live_synced: false
-        };
-      }
+    if (target === "needs_attention") {
+      const alerts = liveContext?.alerts_summary;
+      const ans = alerts ? `NurseTrack Action Center: ${alerts.total} item(s) need attention (${alerts.licenseUrgent} expiring/expired licenses, ${alerts.trainingUrgent} overdue trainings).` : "Action Center: Expiring licenses, overdue trainings, and unassigned staff require supervisor review.";
+      return {
+        success: true,
+        answer: ans,
+        topic_id: "needs_attention",
+        title: "Needs Attention",
+        match_type: "EXACT_TOPIC",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "needs_attention"),
+        candidate_topics: [],
+        live_synced: Boolean(liveContext?.alerts_status === "success"),
+        action_links: [{ label: "Open Dashboard Action Center", url: "/dashboard" }]
+      };
+    }
+    if (target === "license_status") {
+      const l = liveContext?.licenses_summary;
+      const ans = l ? `PRC License Compliance: ${l.expired} expired, ${l.within6Months} expiring within 6 months, ${l.valid} valid (${l.total} total active credentials).` : "PRC License Registry: Monitors licenses against hospital compliance thresholds.";
+      return {
+        success: true,
+        answer: ans,
+        topic_id: "license_status",
+        title: "License Status",
+        match_type: "EXACT_TOPIC",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "license_status"),
+        candidate_topics: [],
+        live_synced: Boolean(liveContext?.licenses_status === "success"),
+        action_links: [{ label: "Open License Registry", url: "/licenses" }]
+      };
+    }
+    if (target === "training_followup") {
+      const f = liveContext?.followup_summary?.counts;
+      const ans = f ? `Training Follow-up: ${f.pendingResponse} pending staff response, ${f.evidenceReview} certificates uploaded, ${f.cannotAttend} cannot attend.` : "Training Follow-up: Review submitted certificates and attendance outcomes.";
+      return {
+        success: true,
+        answer: ans,
+        topic_id: "training_followup",
+        title: "Training Follow-up",
+        match_type: "EXACT_TOPIC",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "training_followup"),
+        candidate_topics: [],
+        live_synced: Boolean(liveContext?.followup_status === "success"),
+        action_links: [{ label: "Open Training Follow-up", url: "/trainings" }]
+      };
+    }
+    if (target === "upcoming_seminars" || target === "trainings") {
+      const s = liveContext?.seminar_events || [];
+      const ans = s.length > 0 ? `Upcoming Seminars:
+${s.map((ev) => `\u2022 ${ev.title} \u2014 ${ev.dateStr}${ev.venue ? ` @ ${ev.venue}` : ""}`).join("\n")}` : "Upcoming Seminars: There are currently no upcoming hospital seminars or workshops scheduled in the database.";
+      return {
+        success: true,
+        answer: ans,
+        topic_id: "upcoming_seminars",
+        title: "Upcoming Seminars",
+        match_type: "EXACT_TOPIC",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "upcoming_seminars"),
+        candidate_topics: [],
+        live_synced: Boolean(liveContext?.seminars_status === "success"),
+        action_links: [{ label: "Open Seminar Schedule", url: "/seminars" }]
+      };
+    }
+    if (target === "area_assignments" || target === "areas") {
       const areaList = liveContext?.active_areas || [];
-      let answer = "SPMC SKTI Clinical Units & Areas (Live Database):\n\n";
+      let ans = "SPMC SKTI Clinical Units & Areas (Live Database):\n\n";
       if (areaList.length > 0) {
-        answer += areaList.map((a) => {
+        ans += areaList.map((a) => {
           const countStr = isAuthorized && a.staffCount !== void 0 ? ` (${a.staffCount} active staff assigned)` : "";
           return `\u2022 ${a.name}${countStr}`;
         }).join("\n");
         if (isAuthorized && liveContext?.total_active_staff !== void 0) {
-          answer += `
+          ans += `
 
 Total Active Staff Tracked: ${liveContext.total_active_staff}`;
         }
       } else {
-        answer += "No active clinical areas currently found in the system.";
+        ans += "No active clinical areas currently found in the system.";
       }
       return {
         success: true,
-        answer,
-        topic_id: "areas",
-        title: "Clinical Units & Areas",
+        answer: ans,
+        topic_id: "area_assignments",
+        title: "Area Assignments",
         match_type: "EXACT_TOPIC",
-        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "areas"),
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "area_assignments"),
         candidate_topics: [],
-        live_synced: Boolean(liveContext && liveContext.areas_status === "success")
+        live_synced: Boolean(liveContext?.areas_status === "success"),
+        action_links: [{ label: "Manage Clinical Units", url: "/areas" }]
+      };
+    }
+    if (target === "calendar") {
+      return {
+        success: true,
+        answer: "Master Calendar displays hospital operational events across daily, weekly, and monthly views.",
+        topic_id: "calendar",
+        title: "Calendar",
+        match_type: "EXACT_TOPIC",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "calendar"),
+        candidate_topics: [],
+        live_synced: true,
+        action_links: [{ label: "Open Master Calendar", url: "/calendar" }]
+      };
+    }
+    if (target === "reports") {
+      return {
+        success: true,
+        answer: "NurseTrack includes 6 verified compliance reports: License Status, Expiring & Due Licenses, Training Compliance, Area Exposure, Training Summary, and Area Transfer Log. All exportable to Excel (.xlsx).",
+        topic_id: "reports",
+        title: "Reports",
+        match_type: "EXACT_TOPIC",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "reports"),
+        candidate_topics: [],
+        live_synced: true,
+        action_links: [{ label: "Open Reports & Exports", url: "/reports" }]
       };
     }
     return {
@@ -11300,8 +11858,9 @@ Total Active Staff Tracked: ${liveContext.total_active_staff}`;
       match_type: "SERVICE_UNAVAILABLE",
       related_topics: FALLBACK_TOPICS,
       candidate_topics: FALLBACK_TOPICS,
-      contact_snippet: "SPMC Trunkline: (082) 227-2731 | Dialysis Local: 4128/4129",
-      live_synced: false
+      contact_snippet: "SKTI Nursing Office: (082) 227-2731 local 4135",
+      live_synced: false,
+      action_links: [{ label: "Open Dashboard", url: "/dashboard" }]
     };
   })
 });
