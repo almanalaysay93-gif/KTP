@@ -1,5 +1,6 @@
 import { getSqliteDb } from "./localDb";
-import { daysUntilExpiry, deriveLicenseStatus, todayDate, dateKey, nurseFullName, durationBetween, trainingCompliance, STAFF_TYPES, TARGET_STAFF_TYPES, PARTICIPATION_ROLES, INACTIVE_EMPLOYMENT_STATUSES } from "../shared/nursetrack";
+import { buildAreaExposure, buildTrainingCompliance } from "./reportBuilders";
+import { daysUntilExpiry, deriveLicenseStatus, todayDate, dateKey, nurseFullName, trainingCompliance, STAFF_TYPES, TARGET_STAFF_TYPES, PARTICIPATION_ROLES, INACTIVE_EMPLOYMENT_STATUSES } from "../shared/nursetrack";
 
 const INACTIVE_STATUS_SQL_LIST = INACTIVE_EMPLOYMENT_STATUSES.map((s) => `'${s}'`).join(", ");
 
@@ -417,28 +418,31 @@ export function getLocalReportData(type: string) {
       }));
   }
 
+  if (type === "trainingCompliance") {
+    return buildTrainingCompliance({
+      areas: sqlite.prepare("SELECT id, name FROM areas WHERE active = 1 ORDER BY sortOrder ASC, name ASC").all() as any[],
+      requirements: sqlite.prepare("SELECT areaId, trainingId FROM areaTrainingRequirements WHERE required = 1").all() as any[],
+      nurses: sqlite
+        .prepare(`SELECT id, currentAreaId FROM nurses WHERE archivedAt IS NULL AND employmentStatus NOT IN (${INACTIVE_STATUS_SQL_LIST})`)
+        .all() as any[],
+      completedRecords: sqlite.prepare("SELECT nurseId, trainingId, expiryDate FROM nurseTrainings WHERE status = 'Completed'").all() as any[],
+      today,
+    });
+  }
+
   if (type === "areaExposure") {
     const rows = sqlite.prepare(`
-      SELECT n.employeeId,
+      SELECT n.id as nurseId, n.employeeId,
              (SELECT c.licenseNumber FROM nurseCredentials c WHERE c.nurseId = n.id ORDER BY date(c.expiryDate) DESC LIMIT 1) as licenseNumber,
              n.firstName, n.middleName, n.lastName, n.suffix,
-             a.name as areaName, asgn.startDate, asgn.endDate, asgn.assignmentType
+             asgn.areaId, a.name as areaName, asgn.startDate, asgn.endDate
       FROM areaAssignments asgn
       INNER JOIN nurses n ON n.id = asgn.nurseId
       INNER JOIN areas a ON a.id = asgn.areaId
       WHERE n.archivedAt IS NULL
-      ORDER BY n.lastName ASC, n.firstName ASC, date(asgn.startDate) ASC
     `).all() as any[];
 
-    return rows.map((r) => ({
-      nurse: nurseFullName(r),
-      employeeId: r.licenseNumber || r.employeeId,
-      areaName: r.areaName,
-      startDate: dateKey(r.startDate),
-      endDate: r.endDate ? dateKey(r.endDate) : "Present",
-      assignmentType: r.assignmentType ?? "—",
-      durationDays: durationBetween(dateKey(r.startDate), r.endDate ? dateKey(r.endDate) : today),
-    }));
+    return buildAreaExposure(rows, today);
   }
 
   if (type === "trainingSummary") {
@@ -471,7 +475,7 @@ export function getLocalReportData(type: string) {
 
   if (type === "transferLog") {
     const rows = sqlite.prepare(`
-      SELECT n.employeeId,
+      SELECT n.id as nurseId, n.employeeId,
              (SELECT c.licenseNumber FROM nurseCredentials c WHERE c.nurseId = n.id ORDER BY date(c.expiryDate) DESC LIMIT 1) as licenseNumber,
              n.firstName, n.middleName, n.lastName, n.suffix,
              a.name as areaName, asgn.startDate, asgn.endDate, asgn.assignmentType, asgn.remarks
@@ -483,7 +487,8 @@ export function getLocalReportData(type: string) {
 
     return rows.map((r) => ({
       nurse: nurseFullName(r),
-      employeeId: r.licenseNumber || r.employeeId,
+      nurseId: r.nurseId,
+      licenseNumber: r.licenseNumber || r.employeeId,
       areaName: r.areaName,
       startDate: dateKey(r.startDate),
       endDate: r.endDate ? dateKey(r.endDate) : "Present",

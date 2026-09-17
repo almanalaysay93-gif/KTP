@@ -14,7 +14,8 @@ import {
   credentialTypes,
   trainingCatalog,
 } from "../../drizzle/schema";
-import { daysUntilExpiry, deriveLicenseStatus, durationBetween, todayDate, nurseFullName } from "../../shared/nursetrack";
+import { daysUntilExpiry, deriveLicenseStatus, todayDate, nurseFullName } from "../../shared/nursetrack";
+import { buildAreaExposure, buildTrainingCompliance } from "../reportBuilders";
 
 export type ReportType = "licenseStatus" | "licenseDue" | "trainingCompliance" | "areaExposure" | "trainingSummary" | "transferLog";
 
@@ -28,8 +29,8 @@ export const reportsRouter = router({
         { type: "licenseStatus" as ReportType, label: "License Status Overview", description: "Active license status of all nurses by area", rowHint: activeCount },
         { type: "licenseDue" as ReportType, label: "Licenses Due for Renewal", description: "Licenses expiring within 1 year, sorted by urgency", rowHint: null },
         { type: "trainingCompliance" as ReportType, label: "Training Compliance by Area", description: "Required-training completion per area", rowHint: areaList.length },
-        { type: "areaExposure" as ReportType, label: "Area Exposure Report", description: "Per-nurse time spent in each area across all assignments", rowHint: activeCount },
-        { type: "trainingSummary" as ReportType, label: "Training Summary", description: "Training counts by category, provider, and status", rowHint: null },
+        { type: "areaExposure" as ReportType, label: "Area Exposure Report", description: "Total days each nurse spent in each area across all assignments", rowHint: null },
+        { type: "trainingSummary" as ReportType, label: "Training Summary", description: "Every training record with category, status, dates, hours, and provider", rowHint: null },
         { type: "transferLog" as ReportType, label: "Transfer Log", description: "Complete history of area transfers, oldest to newest", rowHint: null },
       ];
     }
@@ -38,18 +39,13 @@ export const reportsRouter = router({
 
     const [activeRow] = await db.select({ count: sql<number>`count(*)` }).from(nurses).where(activeNurseCond);
     const areaCount = (await db.select().from(areas).where(eq(areas.active, true))).length;
-    const expiredCount = (await db
-      .select({ count: sql<number>`count(*)` })
-      .from(nurseCredentials)
-      .innerJoin(nurses, eq(nurses.id, nurseCredentials.nurseId))
-      .where(isNull(nurses.archivedAt))).length;
 
     return [
       { type: "licenseStatus" as ReportType, label: "License Status Overview", description: "Active license status of all nurses by area", rowHint: activeRow?.count ?? 0 },
       { type: "licenseDue" as ReportType, label: "Licenses Due for Renewal", description: "Licenses expiring within 1 year, sorted by urgency", rowHint: null },
       { type: "trainingCompliance" as ReportType, label: "Training Compliance by Area", description: "Required-training completion per area", rowHint: areaCount },
-      { type: "areaExposure" as ReportType, label: "Area Exposure Report", description: "Per-nurse time spent in each area across all assignments", rowHint: activeRow?.count ?? 0 },
-      { type: "trainingSummary" as ReportType, label: "Training Summary", description: "Training counts by category, provider, and status", rowHint: null },
+      { type: "areaExposure" as ReportType, label: "Area Exposure Report", description: "Total days each nurse spent in each area across all assignments", rowHint: null },
+      { type: "trainingSummary" as ReportType, label: "Training Summary", description: "Every training record with category, status, dates, hours, and provider", rowHint: null },
       { type: "transferLog" as ReportType, label: "Transfer Log", description: "Complete history of area transfers, oldest to newest", rowHint: null },
     ];
   }),
@@ -142,40 +138,20 @@ export const reportsRouter = router({
       }
 
       if (input.type === "trainingCompliance") {
-        const areaRows = await db.select().from(areas);
-        const result = [];
-        for (const area of areaRows) {
-          const requiredIds = await db
-            .select({ trainingId: areaTrainingRequirements.trainingId })
+        // Four set-based reads instead of one query per area, staff member, and training.
+        const [areaRows, requirements, staff, completed] = await Promise.all([
+          db.select({ id: areas.id, name: areas.name }).from(areas).where(eq(areas.active, true)).orderBy(asc(areas.sortOrder), asc(areas.name)),
+          db
+            .select({ areaId: areaTrainingRequirements.areaId, trainingId: areaTrainingRequirements.trainingId })
             .from(areaTrainingRequirements)
-            .where(and(eq(areaTrainingRequirements.areaId, area.id), eq(areaTrainingRequirements.required, true)));
-          const required = requiredIds.map((r) => r.trainingId);
-          const staff = await db
-            .select({ id: nurses.id, firstName: nurses.firstName, middleName: nurses.middleName, lastName: nurses.lastName })
-            .from(nurses)
-            .where(and(eq(nurses.currentAreaId, area.id), isNull(nurses.archivedAt)));
-          let compliant = 0;
-          let total = 0;
-          for (const n of staff) {
-            total += required.length;
-            for (const tid of required) {
-              const records = await db
-                .select({ status: nurseTrainings.status, expiryDate: nurseTrainings.expiryDate })
-                .from(nurseTrainings)
-                .where(and(eq(nurseTrainings.nurseId, n.id), eq(nurseTrainings.trainingId, tid), eq(nurseTrainings.status, "Completed")));
-              if (records.some((r) => !r.expiryDate || new Date(r.expiryDate) > new Date(`${today}T00:00:00`))) compliant++;
-            }
-          }
-          result.push({
-            areaName: area.name,
-            requiredTrainings: required.length,
-            staffCount: staff.length,
-            requiredChecks: total,
-            compliantChecks: compliant,
-            compliancePercent: total > 0 ? Math.round((compliant / total) * 100) : 100,
-          });
-        }
-        return result;
+            .where(eq(areaTrainingRequirements.required, true)),
+          db.select({ id: nurses.id, currentAreaId: nurses.currentAreaId }).from(nurses).where(activeNurseCondition()),
+          db
+            .select({ nurseId: nurseTrainings.nurseId, trainingId: nurseTrainings.trainingId, expiryDate: nurseTrainings.expiryDate })
+            .from(nurseTrainings)
+            .where(eq(nurseTrainings.status, "Completed")),
+        ]);
+        return buildTrainingCompliance({ areas: areaRows, requirements, nurses: staff, completedRecords: completed, today });
       }
 
       if (input.type === "areaExposure") {
@@ -186,28 +162,21 @@ export const reportsRouter = router({
             firstName: nurses.firstName,
             middleName: nurses.middleName,
             lastName: nurses.lastName,
+            suffix: nurses.suffix,
             areaId: areaAssignments.areaId,
             areaName: areas.name,
             startDate: areaAssignments.startDate,
             endDate: areaAssignments.endDate,
-            assignmentType: areaAssignments.assignmentType,
-            archivedAt: nurses.archivedAt,
           })
           .from(areaAssignments)
           .innerJoin(nurses, eq(nurses.id, areaAssignments.nurseId))
           .innerJoin(areas, eq(areas.id, areaAssignments.areaId))
-          .where(isNull(nurses.archivedAt))
-          .orderBy(asc(nurses.lastName), asc(nurses.firstName), asc(areaAssignments.startDate));
+          .where(isNull(nurses.archivedAt));
         const licenseByNurse = await latestLicenseNumbersByNurse(db, rows.map((r) => r.nurseId));
-        return rows.map((r) => ({
-          nurse: nurseFullName(r),
-          employeeId: licenseByNurse.get(r.nurseId) || r.employeeId,
-          areaName: r.areaName,
-          startDate: dateKey(r.startDate),
-          endDate: r.endDate ? dateKey(r.endDate) : "Present",
-          assignmentType: r.assignmentType ?? "—",
-          durationDays: daysBetween(dateKey(r.startDate), r.endDate ? dateKey(r.endDate) : today),
-        }));
+        return buildAreaExposure(
+          rows.map((r) => ({ ...r, licenseNumber: licenseByNurse.get(r.nurseId) ?? null })),
+          today,
+        );
       }
 
       if (input.type === "trainingSummary") {
@@ -228,28 +197,26 @@ export const reportsRouter = router({
             trainingHours: nurseTrainings.trainingHours,
             cpdUnits: nurseTrainings.cpdUnits,
             provider: nurseTrainings.provider,
-            archivedAt: nurses.archivedAt,
           })
           .from(nurseTrainings)
           .innerJoin(trainingCatalog, eq(trainingCatalog.id, nurseTrainings.trainingId))
           .innerJoin(nurses, eq(nurses.id, nurseTrainings.nurseId))
+          .where(isNull(nurses.archivedAt))
           .orderBy(asc(trainingCatalog.name), desc(nurseTrainings.scheduledDate));
-        return rows
-          .filter((r) => !r.archivedAt)
-          .map((r) => ({
-            nurse: nurseFullName(r),
-            trainingName: r.trainingName,
-            category: r.category ?? "—",
-            renewalRequired: r.renewalRequired,
-            defaultValidityMonths: r.defaultValidityMonths ?? null,
-            status: r.status,
-            scheduledDate: r.scheduledDate ? dateKey(r.scheduledDate) : "—",
-            completionDate: r.completionDate ? dateKey(r.completionDate) : "—",
-            expiryDate: r.expiryDate ? dateKey(r.expiryDate) : "—",
-            trainingHours: r.trainingHours ?? null,
-            cpdUnits: r.cpdUnits ?? null,
-            provider: r.provider ?? "—",
-          }));
+        return rows.map((r) => ({
+          nurse: nurseFullName(r),
+          trainingName: r.trainingName,
+          category: r.category ?? "—",
+          renewalRequired: r.renewalRequired,
+          defaultValidityMonths: r.defaultValidityMonths ?? null,
+          status: r.status,
+          scheduledDate: r.scheduledDate ? dateKey(r.scheduledDate) : "—",
+          completionDate: r.completionDate ? dateKey(r.completionDate) : "—",
+          expiryDate: r.expiryDate ? dateKey(r.expiryDate) : "—",
+          trainingHours: r.trainingHours ?? null,
+          cpdUnits: r.cpdUnits ?? null,
+          provider: r.provider ?? "—",
+        }));
       }
 
       // transferLog
@@ -274,7 +241,8 @@ export const reportsRouter = router({
       const licenseByNurse = await latestLicenseNumbersByNurse(db, rows.map((r) => r.nurseId));
       return rows.map((r) => ({
         nurse: nurseFullName(r),
-        employeeId: licenseByNurse.get(r.nurseId) || r.employeeId,
+        nurseId: r.nurseId,
+        licenseNumber: licenseByNurse.get(r.nurseId) || r.employeeId,
         areaName: r.areaName,
         startDate: dateKey(r.startDate),
         endDate: r.endDate ? dateKey(r.endDate) : "Present",
@@ -295,7 +263,8 @@ async function latestLicenseNumbersByNurse(db: NonNullable<Awaited<ReturnType<ty
   const latestByNurse = new Map<number, { licenseNumber: string | null; expiryDate: unknown }>();
   for (const r of rows) {
     const existing = latestByNurse.get(r.nurseId);
-    if (!existing || String(r.expiryDate) > String(existing.expiryDate)) latestByNurse.set(r.nurseId, r);
+    // Compare YYYY-MM-DD keys: String(Date) starts with the weekday name and does not sort by date.
+    if (!existing || dateKey(r.expiryDate as Date | string) > dateKey(existing.expiryDate as Date | string)) latestByNurse.set(r.nurseId, r);
   }
   const result = new Map<number, string>();
   for (const [nurseId, r] of Array.from(latestByNurse)) {
@@ -303,10 +272,3 @@ async function latestLicenseNumbersByNurse(db: NonNullable<Awaited<ReturnType<ty
   }
   return result;
 }
-
-function daysBetween(start: string | Date, end: string | Date, today = todayDate()): number {
-  const s = new Date(`${String(start)}T00:00:00`).getTime();
-  const e = end === "Present" || !end ? new Date(`${today}T00:00:00`).getTime() : new Date(`${String(end)}T00:00:00`).getTime();
-  return e >= s ? Math.floor((e - s) / 86400000) : 0;
-}
-
