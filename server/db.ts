@@ -88,7 +88,7 @@ export async function getDb() {
 export function getBatchClient() {
   if (!_batchPg && process.env.DATABASE_URL) {
     _batchPg = postgres(process.env.DATABASE_URL, {
-      max: 1,
+      max: 3,
       prepare: false,
       idle_timeout: 20,
       connect_timeout: 15,
@@ -800,6 +800,28 @@ export async function listAssignmentsForNurse(nurseId: number) {
   }
   const sqlite = getSqliteDb();
   const rows = sqlite.prepare("SELECT * FROM areaAssignments WHERE nurseId = ? ORDER BY date(startDate) DESC").all(nurseId) as any[];
+  return rows.map((r) => ({ ...r, isCurrent: Boolean(r.isCurrent) }));
+}
+
+export async function listAllActiveAssignments() {
+  const db = await getDb();
+  if (db) {
+    return await db
+      .select({
+        id: areaAssignments.id,
+        nurseId: areaAssignments.nurseId,
+        areaId: areaAssignments.areaId,
+        startDate: areaAssignments.startDate,
+        endDate: areaAssignments.endDate,
+        assignmentType: areaAssignments.assignmentType,
+        remarks: areaAssignments.remarks,
+        isCurrent: areaAssignments.isCurrent,
+      })
+      .from(areaAssignments)
+      .where(isNull(areaAssignments.endDate));
+  }
+  const sqlite = getSqliteDb();
+  const rows = sqlite.prepare("SELECT * FROM areaAssignments WHERE endDate IS NULL").all() as any[];
   return rows.map((r) => ({ ...r, isCurrent: Boolean(r.isCurrent) }));
 }
 

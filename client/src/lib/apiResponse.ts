@@ -21,6 +21,7 @@ export function shouldRetryQuery(failureCount: number, error: unknown): boolean 
 
 /** Layout-level queries that must not hold a page's data request open. */
 export const SEPARATE_BATCH_PATHS: ReadonlySet<string> = new Set([
+  "auth.me",
   "notifications.unreadCount",
   "notifications.list",
   "areas.list",

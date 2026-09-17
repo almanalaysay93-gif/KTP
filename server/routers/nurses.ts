@@ -104,7 +104,7 @@ export const nursesRouter = router({
               `select * from nursetrack.nurses where id = ${nurseId} limit 1`,
               `select * from nursetrack.areas order by "sortOrder"`,
               `select * from nursetrack."credentialTypes"`,
-              `select * from nursetrack."trainingCatalog" order by name`,
+              `select id, name from nursetrack."trainingCatalog" order by name`,
               `select id, "nurseId", "areaId", "startDate"::text as "startDate", "endDate"::text as "endDate", "assignmentType", remarks, "isCurrent"
                  from nursetrack."areaAssignments"
                  where "nurseId" = ${nurseId}
@@ -118,7 +118,12 @@ export const nursesRouter = router({
                  where "nurseId" = ${nurseId}
                  order by "completionDate" desc nulls last, id desc`,
               `select "areaId", "trainingId", required
-                 from nursetrack."areaTrainingRequirements"`,
+                 from nursetrack."areaTrainingRequirements"
+                where "areaId" in (
+                  select coalesce("currentAreaId", -1) from nursetrack.nurses where id = ${nurseId}
+                  union
+                  select coalesce("areaId", -1) from nursetrack."areaAssignments" where "nurseId" = ${nurseId}
+                )`,
             ].join(";\n"),
           )
           .simple()) as unknown as [

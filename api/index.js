@@ -1170,6 +1170,7 @@ __export(db_exports, {
   isEmailDuplicate: () => isEmailDuplicate,
   isNurseClaimable: () => isNurseClaimable,
   listActivityForNurse: () => listActivityForNurse,
+  listAllActiveAssignments: () => listAllActiveAssignments,
   listAreas: () => listAreas,
   listAssignmentsForNurse: () => listAssignmentsForNurse,
   listCredentialTypes: () => listCredentialTypes,
@@ -1234,7 +1235,7 @@ async function getDb() {
 function getBatchClient() {
   if (!_batchPg && process.env.DATABASE_URL) {
     _batchPg = postgres(process.env.DATABASE_URL, {
-      max: 1,
+      max: 3,
       prepare: false,
       idle_timeout: 20,
       connect_timeout: 15,
@@ -1797,6 +1798,24 @@ async function listAssignmentsForNurse(nurseId) {
   }
   const sqlite = getSqliteDb();
   const rows = sqlite.prepare("SELECT * FROM areaAssignments WHERE nurseId = ? ORDER BY date(startDate) DESC").all(nurseId);
+  return rows.map((r) => ({ ...r, isCurrent: Boolean(r.isCurrent) }));
+}
+async function listAllActiveAssignments() {
+  const db = await getDb();
+  if (db) {
+    return await db.select({
+      id: areaAssignments.id,
+      nurseId: areaAssignments.nurseId,
+      areaId: areaAssignments.areaId,
+      startDate: areaAssignments.startDate,
+      endDate: areaAssignments.endDate,
+      assignmentType: areaAssignments.assignmentType,
+      remarks: areaAssignments.remarks,
+      isCurrent: areaAssignments.isCurrent
+    }).from(areaAssignments).where(isNull(areaAssignments.endDate));
+  }
+  const sqlite = getSqliteDb();
+  const rows = sqlite.prepare("SELECT * FROM areaAssignments WHERE endDate IS NULL").all();
   return rows.map((r) => ({ ...r, isCurrent: Boolean(r.isCurrent) }));
 }
 async function createAssignment(data) {
@@ -5170,7 +5189,7 @@ var nursesRouter = router({
           `select * from nursetrack.nurses where id = ${nurseId} limit 1`,
           `select * from nursetrack.areas order by "sortOrder"`,
           `select * from nursetrack."credentialTypes"`,
-          `select * from nursetrack."trainingCatalog" order by name`,
+          `select id, name from nursetrack."trainingCatalog" order by name`,
           `select id, "nurseId", "areaId", "startDate"::text as "startDate", "endDate"::text as "endDate", "assignmentType", remarks, "isCurrent"
                  from nursetrack."areaAssignments"
                  where "nurseId" = ${nurseId}
@@ -5184,7 +5203,12 @@ var nursesRouter = router({
                  where "nurseId" = ${nurseId}
                  order by "completionDate" desc nulls last, id desc`,
           `select "areaId", "trainingId", required
-                 from nursetrack."areaTrainingRequirements"`
+                 from nursetrack."areaTrainingRequirements"
+                where "areaId" in (
+                  select coalesce("currentAreaId", -1) from nursetrack.nurses where id = ${nurseId}
+                  union
+                  select coalesce("areaId", -1) from nursetrack."areaAssignments" where "nurseId" = ${nurseId}
+                )`
         ].join(";\n")
       ).simple();
       const [nurseRows, areaRows2, credTypes2, catalog2, rawAssignments2, rawCreds2, rawTrainings2, areaReqs] = sets;
@@ -5676,8 +5700,39 @@ var credentialsRouter = router({
     return { success: true };
   }),
   // Single round-trip initial load merging credentials + nurses + types
-  // (the Licenses page previously fired three sequential network calls).
   initial: adminProcedure.query(async () => {
+    const pg = getBatchClient();
+    if (pg) {
+      const sets = await pg.unsafe(
+        [
+          `select id, "nurseId", "credentialTypeId", "licenseNumber", "issuingOrganization",
+                    "issueDate"::text as "issueDate", "expiryDate"::text as "expiryDate",
+                    "renewalStatus", "verificationStatus", "documentKey", remarks
+               from nursetrack."nurseCredentials"
+              order by "expiryDate" asc`,
+          `select id, "employeeId", "firstName", "middleName", "lastName", suffix, position, "currentAreaId", "archivedAt"
+               from nursetrack.nurses
+              where "archivedAt" is null`,
+          `select * from nursetrack."credentialTypes" order by name`
+        ].join(";\n")
+      ).simple();
+      const [rawCreds, activeNurses2, types2] = sets;
+      const activeNurseIds2 = new Set(activeNurses2.map((n) => n.id));
+      const nurseById2 = new Map(activeNurses2.map((n) => [n.id, n]));
+      const typeById2 = new Map(types2.map((t2) => [t2.id, t2]));
+      const activeCreds2 = rawCreds.filter((c) => activeNurseIds2.has(c.nurseId));
+      return {
+        credentials: activeCreds2.map((c) => ({
+          ...c,
+          nurse: nurseById2.get(c.nurseId),
+          typeName: typeById2.get(c.credentialTypeId)?.name ?? "Unknown",
+          derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
+          daysRemaining: daysUntilExpiry(dateKey(c.expiryDate))
+        })),
+        nurses: activeNurses2,
+        types: types2
+      };
+    }
     const [credentials, nurses2, types] = await Promise.all([
       listCredentials(),
       listNurses(),
@@ -6402,6 +6457,175 @@ var calendarRouter = router({
     const includeTypes = new Set(input.includeTypes ?? ["license", "training", "areaChange", "custom"]);
     const today = todayDate();
     const events = [];
+    const pg = getBatchClient();
+    if (pg) {
+      const queries = [
+        `select id, "firstName", "lastName", "currentAreaId", "archivedAt" from nursetrack.nurses where "archivedAt" is null`,
+        `select id, name from nursetrack.areas`,
+        includeTypes.has("license") ? `select id, "nurseId", "expiryDate"::text as "expiryDate" from nursetrack."nurseCredentials"` : `select 1 where false`,
+        includeTypes.has("training") ? `select id, name from nursetrack."trainingCatalog"` : `select 1 where false`,
+        includeTypes.has("training") ? `select id, "nurseId", "trainingId", status, "scheduledDate"::text as "scheduledDate", "completionDate"::text as "completionDate", "expiryDate"::text as "expiryDate" from nursetrack."nurseTrainings" where status != 'Cancelled'` : `select 1 where false`,
+        includeTypes.has("areaChange") ? `select a.id, a."nurseId", a."startDate"::text as "startDate", a."assignmentType", a."areaId", a."isCurrent"
+                 from nursetrack."areaAssignments" a
+                 join nursetrack.nurses n on n.id = a."nurseId"
+                where n."archivedAt" is null and a."endDate" is null` : `select 1 where false`,
+        includeTypes.has("custom") ? `select id, title, "eventDate"::text as "eventDate", "startTime", "endTime", "allDay", "nurseId", "areaId", description
+                 from nursetrack."customCalendarEvents"
+                where "eventDate" >= '${fromStr}' and "eventDate" <= '${toStr}'` : `select 1 where false`
+      ];
+      const sets = await pg.unsafe(queries.join(";\n")).simple();
+      const [nurseRows, areaRows2, creds, catalogRows2, trainings, assignments, customs] = sets;
+      const nurseById2 = new Map(nurseRows.map((n) => [n.id, n]));
+      const areaById2 = new Map(areaRows2.map((a) => [a.id, a]));
+      const catalogById2 = new Map(catalogRows2.map((c) => [c.id, c]));
+      if (includeTypes.has("license")) {
+        for (const c of creds) {
+          const nurse = nurseById2.get(c.nurseId);
+          if (!nurse || nurse.archivedAt) continue;
+          const expiryStr = dateIso(c.expiryDate);
+          const days = daysUntilExpiry(expiryStr, today);
+          if (days < 0) {
+            if (inRange(expiryStr)) {
+              events.push({
+                id: `lic-${c.id}`,
+                type: "license",
+                subtype: "expired",
+                title: `License expired \u2014 ${nurse.firstName} ${nurse.lastName}`,
+                date: expiryStr,
+                allDay: true,
+                severity: "urgent_or_expired",
+                nurseId: nurse.id,
+                nurseName: `${nurse.firstName} ${nurse.lastName}`,
+                areaId: nurse.currentAreaId ?? void 0,
+                areaName: nurse.currentAreaId ? areaById2.get(nurse.currentAreaId)?.name : null,
+                relatedEntityType: "credential",
+                relatedEntityId: c.id
+              });
+            }
+          } else {
+            for (const threshold of [365, 180]) {
+              if (days <= threshold) {
+                const label = threshold === 365 ? "1-year renewal" : "6-month renewal";
+                if (inRange(expiryStr)) {
+                  events.push({
+                    id: `lic-${threshold}-${c.id}`,
+                    type: "license",
+                    subtype: threshold === 365 ? "reminder1y" : "reminder6m",
+                    title: `${label} reminder \u2014 ${nurse.firstName} ${nurse.lastName}`,
+                    date: expiryStr,
+                    allDay: true,
+                    severity: threshold === 365 ? "attention" : "upcoming_renewal",
+                    nurseId: nurse.id,
+                    nurseName: `${nurse.firstName} ${nurse.lastName}`,
+                    areaId: nurse.currentAreaId ?? void 0,
+                    areaName: nurse.currentAreaId ? areaById2.get(nurse.currentAreaId)?.name : null,
+                    relatedEntityType: "credential",
+                    relatedEntityId: c.id
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+      if (includeTypes.has("training")) {
+        for (const r of trainings) {
+          const nurse = nurseById2.get(r.nurseId);
+          if (!nurse || nurse.archivedAt) continue;
+          if (r.status === "Cancelled") continue;
+          const trnDate = r.scheduledDate ? dateIso(r.scheduledDate) : r.completionDate ? dateIso(r.completionDate) : null;
+          const cat = catalogById2.get(r.trainingId);
+          const catName = cat?.name ? cat.name.length > 40 ? cat.name.slice(0, 37) + "..." : cat.name : "Training";
+          if (trnDate && inRange(trnDate)) {
+            events.push({
+              id: `trn-${r.id}`,
+              type: "training",
+              subtype: "schedule",
+              title: `${catName} \u2014 ${nurse.firstName} ${nurse.lastName}`,
+              date: trnDate,
+              allDay: true,
+              severity: r.status === "Scheduled" ? "informational" : r.status === "Completed" ? "healthy" : "attention",
+              nurseId: nurse.id,
+              nurseName: `${nurse.firstName} ${nurse.lastName}`,
+              areaId: nurse.currentAreaId ?? void 0,
+              areaName: nurse.currentAreaId ? areaById2.get(nurse.currentAreaId)?.name : null,
+              relatedEntityType: "nurseTraining",
+              relatedEntityId: r.id
+            });
+          }
+          if (r.status === "Completed" && r.expiryDate && inRange(dateIso(r.expiryDate))) {
+            const days = daysUntilExpiry(dateIso(r.expiryDate), today);
+            events.push({
+              id: `trne-${r.id}`,
+              type: "training",
+              subtype: "expiry",
+              title: `${catName} expires \u2014 ${nurse.firstName} ${nurse.lastName}${days <= 0 ? " (expired)" : ""}`,
+              date: dateIso(r.expiryDate),
+              allDay: true,
+              severity: days <= 0 ? "urgent_or_expired" : days <= 180 ? "upcoming_renewal" : "attention",
+              nurseId: nurse.id,
+              nurseName: `${nurse.firstName} ${nurse.lastName}`,
+              areaId: nurse.currentAreaId ?? void 0,
+              areaName: nurse.currentAreaId ? areaById2.get(nurse.currentAreaId)?.name : null,
+              relatedEntityType: "nurseTraining",
+              relatedEntityId: r.id
+            });
+          }
+        }
+      }
+      if (includeTypes.has("areaChange")) {
+        for (const a of assignments) {
+          const n = nurseById2.get(a.nurseId);
+          if (!n || n.archivedAt) continue;
+          const startStr = dateKey(a.startDate);
+          if (inRange(startStr)) {
+            const newArea = areaById2.get(a.areaId);
+            const isFuture = startStr > today;
+            events.push({
+              id: `asgn-${a.id}`,
+              type: "areaChange",
+              subtype: isFuture ? "transfer-upcoming" : "transfer",
+              title: `${a.isCurrent ? "Current area" : "Area change"} \u2014 ${n.firstName} ${n.lastName}${newArea ? ` \u2192 ${newArea.name}` : ""}`,
+              date: startStr,
+              allDay: true,
+              severity: isFuture ? "informational" : "neutral",
+              nurseId: n.id,
+              nurseName: `${n.firstName} ${n.lastName}`,
+              areaId: a.areaId,
+              areaName: newArea?.name ?? null,
+              relatedEntityType: "areaAssignment",
+              relatedEntityId: a.id,
+              description: a.assignmentType ?? void 0
+            });
+          }
+        }
+      }
+      if (includeTypes.has("custom")) {
+        for (const c of customs) {
+          const nurse = c.nurseId ? nurseById2.get(c.nurseId) : void 0;
+          events.push({
+            id: `cce-${c.id}`,
+            type: "custom",
+            subtype: "custom",
+            title: c.title,
+            date: dateKey(c.eventDate),
+            startTime: c.startTime,
+            endTime: c.endTime,
+            allDay: Boolean(c.allDay),
+            severity: "informational",
+            nurseId: c.nurseId ?? void 0,
+            nurseName: nurse ? `${nurse.firstName} ${nurse.lastName}` : null,
+            areaId: c.areaId ?? void 0,
+            areaName: c.areaId ? areaById2.get(c.areaId)?.name ?? null : null,
+            description: c.description ?? void 0,
+            relatedEntityType: "customCalendarEvent",
+            relatedEntityId: c.id
+          });
+        }
+      }
+      events.sort((a, b) => a.date.localeCompare(b.date));
+      return events;
+    }
     const nurses2 = await listNurses({ archived: false });
     const nurseById = new Map(nurses2.map((n) => [n.id, n]));
     const areaRows = await listAreas();
@@ -6506,33 +6730,30 @@ var calendarRouter = router({
       }
     }
     if (includeTypes.has("areaChange")) {
-      const allNurses = await listNurses();
-      for (const n of allNurses) {
-        if (n.archivedAt) continue;
-        const assignments = await listAssignmentsForNurse(n.id);
-        for (const a of assignments) {
-          if (a.endDate) continue;
-          const startStr = dateKey(a.startDate);
-          if (inRange(startStr)) {
-            const newArea = areaById.get(a.areaId);
-            const isFuture = startStr > today;
-            events.push({
-              id: `asgn-${a.id}`,
-              type: "areaChange",
-              subtype: isFuture ? "transfer-upcoming" : "transfer",
-              title: `${a.isCurrent ? "Current area" : "Area change"} \u2014 ${n.firstName} ${n.lastName}${newArea ? ` \u2192 ${newArea.name}` : ""}`,
-              date: startStr,
-              allDay: true,
-              severity: isFuture ? "informational" : "neutral",
-              nurseId: n.id,
-              nurseName: `${n.firstName} ${n.lastName}`,
-              areaId: a.areaId,
-              areaName: newArea?.name ?? null,
-              relatedEntityType: "areaAssignment",
-              relatedEntityId: a.id,
-              description: a.assignmentType ?? void 0
-            });
-          }
+      const assignments = await listAllActiveAssignments();
+      for (const a of assignments) {
+        const n = nurseById.get(a.nurseId);
+        if (!n || n.archivedAt) continue;
+        const startStr = dateKey(a.startDate);
+        if (inRange(startStr)) {
+          const newArea = areaById.get(a.areaId);
+          const isFuture = startStr > today;
+          events.push({
+            id: `asgn-${a.id}`,
+            type: "areaChange",
+            subtype: isFuture ? "transfer-upcoming" : "transfer",
+            title: `${a.isCurrent ? "Current area" : "Area change"} \u2014 ${n.firstName} ${n.lastName}${newArea ? ` \u2192 ${newArea.name}` : ""}`,
+            date: startStr,
+            allDay: true,
+            severity: isFuture ? "informational" : "neutral",
+            nurseId: n.id,
+            nurseName: `${n.firstName} ${n.lastName}`,
+            areaId: a.areaId,
+            areaName: newArea?.name ?? null,
+            relatedEntityType: "areaAssignment",
+            relatedEntityId: a.id,
+            description: a.assignmentType ?? void 0
+          });
         }
       }
     }

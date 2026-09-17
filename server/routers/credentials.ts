@@ -25,8 +25,44 @@ export const credentialsRouter = router({
     }),
 
   // Single round-trip initial load merging credentials + nurses + types
-  // (the Licenses page previously fired three sequential network calls).
   initial: adminProcedure.query(async () => {
+    const pg = db.getBatchClient();
+    if (pg) {
+      const sets = (await pg
+        .unsafe(
+          [
+            `select id, "nurseId", "credentialTypeId", "licenseNumber", "issuingOrganization",
+                    "issueDate"::text as "issueDate", "expiryDate"::text as "expiryDate",
+                    "renewalStatus", "verificationStatus", "documentKey", remarks
+               from nursetrack."nurseCredentials"
+              order by "expiryDate" asc`,
+            `select id, "employeeId", "firstName", "middleName", "lastName", suffix, position, "currentAreaId", "archivedAt"
+               from nursetrack.nurses
+              where "archivedAt" is null`,
+            `select * from nursetrack."credentialTypes" order by name`,
+          ].join(";\n"),
+        )
+        .simple()) as unknown as [any[], any[], any[]];
+
+      const [rawCreds, activeNurses, types] = sets;
+      const activeNurseIds = new Set(activeNurses.map((n: any) => n.id));
+      const nurseById = new Map(activeNurses.map((n: any) => [n.id, n]));
+      const typeById = new Map(types.map((t: any) => [t.id, t]));
+      const activeCreds = rawCreds.filter((c: any) => activeNurseIds.has(c.nurseId));
+
+      return {
+        credentials: activeCreds.map((c: any) => ({
+          ...c,
+          nurse: nurseById.get(c.nurseId),
+          typeName: typeById.get(c.credentialTypeId)?.name ?? "Unknown",
+          derivedStatus: deriveLicenseStatus(dateKey(c.expiryDate)),
+          daysRemaining: daysUntilExpiry(dateKey(c.expiryDate)),
+        })),
+        nurses: activeNurses,
+        types,
+      };
+    }
+
     const [credentials, nurses, types] = await Promise.all([
       db.listCredentials(),
       db.listNurses(),
