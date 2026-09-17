@@ -40,6 +40,9 @@ export type ChatEntry = {
   candidateTopics?: TopicPill[];
   contactSnippet?: string;
   liveSynced?: boolean;
+  isError?: boolean;
+  retryQuery?: string;
+  retryTopicId?: string;
 };
 
 const DEFAULT_TOPICS: Array<{ id: string; name: string; short_desc: string; icon: typeof Stethoscope }> = [
@@ -61,6 +64,7 @@ export function ChatAssistantWidget() {
   const [question, setQuestion] = useState("");
   const isMobile = useIsMobile();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSentRef = useRef<{ q?: string; tId?: string }>({});
 
   const inquiry = trpc.inquiry.chat.useMutation({
     onSuccess: (data) => {
@@ -76,11 +80,24 @@ export function ChatAssistantWidget() {
           candidateTopics: data.candidate_topics,
           contactSnippet: data.contact_snippet,
           liveSynced: data.live_synced,
+          isError: !data.success,
+          retryQuery: lastSentRef.current.q,
+          retryTopicId: lastSentRef.current.tId,
         },
       ]);
     },
     onError: (err) => {
       toast.error(err.message || "Failed to contact inquiry service.");
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: err.message || "Inquiry service connection failed. Please retry or contact SPMC SKTI at (082) 227-2731.",
+          isError: true,
+          retryQuery: lastSentRef.current.q,
+          retryTopicId: lastSentRef.current.tId,
+        },
+      ]);
     },
   });
 
@@ -93,6 +110,7 @@ export function ChatAssistantWidget() {
     const q = (customQuery ?? question).trim();
     if ((!q && !topicId) || inquiry.isPending) return;
 
+    lastSentRef.current = { q, tId: topicId };
     const displayLabel = q || topicId || "Inquiry";
     setHistoryStack((prev) => [...prev, messages]);
     setMessages((prev) => [
@@ -338,6 +356,21 @@ export function ChatAssistantWidget() {
                             ))}
                           </div>
                         )}
+
+                      {/* Retryable failure banner and action */}
+                      {m.role === "assistant" && m.isError && (
+                        <div className="pl-8 pt-1 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => sendQuestion(m.retryQuery, m.retryTopicId)}
+                            disabled={inquiry.isPending}
+                            className="inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-[11px] font-medium text-destructive hover:bg-destructive/20 transition-colors active:scale-95"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            Retry Question
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
 

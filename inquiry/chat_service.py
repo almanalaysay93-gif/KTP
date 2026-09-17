@@ -2,6 +2,7 @@
 HTTP Chat Service for rule-based inquiry chatbot.
 Runs in-process HTTP server importing normalize, match_inquiry, and responses.
 No separate process is spawned per message.
+Supports service secret authentication and platform host/port binding.
 """
 import os
 import sys
@@ -35,26 +36,52 @@ class InquiryRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", f"{content_type}; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Inquiry-Secret")
         self.end_headers()
+
+    def _is_authorized(self) -> bool:
+        """Validate service authentication via shared secret if configured."""
+        secret = os.getenv("INQUIRY_SERVICE_SECRET")
+        if not secret:
+            # If no secret configured, allow call
+            return True
+
+        auth_header = self.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+            if token == secret:
+                return True
+
+        x_secret = self.headers.get("X-Inquiry-Secret", "")
+        if x_secret == secret:
+            return True
+
+        return False
 
     def do_OPTIONS(self):
         """Handle CORS preflight requests."""
         self._set_cors_headers(204)
 
     def do_GET(self):
-        """Handle GET requests for health and topic listing."""
+        """Handle GET requests for health (public) and topic listing."""
         path = self.path.split("?")[0]
+
+        # Health probe remains unauthenticated for platform health checks
         if path in ("/health", "/api/health"):
             data = {
                 "status": "ok",
                 "service": "skti-inquiry-service",
-                "version": "1.0.0",
+                "version": "1.1.0",
                 "facility": self.faq_data.get("facility", ""),
                 "topics_count": len(self.faq_data.get("topics", [])),
             }
             self._set_cors_headers(200)
             self.wfile.write(json.dumps(data).encode("utf-8"))
+            return
+
+        if not self._is_authorized():
+            self._set_cors_headers(401)
+            self.wfile.write(json.dumps({"error": "Unauthorized: missing or invalid service secret"}).encode("utf-8"))
             return
 
         if path in ("/api/inquiry/topics", "/topics"):
@@ -77,6 +104,11 @@ class InquiryRequestHandler(BaseHTTPRequestHandler):
         if path not in ("/api/inquiry", "/chat", "/api/inquiry/chat"):
             self._set_cors_headers(404)
             self.wfile.write(json.dumps({"error": f"Endpoint {path} not found"}).encode("utf-8"))
+            return
+
+        if not self._is_authorized():
+            self._set_cors_headers(401)
+            self.wfile.write(json.dumps({"error": "Unauthorized: missing or invalid service secret"}).encode("utf-8"))
             return
 
         content_length = int(self.headers.get("Content-Length", 0))
@@ -121,12 +153,14 @@ def create_service(faq_path: Optional[str] = None):
     return matcher, faq_data
 
 
-def run_server(host: str = "127.0.0.1", port: int = 5005, faq_path: Optional[str] = None):
+def run_server(host: str = "0.0.0.0", port: int = 5005, faq_path: Optional[str] = None):
     create_service(faq_path)
     server_address = (host, port)
     httpd = ThreadedHTTPServer(server_address, InquiryRequestHandler)
     print(f"[InquiryService] Running on http://{host}:{port}/")
     print(f"[InquiryService] Endpoints: POST /api/inquiry, GET /health, GET /api/inquiry/topics")
+    if os.getenv("INQUIRY_SERVICE_SECRET"):
+        print("[InquiryService] Service authentication enabled (INQUIRY_SERVICE_SECRET is set).")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -137,9 +171,11 @@ def run_server(host: str = "127.0.0.1", port: int = 5005, faq_path: Optional[str
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SPMC SKTI Rule-Based Inquiry Chat Service")
-    parser.add_argument("--host", default=os.getenv("INQUIRY_HOST", "127.0.0.1"), help="Host address")
-    parser.add_argument("--port", type=int, default=int(os.getenv("INQUIRY_PORT", "5005")), help="Port")
-    parser.add_argument("--faq", default=None, help="Path to custom faq.json")
+    default_host = os.getenv("HOST", os.getenv("INQUIRY_HOST", "0.0.0.0"))
+    default_port = int(os.getenv("PORT", os.getenv("INQUIRY_PORT", "5005")))
+    parser.add_argument("--host", default=default_host, help="Host address (default: env PORT/INQUIRY_HOST or 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=default_port, help="Port (default: env PORT/INQUIRY_PORT or 5005)")
+    parser.add_argument("--faq", default=os.getenv("FAQ_PATH", None), help="Path to custom faq.json")
     args = parser.parse_args()
 
     run_server(host=args.host, port=args.port, faq_path=args.faq)

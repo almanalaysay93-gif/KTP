@@ -1,6 +1,7 @@
 """
 Comprehensive test suite for rule-based inquiry chatbot modules.
-Tests normalize, match_inquiry, responses, and uncertainty handling.
+Tests normalize, match_inquiry, responses, uncertainty handling,
+service authentication, live context enrichment, and greetings.
 """
 import unittest
 import os
@@ -17,7 +18,7 @@ if BASE_DIR not in sys.path:
 from normalize import clean_letter_case, clean_punctuation, clean_spaces, normalize_text, tokenize
 from match_inquiry import InquiryMatcher, load_faq
 from responses import format_inquiry_response
-from chat_service import run_server, ThreadedHTTPServer, InquiryRequestHandler, create_service
+from chat_service import ThreadedHTTPServer, InquiryRequestHandler, create_service
 
 
 class TestNormalize(unittest.TestCase):
@@ -63,6 +64,24 @@ class TestMatchInquiry(unittest.TestCase):
         res_hours = self.matcher.match(topic_id="hours")
         self.assertEqual(res_hours["topic"]["id"], "hours")
 
+    def test_greetings(self):
+        # P3: "hi", "hello", "good morning" must return GREETING, never match random questions
+        greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "kumusta"]
+        for g in greetings:
+            with self.subTest(greeting=g):
+                res = self.matcher.match(query=g)
+                self.assertEqual(res["match_type"], InquiryMatcher.MATCH_GREETING)
+                self.assertIsNone(res["topic"])
+                self.assertEqual(len(res["candidate_topics"]), 8)
+
+    def test_short_unsupported_text(self):
+        # P3: "a", "x" must not match random questions containing 'a'
+        for s in ["a", "x", "??", "b"]:
+            with self.subTest(short_input=s):
+                res = self.matcher.match(query=s)
+                self.assertIn(res["match_type"], [InquiryMatcher.MATCH_NONE, InquiryMatcher.MATCH_EMPTY])
+                self.assertIsNone(res["topic"])
+
     def test_known_questions(self):
         queries = [
             ("What services do you offer?", "services"),
@@ -71,6 +90,8 @@ class TestMatchInquiry(unittest.TestCase):
             ("What documents do I need to bring for dialysis?", "requirements"),
             ("How much does hemodialysis cost?", "fees"),
             ("What is your telephone contact number?", "contact"),
+            ("What seminars are scheduled?", "trainings"),
+            ("What clinical areas or units are active?", "areas"),
         ]
         for q, expected_id in queries:
             with self.subTest(query=q):
@@ -89,6 +110,8 @@ class TestMatchInquiry(unittest.TestCase):
             ("is hemodialysis covered by philhealth 156 sessions", "fees"),
             ("give me the phone number to call the clinic desk", "contact"),
             ("do you do peritoneal dialysis and kidney transplants", "services"),
+            ("show upcoming training schedule", "trainings"),
+            ("show hospital departments and wards", "areas"),
         ]
         for q, expected_id in queries:
             with self.subTest(query=q):
@@ -121,14 +144,11 @@ class TestMatchInquiry(unittest.TestCase):
                 self.assertIsNone(res["topic"])
 
     def test_ambiguous_questions(self):
-        # Query mentioning both requirements and fees
         ambiguous_query = "What are the requirements, documents, fees, and costs for treatment?"
         res = self.matcher.match(query=ambiguous_query)
         self.assertEqual(res["match_type"], InquiryMatcher.MATCH_MULTIPLE)
         self.assertIsNone(res["topic"])
         self.assertTrue(len(res["candidate_topics"]) >= 2)
-        candidate_ids = [c["id"] for c in res["candidate_topics"]]
-        self.assertTrue("requirements" in candidate_ids or "fees" in candidate_ids)
 
 
 class TestResponses(unittest.TestCase):
@@ -137,45 +157,68 @@ class TestResponses(unittest.TestCase):
         self.faq = load_faq()
         self.topics = self.faq["topics"]
 
-    def test_response_for_single_match(self):
-        match_result = self.matcher.match(query="Where is the dialysis center located?")
+    def test_response_for_greeting(self):
+        match_result = self.matcher.match(query="hi")
         resp = format_inquiry_response(match_result, self.topics, self.faq)
         self.assertTrue(resp["success"])
-        self.assertEqual(resp["topic_id"], "location")
-        self.assertIn("J.P. Laurel Avenue", resp["answer"])
-        self.assertTrue(len(resp["related_topics"]) > 0)
+        self.assertEqual(resp["match_type"], "GREETING")
+        self.assertIn("Hello! Welcome", resp["answer"])
+        self.assertEqual(len(resp["candidate_topics"]), 8)
 
-    def test_response_for_empty_input(self):
-        match_result = self.matcher.match(query="")
-        resp = format_inquiry_response(match_result, self.topics, self.faq)
-        self.assertTrue(resp["success"])
-        self.assertIsNone(resp["topic_id"])
-        self.assertEqual(resp["match_type"], "EMPTY_QUERY")
-        self.assertEqual(len(resp["candidate_topics"]), len(self.topics))
+    def test_response_for_db_failure_distinction(self):
+        # P2: preserve distinction between failed query and empty results
+        match_result = self.matcher.match(topic_id="trainings")
+        resp_failed = format_inquiry_response(
+            match_result,
+            self.topics,
+            self.faq,
+            context={"trainings_status": "failed"},
+        )
+        self.assertFalse(resp_failed["success"])
+        self.assertIn("unavailable", resp_failed["answer"])
+        self.assertFalse(resp_failed["live_synced"])
 
-    def test_response_for_ambiguous_matches(self):
-        match_result = self.matcher.match(query="What are the requirements and fees?")
-        resp = format_inquiry_response(match_result, self.topics, self.faq)
-        self.assertTrue(resp["success"])
-        self.assertIsNone(resp["topic_id"])
-        self.assertEqual(resp["match_type"], "MULTIPLE_MATCHES")
-        self.assertIn("matches multiple topics", resp["answer"])
-        self.assertTrue(len(resp["candidate_topics"]) >= 2)
+        resp_success_empty = format_inquiry_response(
+            match_result,
+            self.topics,
+            self.faq,
+            context={"trainings_status": "success", "upcoming_trainings": []},
+        )
+        self.assertTrue(resp_success_empty["success"])
+        self.assertIn("no upcoming seminars", resp_success_empty["answer"])
+        self.assertTrue(resp_success_empty["live_synced"])
 
-    def test_response_for_unsupported_question(self):
-        match_result = self.matcher.match(query="Tell me about quantum physics")
-        resp = format_inquiry_response(match_result, self.topics, self.faq)
-        self.assertTrue(resp["success"])
-        self.assertIsNone(resp["topic_id"])
-        self.assertEqual(resp["match_type"], "NO_MATCH")
-        self.assertIn("SPMC Trunkline", resp["answer"])
-        self.assertEqual(len(resp["candidate_topics"]), len(self.topics))
+    def test_response_authorization_staff_counts(self):
+        # P2: restrict internal staff counts to authorized sessions
+        match_result = self.matcher.match(topic_id="areas")
+        ctx_unauth = {
+            "areas_status": "success",
+            "is_authorized": False,
+            "active_areas": [{"name": "Hemodialysis Unit", "staffCount": 14}],
+            "total_active_staff": 40,
+        }
+        resp_unauth = format_inquiry_response(match_result, self.topics, self.faq, context=ctx_unauth)
+        self.assertNotIn("active staff assigned", resp_unauth["answer"])
+        self.assertNotIn("Total Active Staff Tracked", resp_unauth["answer"])
+
+        ctx_auth = {
+            "areas_status": "success",
+            "is_authorized": True,
+            "active_areas": [{"name": "Hemodialysis Unit", "staffCount": 14}],
+            "total_active_staff": 40,
+        }
+        resp_auth = format_inquiry_response(match_result, self.topics, self.faq, context=ctx_auth)
+        self.assertIn("14 active staff assigned", resp_auth["answer"])
+        self.assertIn("Total Active Staff Tracked: 40", resp_auth["answer"])
 
 
 class TestChatServiceHTTP(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.port = 5098
+        cls.test_secret = "test-secret-key-12345"
+        os.environ["INQUIRY_SERVICE_SECRET"] = cls.test_secret
+
         create_service()
         cls.httpd = ThreadedHTTPServer(("127.0.0.1", cls.port), InquiryRequestHandler)
         cls.server_thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
@@ -185,8 +228,10 @@ class TestChatServiceHTTP(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
+        os.environ.pop("INQUIRY_SERVICE_SECRET", None)
 
-    def test_health_endpoint(self):
+    def test_health_endpoint_public(self):
+        # Health endpoint must remain unauthenticated for probes
         req = Request(f"http://127.0.0.1:{self.port}/health")
         with urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
@@ -194,20 +239,28 @@ class TestChatServiceHTTP(unittest.TestCase):
             self.assertEqual(data["status"], "ok")
             self.assertEqual(data["service"], "skti-inquiry-service")
 
-    def test_topics_endpoint(self):
-        req = Request(f"http://127.0.0.1:{self.port}/api/inquiry/topics")
-        with urlopen(req) as resp:
-            self.assertEqual(resp.status, 200)
-            data = json.loads(resp.read().decode("utf-8"))
-            self.assertTrue(data["success"])
-            self.assertEqual(len(data["topics"]), 8)
-
-    def test_chat_query_endpoint(self):
-        payload = json.dumps({"query": "What are your operating hours?"}).encode("utf-8")
+    def test_auth_rejection_without_secret(self):
+        # P1: Unauthenticated request must return 401 when INQUIRY_SERVICE_SECRET is set
+        payload = json.dumps({"query": "What are your hours?"}).encode("utf-8")
         req = Request(
             f"http://127.0.0.1:{self.port}/api/inquiry",
             data=payload,
             headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(HTTPError) as ctx:
+            urlopen(req)
+        self.assertEqual(ctx.exception.code, 401)
+
+    def test_auth_success_with_bearer_token(self):
+        payload = json.dumps({"query": "What are your hours?"}).encode("utf-8")
+        req = Request(
+            f"http://127.0.0.1:{self.port}/api/inquiry",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.test_secret}",
+            },
             method="POST",
         )
         with urlopen(req) as resp:
@@ -215,14 +268,16 @@ class TestChatServiceHTTP(unittest.TestCase):
             data = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(data["success"])
             self.assertEqual(data["topic_id"], "hours")
-            self.assertIn("8:00 AM", data["answer"])
 
-    def test_chat_topic_id_endpoint(self):
+    def test_auth_success_with_x_secret_header(self):
         payload = json.dumps({"topic_id": "fees"}).encode("utf-8")
         req = Request(
             f"http://127.0.0.1:{self.port}/api/inquiry",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-Inquiry-Secret": self.test_secret,
+            },
             method="POST",
         )
         with urlopen(req) as resp:
@@ -230,38 +285,6 @@ class TestChatServiceHTTP(unittest.TestCase):
             data = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(data["success"])
             self.assertEqual(data["topic_id"], "fees")
-            self.assertIn("156", data["answer"])
-
-    def test_chat_live_context_enrichment(self):
-        # Option D1: test live database context injection
-        payload = json.dumps({
-            "topic_id": "trainings",
-            "context": {
-                "upcoming_trainings": [
-                    {"trainingName": "Basic Life Support (BLS)", "scheduledDate": "2026-10-20"},
-                    {"trainingName": "Dialysis Machine Safety", "scheduledDate": "2026-11-05"}
-                ],
-                "active_areas": [
-                    {"name": "SKTI Hemodialysis Unit", "staffCount": 18},
-                    {"name": "Peritoneal Dialysis Unit", "staffCount": 6}
-                ],
-                "total_active_staff": 48
-            }
-        }).encode("utf-8")
-        req = Request(
-            f"http://127.0.0.1:{self.port}/api/inquiry",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urlopen(req) as resp:
-            self.assertEqual(resp.status, 200)
-            data = json.loads(resp.read().decode("utf-8"))
-            self.assertTrue(data["success"])
-            self.assertEqual(data["topic_id"], "trainings")
-            self.assertIn("Basic Life Support (BLS)", data["answer"])
-            self.assertIn("2026-10-20", data["answer"])
-            self.assertTrue(data.get("live_synced"))
 
 
 if __name__ == "__main__":

@@ -6722,13 +6722,13 @@ function getLocalDashboardInitial() {
 }
 function getLocalSeminarsList(input) {
   const sqlite = getSqliteDb();
-  let sql12 = `
+  let sql13 = `
     SELECT e.*, c.id as c_id, c.name as c_name, c.category as c_category, c.kind as c_kind
     FROM trainingEvents e
     INNER JOIN trainingCatalog c ON c.id = e.trainingId
     ORDER BY date(e.startDate) DESC, c.name ASC
   `;
-  const rows = sqlite.prepare(sql12).all();
+  const rows = sqlite.prepare(sql13).all();
   const records = sqlite.prepare("SELECT eventId, status FROM nurseTrainings WHERE eventId IS NOT NULL").all();
   const counts = /* @__PURE__ */ new Map();
   for (const record of records) {
@@ -10923,10 +10923,15 @@ var aiInsightsRouter = router({
     })
   ).mutation(async ({ input }) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    const secret = process.env.INQUIRY_SERVICE_SECRET;
+    const headers = { "Content-Type": "application/json" };
+    if (secret) {
+      headers["Authorization"] = `Bearer ${secret}`;
+    }
     try {
       const resp = await fetch(`${serviceUrl}/api/inquiry`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ query: input.question }),
         signal: AbortSignal.timeout(4e3)
       });
@@ -10945,6 +10950,10 @@ var aiInsightsRouter = router({
 // server/routers/inquiry.ts
 import { z as z17 } from "zod";
 init_db();
+init_schema();
+init_nursetrack();
+init_localDb();
+import { and as and10, asc as asc5, eq as eq14, gte as gte4, isNotNull as isNotNull3, sql as sql12 } from "drizzle-orm";
 var FALLBACK_TOPICS = [
   { id: "services", name: "Services Offered", short_desc: "Hemodialysis, peritoneal dialysis, transplant" },
   { id: "hours", name: "Hours & Schedule", short_desc: "Clinic hours and 24/7 dialysis shifts" },
@@ -10952,66 +10961,186 @@ var FALLBACK_TOPICS = [
   { id: "requirements", name: "Requirements & Documents", short_desc: "Medical abstract, clearances, PhilHealth" },
   { id: "fees", name: "Fees & PhilHealth", short_desc: "156 sessions coverage and financial aid" },
   { id: "contact", name: "Contact & Inquiries", short_desc: "Trunkline (082) 227-2731 and direct locals" },
-  { id: "trainings", name: "Seminars & Trainings", short_desc: "Live training calendar and upcoming seminars" },
+  { id: "trainings", name: "Seminars & Trainings", short_desc: "Training calendar and upcoming seminars" },
   { id: "areas", name: "Clinical Units & Areas", short_desc: "Active clinical units and hospital stations" }
 ];
 var SERVICE_UNAVAILABLE_ANSWER = "Inquiry service is currently unavailable. For general inquiries regarding SPMC SKTI services, hours, location, requirements, or fees, please contact the SPMC SKTI Information Desk directly at (082) 227-2731 (local 4128/4129) or visit the SPMC Dialysis Complex in Bajada, Davao City.";
-async function buildLiveInquiryContext() {
+function getTodayManila(date2 = /* @__PURE__ */ new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date2);
+}
+function needsDatabaseContext(question, topicId) {
+  const tId = topicId?.trim().toLowerCase();
+  if (tId === "trainings" || tId === "areas") return true;
+  if (!question) return false;
+  const q = question.toLowerCase();
+  const triggers = [
+    "seminar",
+    "seminars",
+    "training",
+    "trainings",
+    "workshop",
+    "course",
+    "courses",
+    "bls",
+    "acls",
+    "area",
+    "areas",
+    "unit",
+    "units",
+    "ward",
+    "wards",
+    "department",
+    "departments",
+    "station",
+    "stations",
+    "roster",
+    "staffing"
+  ];
+  return triggers.some((t2) => q.includes(t2));
+}
+function withTimeout(promise, ms, errorMsg) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
+  ]);
+}
+async function getAreaCountsSummary(isAuthorized = false) {
   try {
-    const [areas2, trainingCatalog2, nurseTrainings2, nurses2] = await Promise.all([
-      listAreas(false).catch(() => []),
-      listTrainingCatalog(false).catch(() => []),
-      listNurseTrainings().catch(() => []),
-      listNurses().catch(() => [])
-    ]);
-    const activeNurses = nurses2.filter(
-      (n) => !n.archivedAt && n.employmentStatus !== "Archived" && n.employmentStatus !== "Resigned"
-    );
-    const areaById = new Map(areas2.map((a) => [a.id, a.name]));
-    const areaCounts = /* @__PURE__ */ new Map();
-    for (const a of areas2) areaCounts.set(a.name, 0);
-    for (const n of activeNurses) {
-      if (n.currentAreaId && areaById.has(n.currentAreaId)) {
-        const name = areaById.get(n.currentAreaId);
-        areaCounts.set(name, (areaCounts.get(name) ?? 0) + 1);
+    const fetchAreas = async () => {
+      const dbConn = await getDb();
+      if (dbConn) {
+        const areaRows = await dbConn.select().from(areas).where(eq14(areas.active, true)).orderBy(areas.sortOrder);
+        const countMap = /* @__PURE__ */ new Map();
+        let total = 0;
+        if (isAuthorized) {
+          const nurseCounts = await dbConn.select({ areaId: nurses.currentAreaId, count: sql12`count(*)::int` }).from(nurses).where(activeNurseCondition()).groupBy(nurses.currentAreaId);
+          for (const c of nurseCounts) {
+            if (c.areaId !== null && c.areaId !== void 0) {
+              const cnt = Number(c.count);
+              countMap.set(c.areaId, cnt);
+              total += cnt;
+            }
+          }
+        }
+        return {
+          status: "success",
+          areas: areaRows.map((a) => ({
+            id: a.id,
+            name: a.name,
+            ...isAuthorized ? { staffCount: countMap.get(a.id) ?? 0 } : {}
+          })),
+          ...isAuthorized ? { totalStaff: total } : {}
+        };
       }
-    }
-    const activeAreas = areas2.map((a) => ({
-      id: a.id,
-      name: a.name,
-      staffCount: areaCounts.get(a.name) ?? 0
-    }));
-    const todayStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const catalogById = new Map(trainingCatalog2.map((t2) => [t2.id, t2.name]));
-    const upcoming = nurseTrainings2.filter((t2) => t2.status === "Scheduled" && t2.scheduledDate && String(t2.scheduledDate) >= todayStr).map((t2) => ({
-      trainingName: catalogById.get(t2.trainingId) ?? "Training/Seminar",
-      scheduledDate: String(t2.scheduledDate).slice(0, 10)
-    })).sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
-    const seen = /* @__PURE__ */ new Set();
-    const deduplicatedUpcoming = upcoming.filter((u) => {
-      const key = `${u.trainingName}::${u.scheduledDate}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).slice(0, 15);
-    return {
-      active_areas: activeAreas,
-      upcoming_trainings: deduplicatedUpcoming,
-      total_active_staff: activeNurses.length
+      const sqlite = getSqliteDb();
+      if (sqlite) {
+        const areaRows = sqlite.prepare("SELECT id, name, sortOrder FROM areas WHERE active = 1 ORDER BY sortOrder").all();
+        const countMap = /* @__PURE__ */ new Map();
+        let total = 0;
+        if (isAuthorized) {
+          const countRows = sqlite.prepare(
+            `SELECT currentAreaId as areaId, COUNT(*) as count FROM nurses WHERE archivedAt IS NULL AND employmentStatus NOT IN (${INACTIVE_STATUS_SQL_LIST}) GROUP BY currentAreaId`
+          ).all();
+          for (const c of countRows) {
+            if (c.areaId !== null && c.areaId !== void 0) {
+              const cnt = Number(c.count);
+              countMap.set(Number(c.areaId), cnt);
+              total += cnt;
+            }
+          }
+        }
+        return {
+          status: "success",
+          areas: areaRows.map((a) => ({
+            id: a.id,
+            name: a.name,
+            ...isAuthorized ? { staffCount: countMap.get(a.id) ?? 0 } : {}
+          })),
+          ...isAuthorized ? { totalStaff: total } : {}
+        };
+      }
+      return { status: "success", areas: [] };
     };
+    return await withTimeout(fetchAreas(), 3e3, "Area database query timed out");
   } catch {
-    return {
-      active_areas: [],
-      upcoming_trainings: [],
-      total_active_staff: 0
+    return { status: "failed", areas: [] };
+  }
+}
+async function getUpcomingTrainingsSummary(todayManila) {
+  try {
+    const fetchTrainings = async () => {
+      const dbConn = await getDb();
+      if (dbConn) {
+        const rows = await dbConn.select({
+          trainingName: trainingCatalog.name,
+          scheduledDate: nurseTrainings.scheduledDate
+        }).from(nurseTrainings).innerJoin(trainingCatalog, eq14(nurseTrainings.trainingId, trainingCatalog.id)).where(
+          and10(
+            eq14(nurseTrainings.status, "Scheduled"),
+            isNotNull3(nurseTrainings.scheduledDate),
+            gte4(nurseTrainings.scheduledDate, sql12`(${todayManila})::date`)
+          )
+        ).orderBy(asc5(nurseTrainings.scheduledDate)).limit(20);
+        const seen = /* @__PURE__ */ new Set();
+        const results = [];
+        for (const r of rows) {
+          const d = dateKey(r.scheduledDate);
+          if (!d || d < todayManila) continue;
+          const key = `${r.trainingName}::${d}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            results.push({ trainingName: r.trainingName, scheduledDate: d });
+          }
+          if (results.length >= 10) break;
+        }
+        return { status: "success", upcoming: results };
+      }
+      const sqlite = getSqliteDb();
+      if (sqlite) {
+        const rows = sqlite.prepare(
+          `SELECT c.name as trainingName, nt.scheduledDate as scheduledDate
+           FROM nurseTrainings nt
+           JOIN trainingCatalog c ON nt.trainingId = c.id
+           WHERE nt.status = 'Scheduled' AND nt.scheduledDate >= ?
+           ORDER BY nt.scheduledDate ASC
+           LIMIT 20`
+        ).all(todayManila);
+        const seen = /* @__PURE__ */ new Set();
+        const results = [];
+        for (const r of rows) {
+          const d = dateKey(r.scheduledDate);
+          if (!d || d < todayManila) continue;
+          const key = `${r.trainingName}::${d}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            results.push({ trainingName: r.trainingName, scheduledDate: d });
+          }
+          if (results.length >= 10) break;
+        }
+        return { status: "success", upcoming: results };
+      }
+      return { status: "success", upcoming: [] };
     };
+    return await withTimeout(fetchTrainings(), 3e3, "Training database query timed out");
+  } catch {
+    return { status: "failed", upcoming: [] };
   }
 }
 var inquiryRouter = router({
   topics: publicProcedure.query(async () => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    const headers = {};
+    if (process.env.INQUIRY_SERVICE_SECRET) {
+      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
+    }
     try {
       const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, {
+        headers,
         signal: AbortSignal.timeout(3e3)
       });
       if (resp.ok) {
@@ -11033,18 +11162,45 @@ var inquiryRouter = router({
         })
       ).max(30).optional()
     })
-  ).mutation(async ({ input }) => {
+  ).mutation(async ({ ctx, input }) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
-    const liveContext = await buildLiveInquiryContext();
+    const isAuthorized = Boolean(ctx.user);
+    const todayManila = getTodayManila();
+    let liveContext = null;
+    let dbReadSucceeded = false;
+    let dbReadAttempted = false;
+    if (needsDatabaseContext(input.question, input.topicId)) {
+      dbReadAttempted = true;
+      const [areasRes, trainingsRes] = await Promise.all([
+        getAreaCountsSummary(isAuthorized),
+        getUpcomingTrainingsSummary(todayManila)
+      ]);
+      const areasSuccess = areasRes.status === "success";
+      const trainingsSuccess = trainingsRes.status === "success";
+      dbReadSucceeded = areasSuccess && trainingsSuccess;
+      liveContext = {
+        today_manila: todayManila,
+        is_authorized: isAuthorized,
+        active_areas: areasRes.areas,
+        areas_status: areasRes.status,
+        total_active_staff: areasRes.totalStaff,
+        upcoming_trainings: trainingsRes.upcoming,
+        trainings_status: trainingsRes.status
+      };
+    }
+    const headers = { "Content-Type": "application/json" };
+    if (process.env.INQUIRY_SERVICE_SECRET) {
+      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
+    }
     try {
       const resp = await fetch(`${serviceUrl}/api/inquiry`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           query: input.question || "",
           topic_id: input.topicId || void 0,
           history: input.history || [],
-          context: liveContext
+          context: liveContext || void 0
         }),
         signal: AbortSignal.timeout(5e3)
       });
@@ -11059,15 +11215,29 @@ var inquiryRouter = router({
           related_topics: json2.related_topics || [],
           candidate_topics: json2.candidate_topics || [],
           contact_snippet: json2.contact_snippet,
-          live_synced: true
+          live_synced: dbReadAttempted ? dbReadSucceeded : false
         };
       }
     } catch {
     }
-    if (input.topicId === "trainings" || input.question?.toLowerCase().includes("seminar") || input.question?.toLowerCase().includes("training")) {
-      const upcoming = liveContext.upcoming_trainings;
+    const tId = input.topicId?.trim().toLowerCase();
+    const qLower = (input.question || "").toLowerCase();
+    if (tId === "trainings" || qLower.includes("seminar") || qLower.includes("training")) {
+      if (liveContext && liveContext.trainings_status === "failed") {
+        return {
+          success: false,
+          answer: "Live training database records are currently unavailable. Please check the Training Calendar in the portal or contact the SKTI Training Coordinator.",
+          topic_id: "trainings",
+          title: "Seminars & Trainings",
+          match_type: "DB_UNAVAILABLE",
+          related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "trainings"),
+          candidate_topics: [],
+          live_synced: false
+        };
+      }
+      const upcoming = liveContext?.upcoming_trainings || [];
       let answer = "SPMC SKTI Seminars & Staff Trainings (Live Database):\n\n";
-      if (upcoming && upcoming.length > 0) {
+      if (upcoming.length > 0) {
         answer += upcoming.map((u) => `\u2022 ${u.trainingName} \u2014 Scheduled: ${u.scheduledDate}`).join("\n");
       } else {
         answer += "There are currently no upcoming seminars or trainings scheduled in the database.";
@@ -11080,19 +11250,36 @@ var inquiryRouter = router({
         match_type: "EXACT_TOPIC",
         related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "trainings"),
         candidate_topics: [],
-        live_synced: true
+        live_synced: Boolean(liveContext && liveContext.trainings_status === "success")
       };
     }
-    if (input.topicId === "areas" || input.question?.toLowerCase().includes("area") || input.question?.toLowerCase().includes("unit")) {
-      const areas2 = liveContext.active_areas;
+    if (tId === "areas" || qLower.includes("area") || qLower.includes("unit")) {
+      if (liveContext && liveContext.areas_status === "failed") {
+        return {
+          success: false,
+          answer: "Clinical area database records are currently unavailable. Please contact the SKTI Nursing Office at local 4135.",
+          topic_id: "areas",
+          title: "Clinical Units & Areas",
+          match_type: "DB_UNAVAILABLE",
+          related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "areas"),
+          candidate_topics: [],
+          live_synced: false
+        };
+      }
+      const areaList = liveContext?.active_areas || [];
       let answer = "SPMC SKTI Clinical Units & Areas (Live Database):\n\n";
-      if (areas2 && areas2.length > 0) {
-        answer += areas2.map((a) => `\u2022 ${a.name} (${a.staffCount} active staff assigned)`).join("\n");
-        answer += `
+      if (areaList.length > 0) {
+        answer += areaList.map((a) => {
+          const countStr = isAuthorized && a.staffCount !== void 0 ? ` (${a.staffCount} active staff assigned)` : "";
+          return `\u2022 ${a.name}${countStr}`;
+        }).join("\n");
+        if (isAuthorized && liveContext?.total_active_staff !== void 0) {
+          answer += `
 
 Total Active Staff Tracked: ${liveContext.total_active_staff}`;
+        }
       } else {
-        answer += "Active hospital areas tracked in NurseTrack.";
+        answer += "No active clinical areas currently found in the system.";
       }
       return {
         success: true,
@@ -11102,7 +11289,7 @@ Total Active Staff Tracked: ${liveContext.total_active_staff}`;
         match_type: "EXACT_TOPIC",
         related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "areas"),
         candidate_topics: [],
-        live_synced: true
+        live_synced: Boolean(liveContext && liveContext.areas_status === "success")
       };
     }
     return {
@@ -11574,10 +11761,14 @@ async function getApp() {
   app.post("/api/admin/import-staff-trainings", importStaffTrainingsHandler);
   app.post("/api/inquiry", async (req, res) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    const headers = { "Content-Type": "application/json" };
+    if (process.env.INQUIRY_SERVICE_SECRET) {
+      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
+    }
     try {
       const resp = await fetch(`${serviceUrl}/api/inquiry`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(req.body),
         signal: AbortSignal.timeout(5e3)
       });
@@ -11593,8 +11784,15 @@ async function getApp() {
   });
   app.get("/api/inquiry/topics", async (_req, res) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    const headers = {};
+    if (process.env.INQUIRY_SERVICE_SECRET) {
+      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
+    }
     try {
-      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, { signal: AbortSignal.timeout(3e3) });
+      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, {
+        headers,
+        signal: AbortSignal.timeout(3e3)
+      });
       const data = await resp.json();
       return res.status(resp.status).json(data);
     } catch {

@@ -265,7 +265,9 @@
         "class",
         "classes",
         "cme",
-        "continuing education"
+        "continuing education",
+        "training schedule",
+        "seminar schedule"
       ],
       "answer": "SPMC SKTI Seminars & Staff Trainings:\n\nStaff training and continuing professional development schedule from the NurseTrack live database.",
       "related_topics": ["services", "hours", "contact"]

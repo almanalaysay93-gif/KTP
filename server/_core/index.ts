@@ -64,10 +64,14 @@ async function startServer() {
   // Rule-based Inquiry API endpoints
   app.post("/api/inquiry", async (req, res) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (process.env.INQUIRY_SERVICE_SECRET) {
+      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
+    }
     try {
       const resp = await fetch(`${serviceUrl}/api/inquiry`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(req.body),
         signal: AbortSignal.timeout(5000),
       });
@@ -83,8 +87,15 @@ async function startServer() {
   });
   app.get("/api/inquiry/topics", async (_req, res) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    const headers: Record<string, string> = {};
+    if (process.env.INQUIRY_SERVICE_SECRET) {
+      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
+    }
     try {
-      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, { signal: AbortSignal.timeout(3000) });
+      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, {
+        headers,
+        signal: AbortSignal.timeout(3000),
+      });
       const data = await resp.json();
       return res.status(resp.status).json(data);
     } catch {

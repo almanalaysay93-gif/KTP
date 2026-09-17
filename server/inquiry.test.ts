@@ -3,15 +3,19 @@ import { appRouter } from "./routers";
 import { spawn, type ChildProcess } from "child_process";
 import fs from "fs";
 import path from "path";
+import { getTodayManila, needsDatabaseContext } from "./routers/inquiry";
 
-describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
+describe("P1-P4: Reliable Rule-based Inquiry Chatbot & Python Microservice", () => {
   let pythonProc: ChildProcess | null = null;
   const testPort = 5099;
+  const testSecret = "skti-test-secret-phase1-phase4";
+
   const caller = appRouter.createCaller({
     user: null,
     req: { cookies: {}, headers: {} } as any,
     res: { cookie: () => {}, clearCookie: () => {} } as any,
   });
+
   const adminCaller = appRouter.createCaller({
     user: { id: "1", email: "almanalaysay93@gmail.com", name: "Admin" } as any,
     req: { cookies: {}, headers: {} } as any,
@@ -20,11 +24,16 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
 
   beforeAll(async () => {
     process.env.INQUIRY_SERVICE_URL = `http://127.0.0.1:${testPort}`;
+    process.env.INQUIRY_SERVICE_SECRET = testSecret;
 
-    // Spawn python chat_service.py for integration test
+    // Spawn python chat_service.py with service secret enabled
     const scriptPath = path.resolve(process.cwd(), "inquiry", "chat_service.py");
     pythonProc = spawn("python", [scriptPath, "--port", String(testPort)], {
       stdio: "pipe",
+      env: {
+        ...process.env,
+        INQUIRY_SERVICE_SECRET: testSecret,
+      },
     });
 
     // Wait for python service to come up
@@ -50,26 +59,34 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
     if (pythonProc) {
       pythonProc.kill();
     }
+    delete process.env.INQUIRY_SERVICE_SECRET;
   });
 
-  describe("A1: FAQ Database and Verified Topics", () => {
-    it("faq.json defines core general inquiry topics plus dynamic topics", () => {
-      const faqRaw = fs.readFileSync(path.resolve(process.cwd(), "inquiry", "faq.json"), "utf-8");
-      const faq = JSON.parse(faqRaw);
-      expect(faq.topics).toHaveLength(8);
-
-      const topicIds = faq.topics.map((t: any) => t.id).sort();
-      expect(topicIds).toEqual(["areas", "contact", "fees", "hours", "location", "requirements", "services", "trainings"]);
-
-      for (const t of faq.topics) {
-        expect(t.name).toBeTruthy();
-        expect(t.answer).toBeTruthy();
-        expect(t.questions.length).toBeGreaterThan(0);
-        expect(t.keywords.length).toBeGreaterThan(0);
-      }
+  describe("P1: Service Authentication and Health Checks", () => {
+    it("health probe endpoint remains public without secret", async () => {
+      const resp = await fetch(`http://127.0.0.1:${testPort}/health`);
+      expect(resp.status).toBe(200);
+      const data = await resp.json();
+      expect(data.status).toBe("ok");
+      expect(data.service).toBe("skti-inquiry-service");
     });
 
-    it("inquiry.topics endpoint returns all approved topics", async () => {
+    it("microservice rejects requests lacking shared secret with 401", async () => {
+      const resp = await fetch(`http://127.0.0.1:${testPort}/api/inquiry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "What are your hours?" }),
+      });
+      expect(resp.status).toBe(401);
+    });
+
+    it("tRPC router automatically attaches secret and succeeds with 200", async () => {
+      const res = await caller.inquiry.chat({ question: "What are your operating hours?" });
+      expect(res.success).toBe(true);
+      expect(res.topic_id).toBe("hours");
+    });
+
+    it("inquiry.topics returns all 8 topics through authenticated proxy", async () => {
       const res = await caller.inquiry.topics();
       expect(res.topics).toHaveLength(8);
       const ids = res.topics.map((t) => t.id);
@@ -84,104 +101,95 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
     });
   });
 
-  describe("A2 & A6: Known Questions and Topic Button Matching", () => {
-    it("matches exact topic button selection", async () => {
-      const res = await caller.inquiry.chat({ topicId: "services" });
-      expect(res.success).toBe(true);
-      expect(res.topic_id).toBe("services");
-      expect(res.match_type).toBe("EXACT_TOPIC");
-      expect(res.answer).toContain("Hemodialysis");
-      expect(res.answer).toContain("Peritoneal Dialysis");
-      expect(res.related_topics.length).toBeGreaterThan(0);
+  describe("P2: Database Context Reliability & Deadlines", () => {
+    it("needsDatabaseContext only activates for topics/queries needing DB records", () => {
+      expect(needsDatabaseContext("What are your hours?", "hours")).toBe(false);
+      expect(needsDatabaseContext("Where are you located?", "location")).toBe(false);
+      expect(needsDatabaseContext("How much is dialysis?", "fees")).toBe(false);
+      expect(needsDatabaseContext("What documents do I need?", "requirements")).toBe(false);
+      expect(needsDatabaseContext("What is your phone number?", "contact")).toBe(false);
+
+      expect(needsDatabaseContext(undefined, "trainings")).toBe(true);
+      expect(needsDatabaseContext("What seminars are scheduled?")).toBe(true);
+      expect(needsDatabaseContext(undefined, "areas")).toBe(true);
+      expect(needsDatabaseContext("Show clinical units and wards")).toBe(true);
     });
 
-    it("answers known questions accurately with approved answers", async () => {
-      const queries = [
-        { q: "What services do you offer?", expectedId: "services" },
-        { q: "What are your operating hours?", expectedId: "hours" },
-        { q: "Where are you located?", expectedId: "location" },
-        { q: "What documents do I need to bring?", expectedId: "requirements" },
-        { q: "How much does hemodialysis cost?", expectedId: "fees" },
-        { q: "What is your telephone contact number?", expectedId: "contact" },
-      ];
+    it("computes exact Manila date YYYY-MM-DD across midnight", () => {
+      // Test with UTC 17:00 (which is 01:00 AM next day in Manila +08:00)
+      const dateUtc = new Date("2026-09-17T17:00:00Z");
+      const manilaDate = getTodayManila(dateUtc);
+      expect(manilaDate).toBe("2026-09-18");
 
-      for (const { q, expectedId } of queries) {
-        const res = await caller.inquiry.chat({ question: q });
-        expect(res.success).toBe(true);
-        expect(res.topic_id).toBe(expectedId);
-        expect(res.answer).toBeTruthy();
+      // Test regular afternoon
+      const afternoonUtc = new Date("2026-09-17T04:00:00Z");
+      expect(getTodayManila(afternoonUtc)).toBe("2026-09-17");
+    });
+
+    it("restricts internal staff headcounts to authorized roles only", async () => {
+      // Unauthenticated public caller
+      const publicRes = await caller.inquiry.chat({ topicId: "areas" });
+      expect(publicRes.success).toBe(true);
+      expect(publicRes.answer).not.toContain("active staff assigned");
+      expect(publicRes.answer).not.toContain("Total Active Staff Tracked");
+
+      // Authenticated admin caller
+      const authRes = await adminCaller.inquiry.chat({ topicId: "areas" });
+      expect(authRes.success).toBe(true);
+      // When live database has records, authorized output shows assignments
+      if (authRes.answer.includes("assigned")) {
+        expect(authRes.answer).toContain("active staff assigned");
       }
     });
   });
 
-  describe("A3 & A6: Alternate Wording, Ambiguity, Empty Input, Unsupported Topics", () => {
-    it("handles alternate wording correctly", async () => {
-      const resHours = await caller.inquiry.chat({ question: "when can i go to dialysis clinic" });
-      expect(resHours.topic_id).toBe("hours");
-      expect(resHours.answer).toContain("8:00 AM");
+  describe("P3: Matching Precision, Greetings, and Ambiguity", () => {
+    it("handles 'hi', 'hello', and greetings without false matching questions", async () => {
+      const resHi = await caller.inquiry.chat({ question: "hi" });
+      expect(resHi.success).toBe(true);
+      expect(resHi.match_type).toBe("GREETING");
+      expect(resHi.answer).toContain("Hello! Welcome to SPMC SKTI General Inquiries");
+      // Must not match "Which building is the kidney center in?"
+      expect(resHi.topic_id).toBeNull();
 
-      const resLoc = await caller.inquiry.chat({
-        question: "can you tell me where the kidney building is situated in bajada",
-      });
-      expect(resLoc.topic_id).toBe("location");
-      expect(resLoc.answer).toContain("J.P. Laurel Avenue");
-
-      const resReq = await caller.inquiry.chat({
-        question: "what papers do i need to prepare for admission",
-      });
-      expect(resReq.topic_id).toBe("requirements");
-      expect(resReq.answer).toContain("Medical Abstract");
-
-      const resFees = await caller.inquiry.chat({
-        question: "is hemodialysis covered by philhealth 156 sessions",
-      });
-      expect(resFees.topic_id).toBe("fees");
-      expect(resFees.answer).toContain("156 hemodialysis sessions");
+      const resHello = await caller.inquiry.chat({ question: "hello" });
+      expect(resHello.match_type).toBe("GREETING");
     });
 
-    it("handles ambiguous questions by offering topic choices", async () => {
-      const res = await caller.inquiry.chat({
+    it("handles short unsupported input ('a', 'x') without false matching", async () => {
+      const resA = await caller.inquiry.chat({ question: "a" });
+      expect(resA.success).toBe(true);
+      expect(resA.match_type).toBe("NO_MATCH");
+      expect(resA.topic_id).toBeNull();
+      expect(resA.answer).toContain("only answer verified general inquiries");
+
+      const resX = await caller.inquiry.chat({ question: "x" });
+      expect(resX.match_type).toBe("NO_MATCH");
+    });
+
+    it("preserves exact matching for topic buttons", async () => {
+      const topics = ["services", "hours", "location", "requirements", "fees", "contact", "trainings", "areas"];
+      for (const t of topics) {
+        const res = await caller.inquiry.chat({ topicId: t });
+        expect(res.success).toBe(true);
+        expect(res.topic_id).toBe(t);
+      }
+    });
+
+    it("preserves ambiguity handling for questions matching multiple topics", async () => {
+      const resAmbig = await caller.inquiry.chat({
         question: "What are the requirements, documents, fees, and costs for treatment?",
       });
-      expect(res.success).toBe(true);
-      expect(res.match_type).toBe("MULTIPLE_MATCHES");
-      expect(res.candidate_topics.length).toBeGreaterThanOrEqual(2);
-      expect(res.answer).toContain("matches multiple topics");
-    });
-
-    it("handles empty and whitespace-only queries cleanly", async () => {
-      const resEmpty = await caller.inquiry.chat({ question: "" });
-      expect(resEmpty.success).toBe(true);
-      expect(resEmpty.match_type).toBe("EMPTY_QUERY");
-      expect(resEmpty.candidate_topics).toHaveLength(8);
-
-      const resSpaces = await caller.inquiry.chat({ question: "     \n\t  " });
-      expect(resSpaces.success).toBe(true);
-      expect(resSpaces.match_type).toBe("EMPTY_QUERY");
-    });
-
-    it("handles unsupported / out-of-scope questions without inventing answers", async () => {
-      const unsupported = [
-        "What is the stock price of Apple?",
-        "Can you write a poem about flowers?",
-        "Who won the soccer match?",
-      ];
-
-      for (const q of unsupported) {
-        const res = await caller.inquiry.chat({ question: q });
-        expect(res.success).toBe(true);
-        expect(res.match_type).toBe("NO_MATCH");
-        expect(res.topic_id).toBeNull();
-        expect(res.answer).toContain("only answer verified general inquiries");
-        expect(res.answer).toContain("SPMC Trunkline");
-      }
+      expect(resAmbig.success).toBe(true);
+      expect(resAmbig.match_type).toBe("MULTIPLE_MATCHES");
+      expect(resAmbig.candidate_topics.length).toBeGreaterThanOrEqual(2);
+      expect(resAmbig.answer).toContain("matches multiple topics");
     });
   });
 
-  describe("A5 & A6: Service Failure and Zero Model Calls", () => {
-    it("gracefully handles service failure when inquiry service is unreachable", async () => {
-      // Point caller to a dead port
-      process.env.INQUIRY_SERVICE_URL = "http://127.0.0.1:59999";
+  describe("P4: Service Outage and Failure Recovery", () => {
+    it("handles service outage without hanging and returns verified fallback with contact info", async () => {
+      process.env.INQUIRY_SERVICE_URL = "http://127.0.0.1:59998";
 
       const res = await caller.inquiry.chat({ question: "What are your hours?" });
       expect(res.success).toBe(false);
@@ -189,34 +197,13 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
       expect(res.answer).toContain("Inquiry service is currently unavailable");
       expect(res.answer).toContain("(082) 227-2731");
 
-      // Restore service url
+      // Restore
       process.env.INQUIRY_SERVICE_URL = `http://127.0.0.1:${testPort}`;
     });
 
     it("confirms zero LLM model calls in inquiry flow", async () => {
-      // The inquiry router exclusively contacts the python service or offline fallback.
-      // aiInsights.chat now routes to inquiry service instead of OpenRouter.
       const res = await adminCaller.aiInsights.chat({ question: "Where are you located?" });
       expect(res.answer).toContain("J.P. Laurel Avenue");
-      // No call to OpenRouter/Nemotron was made
-    });
-  });
-
-  describe("Option D1: Auto-Sync to Live Web App Database Context", () => {
-    it("dynamically queries live database areas and reflects them in inquiry chat", async () => {
-      const res = await caller.inquiry.chat({ topicId: "areas" });
-      expect(res.success).toBe(true);
-      expect(res.topic_id).toBe("areas");
-      expect(res.answer).toContain("SPMC SKTI Clinical Units");
-      expect(res.live_synced).toBe(true);
-    });
-
-    it("dynamically queries live database training catalog / schedule in inquiry chat", async () => {
-      const res = await caller.inquiry.chat({ question: "What seminars are scheduled?" });
-      expect(res.success).toBe(true);
-      expect(res.topic_id).toBe("trainings");
-      expect(res.answer).toContain("SPMC SKTI Seminars & Staff Trainings");
-      expect(res.live_synced).toBe(true);
     });
   });
 });

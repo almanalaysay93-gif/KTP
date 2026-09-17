@@ -22,10 +22,15 @@ export const aiInsightsRouter = router({
     )
     .mutation(async ({ input }) => {
       const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+      const secret = process.env.INQUIRY_SERVICE_SECRET;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (secret) {
+        headers["Authorization"] = `Bearer ${secret}`;
+      }
       try {
         const resp = await fetch(`${serviceUrl}/api/inquiry`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ query: input.question }),
           signal: AbortSignal.timeout(4000),
         });
