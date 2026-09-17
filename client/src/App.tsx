@@ -5,6 +5,7 @@ import { Route, Redirect, Switch } from "wouter";
 import DashboardLayout from "./components/DashboardLayout";
 import { DashboardLayoutSkeleton } from "./components/DashboardLayoutSkeleton";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { SignInPanel } from "./components/SignInPanel";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAuth } from "./_core/hooks/useAuth";
 import AreaDetail from "./pages/AreaDetail";
@@ -47,6 +48,14 @@ function RootRedirect() {
   return <Redirect to={user.role === "admin" ? "/dashboard" : "/me"} />;
 }
 
+// Direct sign-in entry. Signed-in users go to their home page instead.
+function LoginRoute() {
+  const { user, loading } = useAuth();
+  if (loading) return <DashboardLayoutSkeleton />;
+  if (!user) return <SignInPanel />;
+  return <Redirect to={user.role === "admin" ? "/dashboard" : "/me"} />;
+}
+
 function Router() {
   return (
     <Switch>
@@ -66,6 +75,9 @@ function Router() {
         <Protected>
           <StaffMessages />
         </Protected>
+      </Route>
+      <Route path="/login">
+        <LoginRoute />
       </Route>
       <Route path="/staff-signin">
         <StaffSignInPage />
