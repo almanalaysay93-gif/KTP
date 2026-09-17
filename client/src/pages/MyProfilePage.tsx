@@ -253,6 +253,8 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 
 function MyProfileView({ profile }: { profile: any }) {
   const utils = trpc.useUtils();
+  const { logout } = useAuth();
+  const [, setLocation] = useLocation();
   const [contactNumber, setContactNumber] = useState<string | null>(null);
   const [prcLicense, setPrcLicense] = useState<string | null>(null);
   const [trainingDialogOpen, setTrainingDialogOpen] = useState(false);
@@ -321,6 +323,19 @@ function MyProfileView({ profile }: { profile: any }) {
             onFile={(file) => photoMutation.mutate(file)}
           />
           {profile.authMode === "google" ? <ChangeEmailButton currentEmail={profile.accountEmail} /> : null}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              await logout();
+              utils.staffAccount.myProfile.invalidate();
+              setLocation("/staff-signin");
+            }}
+            className="text-destructive hover:text-destructive hover:bg-destructive/10 ml-auto flex items-center gap-1.5"
+          >
+            <LogOut className="h-4 w-4" />
+            <span>Sign out</span>
+          </Button>
         </div>
       </Card>
 

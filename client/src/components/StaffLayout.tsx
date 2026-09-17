@@ -76,9 +76,16 @@ export default function StaffLayout({ children }: StaffLayoutProps) {
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={handleSignOut} className="text-muted-foreground hover:text-foreground">
-              <LogOut className="h-4 w-4 sm:mr-1.5" />
-              <span className="hidden sm:inline">Sign out</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSignOut}
+              className="text-muted-foreground hover:text-destructive flex items-center gap-1.5 h-8 px-2 sm:px-3 text-xs sm:text-sm font-medium"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Sign out</span>
             </Button>
           </div>
         </div>

@@ -354,6 +354,17 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
             </Button>
             <ThemeToggle />
             <NotificationsBell />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-lg text-muted-foreground hover:text-destructive flex items-center gap-1.5 h-9 px-2 sm:px-2.5"
+              onClick={logout}
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="text-xs font-medium hidden sm:inline">Sign out</span>
+            </Button>
           </div>
         </div>
         {isMobile && <MobileBottomNav />}
@@ -677,6 +688,7 @@ function MoreMenu() {
   const searchString = useSearch();
   const currentStaffType = new URLSearchParams(searchString).get("type");
   const [open, setOpen] = useState(false);
+  const { user, logout } = useAuth();
 
   const isItemActive = (itemPath: string) => {
     if (/^https?:\/\//.test(itemPath)) return false;
@@ -704,8 +716,11 @@ function MoreMenu() {
         <span className="text-[10px] leading-none">More</span>
       </button>
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="bottom" className="max-h-[60vh] rounded-t-2xl">
-          <div className="grid grid-cols-4 gap-4 pt-4">
+        <SheetContent side="bottom" className="max-h-[75vh] rounded-t-2xl flex flex-col p-4">
+          <SheetHeader className="pb-2 border-b text-left">
+            <SheetTitle className="text-sm font-semibold">More Navigation</SheetTitle>
+          </SheetHeader>
+          <div className="grid grid-cols-4 gap-3 py-3 overflow-y-auto">
             {NAV_ITEMS.map((item) => {
               const active = isItemActive(item.path);
               if (item.external) {
@@ -718,12 +733,12 @@ function MoreMenu() {
                     aria-label={`${item.label} (opens in new tab)`}
                     onClick={() => setOpen(false)}
                     className={cn(
-                      "flex flex-col items-center gap-2 py-3 rounded-lg transition-colors",
+                      "flex flex-col items-center gap-1.5 p-2 rounded-lg transition-colors",
                       active ? "bg-primary/15 text-primary font-medium" : "hover:bg-accent",
                     )}
                   >
                     <item.icon className="h-5 w-5" />
-                    <span className="text-xs text-center leading-tight">{item.label}</span>
+                    <span className="text-[11px] text-center leading-tight line-clamp-2">{item.label}</span>
                   </a>
                 );
               }
@@ -736,15 +751,46 @@ function MoreMenu() {
                     setLocation(item.path);
                   }}
                   className={cn(
-                    "flex flex-col items-center gap-2 py-3 rounded-lg transition-colors",
+                    "flex flex-col items-center gap-1.5 p-2 rounded-lg transition-colors",
                     active ? "bg-primary/15 text-primary font-medium" : "hover:bg-accent",
                   )}
                 >
                   <item.icon className="h-5 w-5" />
-                  <span className="text-xs text-center leading-tight">{item.label}</span>
+                  <span className="text-[11px] text-center leading-tight line-clamp-2">{item.label}</span>
                 </button>
               );
             })}
+          </div>
+
+          <div className="mt-auto pt-3 border-t flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold truncate">{user?.name || "Signed in"}</p>
+              <p className="text-[11px] text-muted-foreground truncate">{user?.email || ""}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setOpen(false);
+                setLocation("/settings");
+              }}
+              className="h-8 px-2.5 text-xs flex items-center gap-1"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              <span>Settings</span>
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={async () => {
+                setOpen(false);
+                await logout();
+              }}
+              className="h-8 px-2.5 text-xs flex items-center gap-1"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span>Sign out</span>
+            </Button>
           </div>
         </SheetContent>
       </Sheet>
