@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { AlertTriangle, Power, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Power, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -113,11 +113,22 @@ export default function Areas() {
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogHeader>
+          <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+              onClick={() => setOpen(false)}
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="text-xs font-medium">Back</span>
+            </Button>
             <DialogTitle>New Area</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <Label className="mb-1 block">Name *</Label>
                 <Input value={name} onChange={(e) => setName(e.target.value)} />

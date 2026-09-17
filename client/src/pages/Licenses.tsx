@@ -20,7 +20,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import { formatDate, nurseFullName, nurseIdLabel } from "../../../shared/nursetrack";
-import { CalendarCheck, Pencil, Plus, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, CalendarCheck, Pencil, Plus, RefreshCw, Search } from "lucide-react";
 import { safeDateKey } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -292,7 +292,18 @@ function CredentialDialog({
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onOpenChange(false); }}>
       <DialogContent className="max-w-md">
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => onOpenChange(false)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
           <DialogTitle>{editId ? "Edit License" : "Add License"}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
@@ -330,7 +341,7 @@ function CredentialDialog({
             <Label className="mb-1 block">License Number</Label>
             <Input value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="e.g., 0123456" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <Label className="mb-1 block">Issue Date</Label>
               <Input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} />
@@ -340,7 +351,7 @@ function CredentialDialog({
               <Input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <Label className="mb-1 block">Renewal Status</Label>
               <select
@@ -432,7 +443,18 @@ function RenewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => onOpenChange(false)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
           <DialogTitle>Mark License as Renewed</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">

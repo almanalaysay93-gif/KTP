@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
+  ArrowLeft,
   Calendar as CalendarIcon,
   Clock,
   MapPin,
@@ -280,8 +281,19 @@ export default function StaffTrainingCalendar() {
           <DialogContent className="max-w-md">
             {selectedItem && (
               <>
-                <DialogHeader>
-                  <div className="flex items-center gap-2 mb-1">
+                <DialogHeader className="text-left">
+                  <div className="flex items-center justify-between mb-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+                      onClick={() => setSelectedItem(null)}
+                      aria-label="Back"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      <span className="text-xs font-medium">Back</span>
+                    </Button>
                     {getStatusBadge(selectedItem)}
                   </div>
                   <DialogTitle className="text-base font-bold">{selectedItem.trainingName}</DialogTitle>
@@ -427,11 +439,24 @@ export default function StaffTrainingCalendar() {
         {/* Cannot Attend Reason Modal */}
         <Dialog open={isCannotAttendOpen} onOpenChange={setIsCannotAttendOpen}>
           <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="text-base font-bold">Reason for Inability to Attend</DialogTitle>
-              <DialogDescription className="text-xs">
-                Your supervisor will be notified to assist with coverage or rescheduling.
-              </DialogDescription>
+            <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+                onClick={() => setIsCannotAttendOpen(false)}
+                aria-label="Back"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span className="text-xs font-medium">Back</span>
+              </Button>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-base font-bold">Reason for Inability to Attend</DialogTitle>
+                <DialogDescription className="text-xs">
+                  Your supervisor will be notified to assist with coverage or rescheduling.
+                </DialogDescription>
+              </div>
             </DialogHeader>
 
             <div className="space-y-3 py-2">
@@ -472,11 +497,24 @@ export default function StaffTrainingCalendar() {
         {/* Evidence Upload Modal */}
         <Dialog open={isEvidenceOpen} onOpenChange={setIsEvidenceOpen}>
           <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="text-base font-bold">Submit Completion Evidence</DialogTitle>
-              <DialogDescription className="text-xs">
-                Upload a certificate or attendance document (PDF, PNG, JPG up to 10 MB).
-              </DialogDescription>
+            <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+                onClick={() => setIsEvidenceOpen(false)}
+                aria-label="Back"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span className="text-xs font-medium">Back</span>
+              </Button>
+              <div className="space-y-0.5">
+                <DialogTitle className="text-base font-bold">Submit Completion Evidence</DialogTitle>
+                <DialogDescription className="text-xs">
+                  Upload a certificate or attendance document (PDF, PNG, JPG up to 10 MB).
+                </DialogDescription>
+              </div>
             </DialogHeader>
 
             <div className="space-y-3 py-2">

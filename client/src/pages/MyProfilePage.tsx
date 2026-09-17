@@ -17,7 +17,7 @@ import { FileUploadButton } from "@/components/nursetrack/FileUpload";
 import { LicenseStatusBadge, TrainingStatusBadge } from "@/components/nursetrack/StatusBadge";
 import { LICENSE_STATUS_META, nurseIdLabel, type LicenseStatus, formatDate } from "@shared/nursetrack";
 import { toast } from "sonner";
-import { FileCheck, LogOut, Plus, Upload, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, FileCheck, LogOut, Plus, Upload, CheckCircle2 } from "lucide-react";
 
 import StaffLayout from "@/components/StaffLayout";
 
@@ -101,7 +101,18 @@ function ChangeEmailButton({ currentEmail }: { currentEmail: string | null }) {
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogHeader>
+          <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+              onClick={() => setOpen(false)}
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="text-xs font-medium">Back</span>
+            </Button>
             <DialogTitle>Change sign-in email</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
@@ -155,11 +166,22 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => onOpenChange(false)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
           <DialogTitle>Add Completed Training or Seminar</DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <div className="col-span-1 sm:col-span-2">
             <Label className="mb-1 block">Training Topic *</Label>
             <Select value={trainingId} onValueChange={setTrainingId}>
               <SelectTrigger className="w-full">
@@ -210,7 +232,7 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               placeholder="e.g. 5"
             />
           </div>
-          <div className="col-span-2">
+          <div className="col-span-1 sm:col-span-2">
             <Label className="mb-1 block">Certificate Number</Label>
             <Input
               value={certNumber}
@@ -218,7 +240,7 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               placeholder="e.g. CERT-2026-001"
             />
           </div>
-          <div className="col-span-2">
+          <div className="col-span-1 sm:col-span-2">
             <Label className="mb-1 block">Remarks / Notes</Label>
             <Textarea
               value={remarks}
@@ -226,7 +248,7 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               placeholder="Optional notes or details…"
             />
           </div>
-          <div className="col-span-2 flex justify-end gap-2">
+          <div className="col-span-1 sm:col-span-2 flex justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button
               disabled={!trainingId || !completionDate || addMutation.isPending}

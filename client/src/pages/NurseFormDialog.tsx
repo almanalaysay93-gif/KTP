@@ -201,8 +201,8 @@ export function NurseFormDialog({
           </Button>
           <DialogTitle className="text-lg font-semibold">{nurse ? "Edit Nurse" : "Add Nurse"}</DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2 flex items-center gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <div className="col-span-1 sm:col-span-2 flex items-center gap-3">
             <img
               src={photoPreview ?? ""}
               alt=""
@@ -275,7 +275,7 @@ export function NurseFormDialog({
             <Label className="mb-1 block">Date Hired *</Label>
             <Input type="date" value={dateHired} onChange={(e) => setDateHired(e.target.value)} />
           </div>
-          <div className="col-span-2">
+          <div className="col-span-1 sm:col-span-2">
             <Label htmlFor="accountEmail" className="mb-1 block">Sign-in email</Label>
             <Input
               id="accountEmail"
@@ -290,7 +290,7 @@ export function NurseFormDialog({
                 : "Optional. Staff can also set this themselves on first sign-in — see /staff-signin."}
             </p>
           </div>
-          <div className="col-span-2 flex justify-end gap-2 pt-2">
+          <div className="col-span-1 sm:col-span-2 flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={submit} disabled={submitting || !valid}>
               {submitting ? "Saving…" : nurse ? "Save Changes" : "Add Nurse"}

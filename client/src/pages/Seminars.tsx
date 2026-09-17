@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { formatDate, TARGET_STAFF_TYPES } from "../../../shared/nursetrack";
-import { CalendarDays, MapPin, Plus, Trash2, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, MapPin, Plus, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -180,18 +180,73 @@ function SeminarDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-        <DialogHeader><DialogTitle>Schedule Seminar or LDI</DialogTitle></DialogHeader>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2"><Label className="mb-1 block">Training catalog item *</Label><Select value={trainingId} onValueChange={setTrainingId}><SelectTrigger><SelectValue placeholder="Choose seminar or training" /></SelectTrigger><SelectContent>{catalog?.filter((item) => item.active).map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.name} ({item.kind})</SelectItem>)}</SelectContent></Select></div>
-          <div><Label className="mb-1 block">Start date *</Label><Input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); if (!endDate) setEndDate(event.target.value); }} /></div>
-          <div><Label className="mb-1 block">End date *</Label><Input type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} /></div>
-          <div><Label className="mb-1 block">Start time</Label><Input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></div>
-          <div><Label className="mb-1 block">End time</Label><Input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></div>
-          <div><Label className="mb-1 block">Provider</Label><Input value={provider} onChange={(event) => setProvider(event.target.value)} /></div>
-          <div><Label className="mb-1 block">Venue</Label><Input value={venue} onChange={(event) => setVenue(event.target.value)} /></div>
-          <div className="col-span-2"><Label className="mb-1 block">Target staff</Label><Select value={targetStaffType} onValueChange={setTargetStaffType}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TARGET_STAFF_TYPES.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select></div>
-          <div className="col-span-2"><Label className="mb-1 block">Remarks</Label><Textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} /></div>
-          <div className="col-span-2 flex justify-end gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={!valid || create.isPending} onClick={() => create.mutate({ trainingId: Number(trainingId), provider: provider || undefined, venue: venue || undefined, startDate, endDate, startTime: startTime || undefined, endTime: endTime || undefined, targetStaffType: targetStaffType as (typeof TARGET_STAFF_TYPES)[number], remarks: remarks || undefined })}>Schedule</Button></div>
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => onOpenChange(false)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
+          <DialogTitle>Schedule Seminar or LDI</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <div className="col-span-1 sm:col-span-2">
+            <Label className="mb-1 block">Training catalog item *</Label>
+            <Select value={trainingId} onValueChange={setTrainingId}>
+              <SelectTrigger><SelectValue placeholder="Choose seminar or training" /></SelectTrigger>
+              <SelectContent>
+                {catalog?.filter((item) => item.active).map((item) => (
+                  <SelectItem key={item.id} value={String(item.id)}>{item.name} ({item.kind})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="mb-1 block">Start date *</Label>
+            <Input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); if (!endDate) setEndDate(event.target.value); }} />
+          </div>
+          <div>
+            <Label className="mb-1 block">End date *</Label>
+            <Input type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+          </div>
+          <div>
+            <Label className="mb-1 block">Start time</Label>
+            <Input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+          </div>
+          <div>
+            <Label className="mb-1 block">End time</Label>
+            <Input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+          </div>
+          <div>
+            <Label className="mb-1 block">Provider</Label>
+            <Input value={provider} onChange={(event) => setProvider(event.target.value)} />
+          </div>
+          <div>
+            <Label className="mb-1 block">Venue</Label>
+            <Input value={venue} onChange={(event) => setVenue(event.target.value)} />
+          </div>
+          <div className="col-span-1 sm:col-span-2">
+            <Label className="mb-1 block">Target staff</Label>
+            <Select value={targetStaffType} onValueChange={setTargetStaffType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TARGET_STAFF_TYPES.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="col-span-1 sm:col-span-2">
+            <Label className="mb-1 block">Remarks</Label>
+            <Textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} />
+          </div>
+          <div className="col-span-1 sm:col-span-2 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button disabled={!valid || create.isPending} onClick={() => create.mutate({ trainingId: Number(trainingId), provider: provider || undefined, venue: venue || undefined, startDate, endDate, startTime: startTime || undefined, endTime: endTime || undefined, targetStaffType: targetStaffType as (typeof TARGET_STAFF_TYPES)[number], remarks: remarks || undefined })}>Schedule</Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

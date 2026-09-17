@@ -896,8 +896,8 @@ function CredentialDialog({
           </Button>
           <DialogTitle>{credentialId ? "Edit Credential" : "Add Credential"}</DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <div className="col-span-1 sm:col-span-2">
             <Label className="mb-1 block">Credential Type *</Label>
             <Select value={typeId} onValueChange={setTypeId} disabled={!!credentialId}>
               <SelectTrigger className="w-full"><SelectValue placeholder="Select type…" /></SelectTrigger>
@@ -944,11 +944,11 @@ function CredentialDialog({
             <Label className="mb-1 block">Certificate Number</Label>
             <Input value={certNumber} onChange={(e) => setCertNumber(e.target.value)} />
           </div>
-          <div className="col-span-2">
+          <div className="col-span-1 sm:col-span-2">
             <Label className="mb-1 block">Remarks</Label>
             <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} />
           </div>
-          <div className="col-span-2 flex justify-end gap-2">
+          <div className="col-span-1 sm:col-span-2 flex justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button
               disabled={isSaveDisabled}

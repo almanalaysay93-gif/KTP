@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
+  ArrowLeft,
   MessageSquarePlus,
   Send,
   Users,
@@ -256,11 +257,24 @@ export default function StaffMessages() {
       {/* Compose Message Dialog */}
       <Dialog open={isComposeOpen} onOpenChange={setIsComposeOpen}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">Compose Supervisor Message</DialogTitle>
-            <DialogDescription className="text-xs">
-              This message will appear in the designated nurses' portal feeds.
-            </DialogDescription>
+          <DialogHeader className="flex flex-row items-center gap-2 space-y-0 text-left">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+              onClick={() => setIsComposeOpen(false)}
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="text-xs font-medium">Back</span>
+            </Button>
+            <div className="space-y-0.5">
+              <DialogTitle className="text-lg font-bold">Compose Supervisor Message</DialogTitle>
+              <DialogDescription className="text-xs">
+                This message will appear in the designated nurses' portal feeds.
+              </DialogDescription>
+            </div>
           </DialogHeader>
 
           <div className="space-y-4 py-2 text-xs">
@@ -424,11 +438,24 @@ export default function StaffMessages() {
       {/* Recipient Audit Dialog */}
       <Dialog open={selectedMessageId !== null} onOpenChange={(open) => !open && setSelectedMessageId(null)}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-base font-bold">Recipient Read & Acknowledgment Status</DialogTitle>
-            <DialogDescription className="text-xs">
-              Audited status for message: <strong>{messageDetail?.title}</strong>
-            </DialogDescription>
+          <DialogHeader className="flex flex-row items-center gap-2 space-y-0 text-left">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+              onClick={() => setSelectedMessageId(null)}
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="text-xs font-medium">Back</span>
+            </Button>
+            <div className="space-y-0.5">
+              <DialogTitle className="text-base font-bold">Recipient Read & Acknowledgment Status</DialogTitle>
+              <DialogDescription className="text-xs">
+                Audited status for message: <strong>{messageDetail?.title}</strong>
+              </DialogDescription>
+            </div>
           </DialogHeader>
 
           {isDetailLoading ? (
@@ -508,11 +535,24 @@ export default function StaffMessages() {
       {/* Edit Message Dialog */}
       <Dialog open={editingMessage !== null} onOpenChange={(open) => !open && setEditingMessage(null)}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-base font-bold">Edit Message</DialogTitle>
-            <DialogDescription className="text-xs">
-              Editing increments the message revision and requires nurses to re-read and re-acknowledge.
-            </DialogDescription>
+          <DialogHeader className="flex flex-row items-center gap-2 space-y-0 text-left">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+              onClick={() => setEditingMessage(null)}
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="text-xs font-medium">Back</span>
+            </Button>
+            <div className="space-y-0.5">
+              <DialogTitle className="text-base font-bold">Edit Message</DialogTitle>
+              <DialogDescription className="text-xs">
+                Editing increments the message revision and requires nurses to re-read and re-acknowledge.
+              </DialogDescription>
+            </div>
           </DialogHeader>
 
           {editingMessage && (

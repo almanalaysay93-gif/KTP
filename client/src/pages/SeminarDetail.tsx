@@ -240,5 +240,102 @@ function AttendanceDialog({ open, onOpenChange, eventId, defaultDate }: { open: 
   const [nurseId, setNurseId] = useState(""); const [status, setStatus] = useState("Completed"); const [completionDate, setCompletionDate] = useState(defaultDate); const [role, setRole] = useState("Participant"); const [hours, setHours] = useState(""); const [cpd, setCpd] = useState(""); const [remarks, setRemarks] = useState("");
   const needsCompletionDate = status === "Completed" || status === "Expired";
   const add = trpc.seminars.addAttendance.useMutation({ onSuccess: async () => { toast.success("Attendance added."); await utils.seminars.detail.invalidate({ eventId }); await utils.seminars.list.invalidate(); onOpenChange(false); setNurseId(""); }, onError: (error) => toast.error(error.message) });
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle>Add Seminar Attendance</DialogTitle></DialogHeader><div className="grid grid-cols-2 gap-4"><div className="col-span-2"><Label className="mb-1 block">Staff member *</Label><Select value={nurseId} onValueChange={setNurseId}><SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger><SelectContent>{staff?.map((person) => <SelectItem key={person.id} value={String(person.id)}>{person.lastName}, {person.firstName} ({person.staffType})</SelectItem>)}</SelectContent></Select></div><div><Label className="mb-1 block">Status</Label><Select value={status} onValueChange={setStatus}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TRAINING_STATUSES.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select></div><div><Label className="mb-1 block">Full completion date{needsCompletionDate ? " *" : ""}</Label><Input type="date" value={completionDate} disabled={!needsCompletionDate} onChange={(event) => setCompletionDate(event.target.value)} /></div><div><Label className="mb-1 block">Participation role</Label><Select value={role} onValueChange={setRole}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PARTICIPATION_ROLES.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-2 gap-2"><div><Label className="mb-1 block">Hours</Label><Input type="number" min={1} value={hours} onChange={(event) => setHours(event.target.value)} /></div><div><Label className="mb-1 block">CPD</Label><Input type="number" min={1} value={cpd} onChange={(event) => setCpd(event.target.value)} /></div></div><div className="col-span-2"><Label className="mb-1 block">Remarks</Label><Textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} /></div><div className="col-span-2 flex justify-end gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={!nurseId || (needsCompletionDate && !completionDate) || add.isPending} onClick={() => add.mutate({ eventId, nurseId: Number(nurseId), status: status as (typeof TRAINING_STATUSES)[number], completionDate: needsCompletionDate ? completionDate : undefined, participationRole: role as (typeof PARTICIPATION_ROLES)[number], trainingHours: hours ? Number(hours) : undefined, cpdUnits: cpd ? Number(cpd) : undefined, remarks: remarks || undefined })}>Add</Button></div></div></DialogContent></Dialog>;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => onOpenChange(false)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
+          <DialogTitle>Add Seminar Attendance</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <div className="col-span-1 sm:col-span-2">
+            <Label className="mb-1 block">Staff member *</Label>
+            <Select value={nurseId} onValueChange={setNurseId}>
+              <SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger>
+              <SelectContent>
+                {staff?.map((person) => (
+                  <SelectItem key={person.id} value={String(person.id)}>
+                    {person.lastName}, {person.firstName} ({person.staffType})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="mb-1 block">Status</Label>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TRAINING_STATUSES.map((item) => (
+                  <SelectItem key={item} value={item}>{item}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="mb-1 block">Full completion date{needsCompletionDate ? " *" : ""}</Label>
+            <Input
+              type="date"
+              value={completionDate}
+              disabled={!needsCompletionDate}
+              onChange={(event) => setCompletionDate(event.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="mb-1 block">Participation role</Label>
+            <Select value={role} onValueChange={setRole}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PARTICIPATION_ROLES.map((item) => (
+                  <SelectItem key={item} value={item}>{item}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="mb-1 block">Hours</Label>
+              <Input type="number" min={1} value={hours} onChange={(event) => setHours(event.target.value)} />
+            </div>
+            <div>
+              <Label className="mb-1 block">CPD</Label>
+              <Input type="number" min={1} value={cpd} onChange={(event) => setCpd(event.target.value)} />
+            </div>
+          </div>
+          <div className="col-span-1 sm:col-span-2">
+            <Label className="mb-1 block">Remarks</Label>
+            <Textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} />
+          </div>
+          <div className="col-span-1 sm:col-span-2 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button
+              disabled={!nurseId || (needsCompletionDate && !completionDate) || add.isPending}
+              onClick={() => add.mutate({
+                eventId,
+                nurseId: Number(nurseId),
+                status: status as (typeof TRAINING_STATUSES)[number],
+                completionDate: needsCompletionDate ? completionDate : undefined,
+                participationRole: role as (typeof PARTICIPATION_ROLES)[number],
+                trainingHours: hours ? Number(hours) : undefined,
+                cpdUnits: cpd ? Number(cpd) : undefined,
+                remarks: remarks || undefined,
+              })}
+            >
+              Add
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }

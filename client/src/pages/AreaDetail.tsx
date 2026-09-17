@@ -210,7 +210,18 @@ function BackfillDialog(props: {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent>
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => props.onOpenChange(false)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
           <DialogTitle>Backfill Historical Assignment</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
@@ -225,7 +236,7 @@ function BackfillDialog(props: {
             />
             <p className="text-xs text-muted-foreground mt-1">Enter the nurse's numeric ID (shown on the nurse profile page).</p>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <Label className="mb-1 block">Start Date *</Label>
               <Input type="date" value={props.startDate} onChange={(e) => props.setStartDate(e.target.value)} />

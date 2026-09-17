@@ -35,6 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { formatDate, nurseFullName, TRAINING_KINDS } from "../../../shared/nursetrack";
 import {
+  ArrowLeft,
   BookOpen,
   Plus,
   Trash2,
@@ -588,7 +589,18 @@ function CatalogDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => { onOpenChange(false); reset(); }}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
           <DialogTitle>{isEdit ? "Edit Training Type" : "Add Training Type"}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
@@ -596,7 +608,7 @@ function CatalogDialog({
             <Label className="mb-1 block">Name *</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Basic Life Support" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
               <Label className="mb-1 block">Activity Type</Label>
               <Select value={kind} onValueChange={(value) => setKind(value as (typeof TRAINING_KINDS)[number])}>
@@ -608,7 +620,7 @@ function CatalogDialog({
               <Label className="mb-1 block">Category</Label>
               <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g., Clinical" />
             </div>
-            <div>
+            <div className="col-span-1 sm:col-span-2">
               <Label className="mb-1 block">Default Validity (months)</Label>
               <Input
                 type="number"

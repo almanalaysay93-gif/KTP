@@ -178,7 +178,7 @@ export default function Dashboard() {
           <button
             key={s.label}
             onClick={() => navigate(s.path)}
-            className="group"
+            className="group text-left last:col-span-2 md:last:col-span-1"
           >
             <Card className="glass-card text-left h-full">
               <CardContent className="pt-5 flex items-start justify-between gap-2">
