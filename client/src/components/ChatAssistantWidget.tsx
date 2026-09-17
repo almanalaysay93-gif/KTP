@@ -18,6 +18,8 @@ import {
   User,
   X,
   FileCheck2,
+  GraduationCap,
+  Layers,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -37,6 +39,7 @@ export type ChatEntry = {
   relatedTopics?: TopicPill[];
   candidateTopics?: TopicPill[];
   contactSnippet?: string;
+  liveSynced?: boolean;
 };
 
 const DEFAULT_TOPICS: Array<{ id: string; name: string; short_desc: string; icon: typeof Stethoscope }> = [
@@ -45,6 +48,8 @@ const DEFAULT_TOPICS: Array<{ id: string; name: string; short_desc: string; icon
   { id: "location", name: "Location", short_desc: "SPMC Bajada Campus", icon: Building2 },
   { id: "requirements", name: "Requirements", short_desc: "Abstracts & Clearances", icon: FileCheck2 },
   { id: "fees", name: "Fees", short_desc: "PhilHealth 156 Sessions", icon: Receipt },
+  { id: "trainings", name: "Seminars", short_desc: "Live Training Calendar", icon: GraduationCap },
+  { id: "areas", name: "Units", short_desc: "Live Clinical Areas", icon: Layers },
   { id: "contact", name: "Contact", short_desc: "Trunkline & Locals", icon: Mail },
 ];
 
@@ -70,6 +75,7 @@ export function ChatAssistantWidget() {
           relatedTopics: data.related_topics,
           candidateTopics: data.candidate_topics,
           contactSnippet: data.contact_snippet,
+          liveSynced: data.live_synced,
         },
       ]);
     },

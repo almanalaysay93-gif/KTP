@@ -240,6 +240,63 @@
       ],
       "answer": "SPMC SKTI Contact Information:\n\n• SPMC Main Hospital Trunkline: (082) 227-2731\n• Dialysis Center Direct Extension: Local 4128 / 4129\n• Nephrology Outpatient Clinic: Local 4135\n• Kidney Transplant Coordination Office: Local 4140\n• SPMC Emergency Department Triage: (082) 227-2731 local 1111\n• Official Hospital Email: spmc.doh@gmail.com / skti.spmc@gmail.com\n• Facility Location: J.P. Laurel Avenue, Bajada, Davao City, 8000",
       "related_topics": ["hours", "location", "services"]
+    },
+    {
+      "id": "trainings",
+      "name": "Seminars & Trainings",
+      "short_desc": "Live training calendar and upcoming seminars",
+      "questions": [
+        "What seminars are scheduled?",
+        "What upcoming trainings are available?",
+        "When is the next BLS or hemodialysis training?",
+        "Show the seminar schedule"
+      ],
+      "keywords": [
+        "training",
+        "trainings",
+        "seminar",
+        "seminars",
+        "workshop",
+        "workshops",
+        "bls",
+        "acls",
+        "course",
+        "courses",
+        "class",
+        "classes",
+        "cme",
+        "continuing education"
+      ],
+      "answer": "SPMC SKTI Seminars & Staff Trainings:\n\nStaff training and continuing professional development schedule from the NurseTrack live database.",
+      "related_topics": ["services", "hours", "contact"]
+    },
+    {
+      "id": "areas",
+      "name": "Clinical Units & Areas",
+      "short_desc": "Active clinical units and hospital stations",
+      "questions": [
+        "What clinical areas or units are active?",
+        "What hospital wards are in SKTI?",
+        "Which areas have dialysis or nephrology stations?",
+        "Show hospital departments and staffing"
+      ],
+      "keywords": [
+        "unit",
+        "units",
+        "area",
+        "areas",
+        "ward",
+        "wards",
+        "department",
+        "departments",
+        "station",
+        "stations",
+        "section",
+        "sections",
+        "clinical units"
+      ],
+      "answer": "SPMC SKTI Clinical Areas and Hospital Units:\n\nActive nephrology care areas and stations tracked in the NurseTrack live database.",
+      "related_topics": ["services", "location", "hours"]
     }
   ]
 }

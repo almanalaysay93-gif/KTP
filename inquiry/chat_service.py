@@ -96,13 +96,14 @@ class InquiryRequestHandler(BaseHTTPRequestHandler):
         # Extract fields
         query = body.get("query") or body.get("question") or ""
         topic_id = body.get("topic_id") or body.get("topicId")
+        context = body.get("context") or {}
 
         # In-process match execution
         match_result = self.matcher.match(query=query, topic_id=topic_id)
 
-        # Format approved response
+        # Format approved response with live database context
         all_topics = self.faq_data.get("topics", [])
-        response_payload = format_inquiry_response(match_result, all_topics, self.faq_data)
+        response_payload = format_inquiry_response(match_result, all_topics, self.faq_data, context=context)
 
         self._set_cors_headers(200)
         self.wfile.write(json.dumps(response_payload, ensure_ascii=False).encode("utf-8"))

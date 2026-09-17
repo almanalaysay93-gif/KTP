@@ -53,13 +53,13 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
   });
 
   describe("A1: FAQ Database and Verified Topics", () => {
-    it("faq.json defines all 6 core general inquiry topics", () => {
+    it("faq.json defines core general inquiry topics plus dynamic topics", () => {
       const faqRaw = fs.readFileSync(path.resolve(process.cwd(), "inquiry", "faq.json"), "utf-8");
       const faq = JSON.parse(faqRaw);
-      expect(faq.topics).toHaveLength(6);
+      expect(faq.topics).toHaveLength(8);
 
       const topicIds = faq.topics.map((t: any) => t.id).sort();
-      expect(topicIds).toEqual(["contact", "fees", "hours", "location", "requirements", "services"]);
+      expect(topicIds).toEqual(["areas", "contact", "fees", "hours", "location", "requirements", "services", "trainings"]);
 
       for (const t of faq.topics) {
         expect(t.name).toBeTruthy();
@@ -69,9 +69,9 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
       }
     });
 
-    it("inquiry.topics endpoint returns the 6 approved topics", async () => {
+    it("inquiry.topics endpoint returns all approved topics", async () => {
       const res = await caller.inquiry.topics();
-      expect(res.topics).toHaveLength(6);
+      expect(res.topics).toHaveLength(8);
       const ids = res.topics.map((t) => t.id);
       expect(ids).toContain("services");
       expect(ids).toContain("hours");
@@ -79,6 +79,8 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
       expect(ids).toContain("requirements");
       expect(ids).toContain("fees");
       expect(ids).toContain("contact");
+      expect(ids).toContain("trainings");
+      expect(ids).toContain("areas");
     });
   });
 
@@ -151,7 +153,7 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
       const resEmpty = await caller.inquiry.chat({ question: "" });
       expect(resEmpty.success).toBe(true);
       expect(resEmpty.match_type).toBe("EMPTY_QUERY");
-      expect(resEmpty.candidate_topics).toHaveLength(6);
+      expect(resEmpty.candidate_topics).toHaveLength(8);
 
       const resSpaces = await caller.inquiry.chat({ question: "     \n\t  " });
       expect(resSpaces.success).toBe(true);
@@ -197,6 +199,24 @@ describe("A1-A6: Rule-based Inquiry Chatbot & Python Service", () => {
       const res = await adminCaller.aiInsights.chat({ question: "Where are you located?" });
       expect(res.answer).toContain("J.P. Laurel Avenue");
       // No call to OpenRouter/Nemotron was made
+    });
+  });
+
+  describe("Option D1: Auto-Sync to Live Web App Database Context", () => {
+    it("dynamically queries live database areas and reflects them in inquiry chat", async () => {
+      const res = await caller.inquiry.chat({ topicId: "areas" });
+      expect(res.success).toBe(true);
+      expect(res.topic_id).toBe("areas");
+      expect(res.answer).toContain("SPMC SKTI Clinical Units");
+      expect(res.live_synced).toBe(true);
+    });
+
+    it("dynamically queries live database training catalog / schedule in inquiry chat", async () => {
+      const res = await caller.inquiry.chat({ question: "What seminars are scheduled?" });
+      expect(res.success).toBe(true);
+      expect(res.topic_id).toBe("trainings");
+      expect(res.answer).toContain("SPMC SKTI Seminars & Staff Trainings");
+      expect(res.live_synced).toBe(true);
     });
   });
 });

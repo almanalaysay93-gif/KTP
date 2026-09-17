@@ -51,6 +51,14 @@ INTENT_TRIGGERS: Dict[str, Set[str]] = {
     "contact": {
         "contact", "contacts", "phone", "telephone", "trunkline", "call",
         "number", "numbers", "email", "hotline", "extension", "local"
+    },
+    "trainings": {
+        "training", "trainings", "seminar", "seminars", "workshop", "workshops",
+        "bls", "acls", "course", "courses", "class", "classes", "cme"
+    },
+    "areas": {
+        "unit", "units", "area", "areas", "ward", "wards", "department",
+        "departments", "station", "stations", "section", "sections"
     }
 }
 

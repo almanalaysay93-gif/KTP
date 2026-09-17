@@ -10944,15 +10944,69 @@ var aiInsightsRouter = router({
 
 // server/routers/inquiry.ts
 import { z as z17 } from "zod";
+init_db();
 var FALLBACK_TOPICS = [
   { id: "services", name: "Services Offered", short_desc: "Hemodialysis, peritoneal dialysis, transplant" },
   { id: "hours", name: "Hours & Schedule", short_desc: "Clinic hours and 24/7 dialysis shifts" },
   { id: "location", name: "Location & Directions", short_desc: "SPMC Bajada Dialysis Complex" },
   { id: "requirements", name: "Requirements & Documents", short_desc: "Medical abstract, clearances, PhilHealth" },
   { id: "fees", name: "Fees & PhilHealth", short_desc: "156 sessions coverage and financial aid" },
-  { id: "contact", name: "Contact & Inquiries", short_desc: "Trunkline (082) 227-2731 and direct locals" }
+  { id: "contact", name: "Contact & Inquiries", short_desc: "Trunkline (082) 227-2731 and direct locals" },
+  { id: "trainings", name: "Seminars & Trainings", short_desc: "Live training calendar and upcoming seminars" },
+  { id: "areas", name: "Clinical Units & Areas", short_desc: "Active clinical units and hospital stations" }
 ];
 var SERVICE_UNAVAILABLE_ANSWER = "Inquiry service is currently unavailable. For general inquiries regarding SPMC SKTI services, hours, location, requirements, or fees, please contact the SPMC SKTI Information Desk directly at (082) 227-2731 (local 4128/4129) or visit the SPMC Dialysis Complex in Bajada, Davao City.";
+async function buildLiveInquiryContext() {
+  try {
+    const [areas2, trainingCatalog2, nurseTrainings2, nurses2] = await Promise.all([
+      listAreas(false).catch(() => []),
+      listTrainingCatalog(false).catch(() => []),
+      listNurseTrainings().catch(() => []),
+      listNurses().catch(() => [])
+    ]);
+    const activeNurses = nurses2.filter(
+      (n) => !n.archivedAt && n.employmentStatus !== "Archived" && n.employmentStatus !== "Resigned"
+    );
+    const areaById = new Map(areas2.map((a) => [a.id, a.name]));
+    const areaCounts = /* @__PURE__ */ new Map();
+    for (const a of areas2) areaCounts.set(a.name, 0);
+    for (const n of activeNurses) {
+      if (n.currentAreaId && areaById.has(n.currentAreaId)) {
+        const name = areaById.get(n.currentAreaId);
+        areaCounts.set(name, (areaCounts.get(name) ?? 0) + 1);
+      }
+    }
+    const activeAreas = areas2.map((a) => ({
+      id: a.id,
+      name: a.name,
+      staffCount: areaCounts.get(a.name) ?? 0
+    }));
+    const todayStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const catalogById = new Map(trainingCatalog2.map((t2) => [t2.id, t2.name]));
+    const upcoming = nurseTrainings2.filter((t2) => t2.status === "Scheduled" && t2.scheduledDate && String(t2.scheduledDate) >= todayStr).map((t2) => ({
+      trainingName: catalogById.get(t2.trainingId) ?? "Training/Seminar",
+      scheduledDate: String(t2.scheduledDate).slice(0, 10)
+    })).sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
+    const seen = /* @__PURE__ */ new Set();
+    const deduplicatedUpcoming = upcoming.filter((u) => {
+      const key = `${u.trainingName}::${u.scheduledDate}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 15);
+    return {
+      active_areas: activeAreas,
+      upcoming_trainings: deduplicatedUpcoming,
+      total_active_staff: activeNurses.length
+    };
+  } catch {
+    return {
+      active_areas: [],
+      upcoming_trainings: [],
+      total_active_staff: 0
+    };
+  }
+}
 var inquiryRouter = router({
   topics: publicProcedure.query(async () => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
@@ -10981,6 +11035,7 @@ var inquiryRouter = router({
     })
   ).mutation(async ({ input }) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    const liveContext = await buildLiveInquiryContext();
     try {
       const resp = await fetch(`${serviceUrl}/api/inquiry`, {
         method: "POST",
@@ -10988,7 +11043,8 @@ var inquiryRouter = router({
         body: JSON.stringify({
           query: input.question || "",
           topic_id: input.topicId || void 0,
-          history: input.history || []
+          history: input.history || [],
+          context: liveContext
         }),
         signal: AbortSignal.timeout(5e3)
       });
@@ -11002,10 +11058,52 @@ var inquiryRouter = router({
           match_type: json2.match_type || "UNKNOWN",
           related_topics: json2.related_topics || [],
           candidate_topics: json2.candidate_topics || [],
-          contact_snippet: json2.contact_snippet
+          contact_snippet: json2.contact_snippet,
+          live_synced: true
         };
       }
     } catch {
+    }
+    if (input.topicId === "trainings" || input.question?.toLowerCase().includes("seminar") || input.question?.toLowerCase().includes("training")) {
+      const upcoming = liveContext.upcoming_trainings;
+      let answer = "SPMC SKTI Seminars & Staff Trainings (Live Database):\n\n";
+      if (upcoming && upcoming.length > 0) {
+        answer += upcoming.map((u) => `\u2022 ${u.trainingName} \u2014 Scheduled: ${u.scheduledDate}`).join("\n");
+      } else {
+        answer += "There are currently no upcoming seminars or trainings scheduled in the database.";
+      }
+      return {
+        success: true,
+        answer,
+        topic_id: "trainings",
+        title: "Seminars & Trainings",
+        match_type: "EXACT_TOPIC",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "trainings"),
+        candidate_topics: [],
+        live_synced: true
+      };
+    }
+    if (input.topicId === "areas" || input.question?.toLowerCase().includes("area") || input.question?.toLowerCase().includes("unit")) {
+      const areas2 = liveContext.active_areas;
+      let answer = "SPMC SKTI Clinical Units & Areas (Live Database):\n\n";
+      if (areas2 && areas2.length > 0) {
+        answer += areas2.map((a) => `\u2022 ${a.name} (${a.staffCount} active staff assigned)`).join("\n");
+        answer += `
+
+Total Active Staff Tracked: ${liveContext.total_active_staff}`;
+      } else {
+        answer += "Active hospital areas tracked in NurseTrack.";
+      }
+      return {
+        success: true,
+        answer,
+        topic_id: "areas",
+        title: "Clinical Units & Areas",
+        match_type: "EXACT_TOPIC",
+        related_topics: FALLBACK_TOPICS.filter((t2) => t2.id !== "areas"),
+        candidate_topics: [],
+        live_synced: true
+      };
     }
     return {
       success: false,
@@ -11015,7 +11113,8 @@ var inquiryRouter = router({
       match_type: "SERVICE_UNAVAILABLE",
       related_topics: FALLBACK_TOPICS,
       candidate_topics: FALLBACK_TOPICS,
-      contact_snippet: "SPMC Trunkline: (082) 227-2731 | Dialysis Local: 4128/4129"
+      contact_snippet: "SPMC Trunkline: (082) 227-2731 | Dialysis Local: 4128/4129",
+      live_synced: false
     };
   })
 });

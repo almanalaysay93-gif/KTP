@@ -200,7 +200,7 @@ class TestChatServiceHTTP(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(data["success"])
-            self.assertEqual(len(data["topics"]), 6)
+            self.assertEqual(len(data["topics"]), 8)
 
     def test_chat_query_endpoint(self):
         payload = json.dumps({"query": "What are your operating hours?"}).encode("utf-8")
@@ -231,6 +231,37 @@ class TestChatServiceHTTP(unittest.TestCase):
             self.assertTrue(data["success"])
             self.assertEqual(data["topic_id"], "fees")
             self.assertIn("156", data["answer"])
+
+    def test_chat_live_context_enrichment(self):
+        # Option D1: test live database context injection
+        payload = json.dumps({
+            "topic_id": "trainings",
+            "context": {
+                "upcoming_trainings": [
+                    {"trainingName": "Basic Life Support (BLS)", "scheduledDate": "2026-10-20"},
+                    {"trainingName": "Dialysis Machine Safety", "scheduledDate": "2026-11-05"}
+                ],
+                "active_areas": [
+                    {"name": "SKTI Hemodialysis Unit", "staffCount": 18},
+                    {"name": "Peritoneal Dialysis Unit", "staffCount": 6}
+                ],
+                "total_active_staff": 48
+            }
+        }).encode("utf-8")
+        req = Request(
+            f"http://127.0.0.1:{self.port}/api/inquiry",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(data["success"])
+            self.assertEqual(data["topic_id"], "trainings")
+            self.assertIn("Basic Life Support (BLS)", data["answer"])
+            self.assertIn("2026-10-20", data["answer"])
+            self.assertTrue(data.get("live_synced"))
 
 
 if __name__ == "__main__":
