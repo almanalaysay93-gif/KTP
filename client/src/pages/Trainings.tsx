@@ -33,6 +33,14 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
+import {
+  EMPTY_TRAINING_RECORD_FORM,
+  formStateToUpdate,
+  RECORD_STATUSES,
+  recordToFormState,
+  type TrainingRecordFields,
+  type TrainingRecordFormState,
+} from "@/lib/trainingRecordForm";
 import { formatDate, nurseFullName, TRAINING_KINDS } from "../../../shared/nursetrack";
 import {
   ArrowLeft,
@@ -55,7 +63,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
-const RECORD_STATUSES = ["Scheduled", "Completed", "Expired", "Cancelled"] as const;
 
 export default function Trainings() {
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -77,10 +84,14 @@ export default function Trainings() {
   const toggleActive = trpc.trainings.updateCatalogItem.useMutation({
     onSuccess: () => {
       toast.success("Catalog item updated.");
+      utils.trainings.initial.invalidate();
       utils.trainings.listCatalog.invalidate();
     },
     onError: (e) => toast.error(e.message),
   });
+
+  // Look the record up from the loaded list so the edit dialog opens with its stored values.
+  const editRecord = editRecordId !== null ? records?.find((r) => r.id === editRecordId) ?? null : null;
 
   if ((catalogLoading || recordsLoading) && !initial) {
     return <Skeleton className="h-64 w-full" />;
@@ -154,11 +165,15 @@ export default function Trainings() {
         />
       )}
 
-      {recordOpen && (
+      {recordOpen && (editRecordId === null || editRecord) && (
         <TrainingRecordDialog
+          key={editRecord?.id ?? "new"}
           open={recordOpen}
-          onOpenChange={setRecordOpen}
-          recordId={editRecordId}
+          onOpenChange={(v) => {
+            setRecordOpen(v);
+            if (!v) setEditRecordId(null);
+          }}
+          record={editRecord}
           utils={utils}
           catalog={catalog ?? []}
         />
@@ -204,6 +219,7 @@ function RecordsTab({
   const upload = trpc.trainings.uploadCertificate.useMutation({
     onSuccess: () => {
       toast.success("Certificate uploaded.");
+      utils.trainings.initial.invalidate();
       utils.trainings.listRecords.invalidate();
       setCertUploadId(null);
     },
@@ -212,6 +228,7 @@ function RecordsTab({
   const mark = trpc.trainings.updateRecord.useMutation({
     onSuccess: () => {
       toast.success("Record updated.");
+      utils.trainings.initial.invalidate();
       utils.trainings.listRecords.invalidate();
     },
     onError: (e) => toast.error(e.message),
@@ -567,6 +584,7 @@ function CatalogDialog({
   const create = trpc.trainings.createCatalogItem.useMutation({
     onSuccess: () => {
       toast.success("Training type added to catalog.");
+      utils.trainings.initial.invalidate();
       utils.trainings.listCatalog.invalidate();
       onOpenChange(false);
       reset();
@@ -577,6 +595,7 @@ function CatalogDialog({
   const update = trpc.trainings.updateCatalogItem.useMutation({
     onSuccess: () => {
       toast.success("Training type updated.");
+      utils.trainings.initial.invalidate();
       utils.trainings.listCatalog.invalidate();
       onOpenChange(false);
       reset();
@@ -672,34 +691,30 @@ function CatalogDialog({
 function TrainingRecordDialog({
   open,
   onOpenChange,
-  recordId,
+  record,
   utils,
   catalog,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  recordId: number | null;
+  record: (TrainingRecordFields & { id: number; trainingId: number; trainingName?: string }) | null;
   utils: ReturnType<typeof trpc.useUtils>;
   catalog: { id: number; name: string; defaultValidityMonths?: number | null }[];
 }) {
   const [, navigate] = useLocation();
+  const isEdit = record !== null;
+  // Parent remounts this dialog per record (key), so the initial values are read once per open.
+  const [initialForm] = useState<TrainingRecordFormState>(() => (record ? recordToFormState(record) : EMPTY_TRAINING_RECORD_FORM));
+  const [form, setForm] = useState<TrainingRecordFormState>(initialForm);
   const [nurseId, setNurseId] = useState("");
   const [trainingId, setTrainingId] = useState("");
-  const [provider, setProvider] = useState("");
-  const [status, setStatus] = useState("Scheduled");
-  const [scheduledDate, setScheduledDate] = useState("");
-  const [completionDate, setCompletionDate] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
-  const [hours, setHours] = useState("");
-  const [cpd, setCpd] = useState("");
-  const [certNumber, setCertNumber] = useState("");
-  const [remarks, setRemarks] = useState("");
-
-  const existing = recordId ? undefined : undefined;
+  const setField = <K extends keyof TrainingRecordFormState>(key: K, value: TrainingRecordFormState[K]) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
 
   const create = trpc.trainings.createRecord.useMutation({
     onSuccess: () => {
       toast.success("Training record added.");
+      utils.trainings.initial.invalidate();
       utils.trainings.listRecords.invalidate();
       onOpenChange(false);
     },
@@ -708,13 +723,37 @@ function TrainingRecordDialog({
   const update = trpc.trainings.updateRecord.useMutation({
     onSuccess: () => {
       toast.success("Training record updated.");
+      utils.trainings.initial.invalidate();
       utils.trainings.listRecords.invalidate();
       onOpenChange(false);
     },
     onError: (e) => toast.error(e.message),
   });
 
-  const valid = recordId || (nurseId.trim() && trainingId.trim());
+  const changes = isEdit ? formStateToUpdate(initialForm, form) : {};
+  const hasChanges = Object.keys(changes).length > 0;
+  const valid = isEdit ? hasChanges : Boolean(nurseId.trim() && trainingId.trim());
+  const trainingName = record ? record.trainingName ?? catalog.find((c) => c.id === record.trainingId)?.name ?? "Unknown" : "";
+
+  const save = () => {
+    if (record) {
+      update.mutate({ id: record.id, ...changes });
+      return;
+    }
+    create.mutate({
+      nurseId: Number(nurseId),
+      trainingId: Number(trainingId),
+      provider: form.provider.trim() || undefined,
+      status: form.status,
+      scheduledDate: form.scheduledDate ? new Date(form.scheduledDate) : undefined,
+      completionDate: form.completionDate ? new Date(form.completionDate) : undefined,
+      expiryDate: form.expiryDate ? new Date(form.expiryDate) : undefined,
+      trainingHours: form.hours ? Number(form.hours) : undefined,
+      cpdUnits: form.cpd ? Number(form.cpd) : undefined,
+      certificateNumber: form.certNumber.trim() || undefined,
+      remarks: form.remarks.trim() || undefined,
+    });
+  };
 
   return (
     <Dialog
@@ -723,10 +762,10 @@ function TrainingRecordDialog({
     >
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{recordId ? "Edit Training Record" : "Add Training Record"}</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit Training Record" : "Add Training Record"}</DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-4">
-          {!recordId && (
+          {!isEdit && (
             <div>
               <Label className="mb-1 block">Nurse ID (numeric) *</Label>
               <Input
@@ -745,18 +784,24 @@ function TrainingRecordDialog({
               </button>
             </div>
           )}
-          <div className={recordId ? "col-span-2" : undefined}>
-            <Label className="mb-1 block">Training Type *</Label>
-            <Select value={trainingId} onValueChange={setTrainingId}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select training…" /></SelectTrigger>
-              <SelectContent>
-                {catalog.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className={isEdit ? "col-span-2" : undefined}>
+            <Label className="mb-1 block">Training Type{isEdit ? "" : " *"}</Label>
+            {isEdit ? (
+              <p className="h-9 flex items-center rounded-md border bg-muted/40 px-3 text-sm font-medium" aria-readonly="true">
+                {trainingName}
+              </p>
+            ) : (
+              <Select value={trainingId} onValueChange={setTrainingId}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select training…" /></SelectTrigger>
+                <SelectContent>
+                  {catalog.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div>
             <Label className="mb-1 block">Status</Label>
-            <Select value={status} onValueChange={setStatus}>
+            <Select value={form.status} onValueChange={(v) => setField("status", v as TrainingRecordFormState["status"])}>
               <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {RECORD_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -765,58 +810,43 @@ function TrainingRecordDialog({
           </div>
           <div>
             <Label className="mb-1 block">Provider</Label>
-            <Input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="e.g., SKTI HRD" />
+            <Input value={form.provider} onChange={(e) => setField("provider", e.target.value)} placeholder="e.g., SKTI HRD" />
           </div>
           <div>
             <Label className="mb-1 block">Scheduled Date</Label>
-            <Input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
+            <Input type="date" value={form.scheduledDate} onChange={(e) => setField("scheduledDate", e.target.value)} />
           </div>
           <div>
             <Label className="mb-1 block">Completion Date</Label>
-            <Input type="date" value={completionDate} onChange={(e) => setCompletionDate(e.target.value)} />
+            <Input type="date" value={form.completionDate} onChange={(e) => setField("completionDate", e.target.value)} />
           </div>
           <div>
             <Label className="mb-1 block">Expiry Date</Label>
-            <Input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
+            <Input type="date" value={form.expiryDate} onChange={(e) => setField("expiryDate", e.target.value)} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="mb-1 block">Training Hours</Label>
-              <Input type="number" min={1} value={hours} onChange={(e) => setHours(e.target.value)} />
+              <Input type="number" min={1} value={form.hours} onChange={(e) => setField("hours", e.target.value)} />
             </div>
             <div>
               <Label className="mb-1 block">CPD Units</Label>
-              <Input type="number" min={1} value={cpd} onChange={(e) => setCpd(e.target.value)} />
+              <Input type="number" min={1} value={form.cpd} onChange={(e) => setField("cpd", e.target.value)} />
             </div>
           </div>
           <div>
             <Label className="mb-1 block">Certificate Number</Label>
-            <Input value={certNumber} onChange={(e) => setCertNumber(e.target.value)} />
+            <Input value={form.certNumber} onChange={(e) => setField("certNumber", e.target.value)} />
           </div>
           <div className="col-span-2">
             <Label className="mb-1 block">Remarks</Label>
-            <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+            <Textarea value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} />
           </div>
           <div className="col-span-2 flex justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button
               disabled={create.isPending || update.isPending || !valid}
-              onClick={() => {
-                const data = {
-                  trainingId: Number(trainingId),
-                  provider: provider.trim() || undefined,
-                  status: status as never,
-                  scheduledDate: scheduledDate ? new Date(scheduledDate) : undefined,
-                  completionDate: completionDate ? new Date(completionDate) : undefined,
-                  expiryDate: expiryDate ? new Date(expiryDate) : undefined,
-                  trainingHours: hours ? Number(hours) : undefined,
-                  cpdUnits: cpd ? Number(cpd) : undefined,
-                  certificateNumber: certNumber.trim() || undefined,
-                  remarks: remarks.trim() || undefined,
-                };
-                if (recordId) update.mutate({ id: recordId, ...data });
-                else create.mutate({ nurseId: Number(nurseId), ...data });
-              }}
+              onClick={save}
             >
               Save
             </Button>
