@@ -1,5 +1,6 @@
 import { AreaSelect } from "@/components/nursetrack/AreaSelect";
 import { NurseAvatar } from "@/components/nursetrack/NurseAvatar";
+import { QueryErrorState } from "@/components/nursetrack/QueryErrorState";
 import { EmploymentStatusBadge, LicenseStatusBadge } from "@/components/nursetrack/StatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,7 +74,7 @@ export default function Nurses() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createStaffType, setCreateStaffType] = useState<(typeof STAFF_TYPES)[number]>("Registered Nurse");
   // Single round-trip: server merges nurses + areas.
-  const { data: initial, isLoading } = trpc.nurses.initial.useQuery(undefined, {
+  const { data: initial, isLoading, error, refetch, isFetching } = trpc.nurses.initial.useQuery(undefined, {
     placeholderData: (prev) => prev,
   });
   const nurses = initial?.nurses;
@@ -139,6 +140,10 @@ export default function Nurses() {
     const targetType = matches[0].staffType;
     return { count: matches.length, targetType, firstMatch: matches[0] };
   }, [search, filtered.length, nurses]);
+
+  if (error && !initial) {
+    return <QueryErrorState title="Could not load the staff list" error={error} onRetry={() => refetch()} retrying={isFetching} />;
+  }
 
   if (isLoading && !initial) {
     return (

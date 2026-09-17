@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryErrorState } from "@/components/nursetrack/QueryErrorState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
@@ -14,8 +15,8 @@ import { toast } from "sonner";
 
 export default function SettingsPage() {
   const utils = trpc.useUtils();
-  const { data, isLoading } = trpc.settings.getAll.useQuery();
-  const update = trpc.settings.update.useMutation({
+  const { data, error, refetch, isFetching } = trpc.settings.getAll.useQuery();
+  const update = trpc.settings.updateMany.useMutation({
     onSuccess: () => {
       toast.success("Settings saved.");
       utils.settings.getAll.invalidate();
@@ -37,14 +38,31 @@ export default function SettingsPage() {
     }
   }, [data]);
 
+  // Saving before the stored values arrive would overwrite them with empty fields.
+  const canSave = Boolean(data) && !update.isPending;
   const save = () => {
-    update.mutate({ key: "appTitle", value: appTitle.trim() || null });
-    update.mutate({ key: "orgName", value: orgName.trim() || null });
-    update.mutate({ key: "contactEmail", value: contactEmail.trim() || null });
-    update.mutate({ key: "reminderThresholdDays", value: thresholds.trim() });
+    if (!data) return;
+    update.mutate({
+      appTitle: appTitle.trim() || null,
+      orgName: orgName.trim() || null,
+      contactEmail: contactEmail.trim() || null,
+      reminderThresholdDays: thresholds.trim(),
+    });
   };
 
-  if (isLoading) return <Skeleton className="h-96 w-full" />;
+  const settingsBody = (form: React.ReactNode) => {
+    if (data) return form;
+    if (error) {
+      return <QueryErrorState title="Could not load settings" error={error} onRetry={() => refetch()} retrying={isFetching} />;
+    }
+    return (
+      <div className="grid gap-4 max-w-md" aria-busy="true">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -72,23 +90,27 @@ export default function SettingsPage() {
                 Customize how SKTI NurseTrack appears to users across the department.
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 max-w-md">
-              <div>
-                <Label className="mb-1 block">Application Title</Label>
-                <Input value={appTitle} onChange={(e) => setAppTitle(e.target.value)} />
-              </div>
-              <div>
-                <Label className="mb-1 block">Organization Name</Label>
-                <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} />
-              </div>
-              <div>
-                <Label className="mb-1 block">Contact Email</Label>
-                <Input value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
-              </div>
-              <Button onClick={save} disabled={update.isPending} className="w-fit">
-                <Save className="h-4 w-4 mr-1" />
-                Save
-              </Button>
+            <CardContent>
+              {settingsBody(
+                <div className="grid gap-4 max-w-md">
+                  <div>
+                    <Label className="mb-1 block">Application Title</Label>
+                    <Input value={appTitle} onChange={(e) => setAppTitle(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label className="mb-1 block">Organization Name</Label>
+                    <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label className="mb-1 block">Contact Email</Label>
+                    <Input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+                  </div>
+                  <Button onClick={save} disabled={!canSave} className="w-fit">
+                    <Save className="h-4 w-4 mr-1" />
+                    {update.isPending ? "Saving…" : "Save"}
+                  </Button>
+                </div>,
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -104,18 +126,22 @@ export default function SettingsPage() {
                 The daily job notifies you about licenses expiring within these thresholds (days).
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 max-w-md">
-              <div>
-                <Label className="mb-1 block">Thresholds (comma-separated, e.g. 365,180)</Label>
-                <Input value={thresholds} onChange={(e) => setThresholds(e.target.value)} />
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={save} disabled={update.isPending} className="w-fit">
-                  <Save className="h-4 w-4 mr-1" />
-                  Save
-                </Button>
-                <RunRemindersNow />
-              </div>
+            <CardContent>
+              {settingsBody(
+                <div className="grid gap-4 max-w-md">
+                  <div>
+                    <Label className="mb-1 block">Thresholds (comma-separated, e.g. 365,180)</Label>
+                    <Input value={thresholds} onChange={(e) => setThresholds(e.target.value)} />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={save} disabled={!canSave} className="w-fit">
+                      <Save className="h-4 w-4 mr-1" />
+                      {update.isPending ? "Saving…" : "Save"}
+                    </Button>
+                    <RunRemindersNow />
+                  </div>
+                </div>,
+              )}
             </CardContent>
           </Card>
         </TabsContent>

@@ -11,6 +11,15 @@ import { todayDate } from "../../shared/nursetrack";
 import { seedExcelDatabase } from "../seedExcel";
 import { deduplicateDatabase } from "../deduplicate";
 
+/** "365, 180" -> "365,180". Null when any entry is not a whole number from 1 to 365. */
+export function normalizeReminderThresholds(value: string): string | null {
+  const parts = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  if (parts.length === 0) return null;
+  const nums = parts.map(Number);
+  if (!nums.every((n) => Number.isInteger(n) && n > 0 && n <= 365)) return null;
+  return nums.join(",");
+}
+
 const settingKey = z.enum([
   "appTitle",
   "reminderThresholdDays",
@@ -41,23 +50,37 @@ export const settingsRouter = router({
     };
   }),
 
-  update: adminProcedure
-    .input(z.object({ key: settingKey, value: z.string().max(5000).nullable() }))
+  // All four settings in one request: every value is validated first, then written in one transaction.
+  updateMany: adminProcedure
+    .input(
+      z.object({
+        appTitle: z.string().trim().max(5000).nullable(),
+        orgName: z.string().trim().max(5000).nullable(),
+        contactEmail: z.union([z.string().trim().email().max(320), z.literal(""), z.null()]),
+        reminderThresholdDays: z.string().max(5000),
+      }),
+    )
     .mutation(async ({ input }) => {
+      const thresholds = normalizeReminderThresholds(input.reminderThresholdDays);
+      if (!thresholds) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Thresholds must be positive integers up to 365, separated by commas (e.g. 365,180)." });
+      }
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      if (input.key === "reminderThresholdDays") {
-        const nums = input.value
-          ? input.value
-              .split(",")
-              .map((s) => Number(s.trim()))
-              .filter((n) => Number.isInteger(n) && n > 0 && n <= 365)
-          : [];
-        if (nums.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Thresholds must be positive integers up to 365, separated by commas (e.g. 365,180)." });
-        await db.update(appSettings).set({ value: nums.join(",") }).where(eq(appSettings.key, "reminderThresholdDays"));
-      } else {
-        await db.update(appSettings).set({ value: input.value }).where(eq(appSettings.key, input.key));
-      }
+      const values: Record<z.infer<typeof settingKey>, string | null> = {
+        appTitle: input.appTitle || null,
+        orgName: input.orgName || null,
+        contactEmail: input.contactEmail || null,
+        reminderThresholdDays: thresholds,
+      };
+      await db.transaction(async (tx) => {
+        for (const [key, value] of Object.entries(values)) {
+          await tx
+            .insert(appSettings)
+            .values({ key, value })
+            .onConflictDoUpdate({ target: appSettings.key, set: { value } });
+        }
+      });
       return { success: true } as const;
     }),
 
