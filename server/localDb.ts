@@ -470,6 +470,9 @@ export function seedFromSeedJson(db: Database.Database) {
   `);
 
   let totalAttendances = 0;
+  // The workbook lists attendees who are not in the seed roster (staff from
+  // later imports). Skip them: a local dev seed must not fail on them.
+  const unresolvedAttendees = new Set<string>();
   const insertEventsTx = db.transaction((eventsList: any[]) => {
     for (const ev of eventsList) {
       const catId = catIdByName.get(ev.title.trim().toLowerCase());
@@ -487,9 +490,10 @@ export function seedFromSeedJson(db: Database.Database) {
       const eventId = Number(evRes.lastInsertRowid);
 
       for (const att of ev.attendees) {
-        let nurseId = nurseIdByEmployeeId.get(att.employeeId) ?? nurseIdByNormName.get(att.normName);
+        const nurseId = nurseIdByEmployeeId.get(att.employeeId) ?? nurseIdByNormName.get(att.normName);
         if (!nurseId) {
-          throw new Error(`Seed attendee did not resolve uniquely: ${att.staffName} (${att.employeeId})`);
+          unresolvedAttendees.add(String(att.staffName));
+          continue;
         }
 
         insAttend.run(
@@ -509,6 +513,9 @@ export function seedFromSeedJson(db: Database.Database) {
   });
 
   insertEventsTx(data.events);
+  if (unresolvedAttendees.size > 0) {
+    console.warn(`[LocalDB] Seed skipped attendances for ${unresolvedAttendees.size} people who are not in the seed roster.`);
+  }
 
   // Initial Activity Log
   db.prepare("INSERT INTO activityLog (actionType, summary) VALUES (?, ?)").run(
