@@ -10,11 +10,11 @@ import { Upload } from "lucide-react";
 const SMART_IMPORT_ACCEPT =
   "image/jpeg,image/png,image/webp,application/pdf,text/plain,text/csv,.csv,.xlsx,.xls,.docx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-/** Compress image using HTML Canvas to keep upload size tiny (<100KB) and compatible with Vercel limits. */
+/** Compress image using HTML Canvas to 320px WebP (<15KB) for maximum memory & storage savings. */
 async function compressPhoto(
   file: File,
-  maxDim = 800,
-  quality = 0.88,
+  maxDim = 320,
+  quality = 0.8,
 ): Promise<{ fileBase64: string; fileName: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -51,13 +51,19 @@ async function compressPhoto(
         return;
       }
       ctx.drawImage(img, 0, 0, width, height);
-      const dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+      // Prefer WebP with JPEG fallback if WebP encoding is unsupported
+      const isWebpSupported = canvas.toDataURL("image/webp").startsWith("data:image/webp");
+      const targetMime = isWebpSupported ? "image/webp" : "image/jpeg";
+      const targetExt = isWebpSupported ? "webp" : "jpg";
+
+      const dataUrl = canvas.toDataURL(targetMime, quality);
       const base64 = dataUrl.split(",")[1] ?? "";
       const baseName = file.name.replace(/\.[^/.]+$/, "");
       resolve({
         fileBase64: base64,
-        fileName: `${baseName}.jpg`,
-        mimeType: "image/jpeg",
+        fileName: `${baseName}.${targetExt}`,
+        mimeType: targetMime,
       });
     };
     img.onerror = () => {
