@@ -17,7 +17,8 @@ import {
   TARGET_STAFF_TYPES,
 } from "../../shared/nursetrack";
 import { adminProcedure, router } from "../_core/trpc";
-import { deleteNurseTraining, deleteTrainingEvent, getDb, getNurseTrainingById, logActivity } from "../db";
+import { deleteNurseTraining, deleteTrainingEvent, getBatchClient, getDb, getNurseTrainingById, logActivity } from "../db";
+import { getSqliteDb } from "../localDb";
 import { storageDelete } from "../storage";
 import {
   getLocalSeminarsList,
@@ -126,6 +127,82 @@ export const seminarsRouter = router({
       return { id };
     }),
 
+  update: adminProcedure
+    .input(z.object({
+      id: z.number().int().positive(),
+      provider: z.string().max(128).optional().nullable(),
+      venue: z.string().max(256).optional().nullable(),
+      startDate: dateInput.optional(),
+      endDate: dateInput.optional(),
+      startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().nullable(),
+      endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().nullable(),
+      targetStaffType: z.enum(TARGET_STAFF_TYPES).optional(),
+      remarks: z.string().max(2000).optional().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) {
+        const sqlite = getSqliteDb();
+        const existing = sqlite.prepare("SELECT * FROM trainingEvents WHERE id = ?").get(input.id) as any;
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
+        const start = input.startDate ? dateKey(input.startDate) : existing.startDate;
+        const end = input.endDate ? dateKey(input.endDate) : existing.endDate;
+        if (start && end && end < start) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "End date cannot be before start date." });
+        }
+        sqlite.prepare(`
+          UPDATE trainingEvents
+          SET provider = ?, venue = ?, startDate = ?, endDate = ?, startTime = ?, endTime = ?, targetStaffType = ?, remarks = ?
+          WHERE id = ?
+        `).run(
+          input.provider !== undefined ? input.provider : existing.provider,
+          input.venue !== undefined ? input.venue : existing.venue,
+          start,
+          end,
+          input.startTime !== undefined ? input.startTime : existing.startTime,
+          input.endTime !== undefined ? input.endTime : existing.endTime,
+          input.targetStaffType ?? existing.targetStaffType,
+          input.remarks !== undefined ? input.remarks : existing.remarks,
+          input.id
+        );
+        return { success: true };
+      }
+
+      const [existing] = await db.select().from(trainingEvents).where(eq(trainingEvents.id, input.id)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
+
+      const startDate = input.startDate ?? existing.startDate;
+      const endDate = input.endDate ?? existing.endDate;
+      validateRange(startDate, endDate);
+
+      const startTime = input.startTime !== undefined ? input.startTime : existing.startTime;
+      const endTime = input.endTime !== undefined ? input.endTime : existing.endTime;
+      if (dateKey(startDate) === dateKey(endDate) && startTime && endTime && endTime < startTime) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "End time cannot be before start time." });
+      }
+
+      await db.update(trainingEvents).set({
+        provider: input.provider !== undefined ? input.provider : existing.provider,
+        venue: input.venue !== undefined ? input.venue : existing.venue,
+        startDate,
+        endDate,
+        startTime,
+        endTime,
+        targetStaffType: input.targetStaffType ?? existing.targetStaffType,
+        remarks: input.remarks !== undefined ? input.remarks : existing.remarks,
+      }).where(eq(trainingEvents.id, input.id));
+
+      await logActivity({
+        supervisorId: ctx.user.id,
+        actionType: "seminar.updated",
+        entityType: "trainingEvent",
+        entityId: input.id,
+        summary: `Seminar updated (event #${input.id})`,
+      });
+
+      return { success: true } as const;
+    }),
+
   deleteEvent: adminProcedure
     .input(z.object({ eventId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
@@ -144,6 +221,118 @@ export const seminarsRouter = router({
   detail: adminProcedure
     .input(z.object({ eventId: z.number().int().positive() }))
     .query(async ({ input }) => {
+      const pg = getBatchClient();
+      if (pg) {
+        const queries = [
+          `select te.id, te."trainingId", te.provider, te.venue,
+                  te."startDate"::text as "startDate", te."endDate"::text as "endDate",
+                  te."startTime", te."endTime", te."targetStaffType", te.remarks,
+                  tc.id as "catalogId", tc.name as "catalogName", tc.category as "catalogCategory", tc.kind as "catalogKind"
+             from nursetrack."trainingEvents" te
+            inner join nursetrack."trainingCatalog" tc on tc.id = te."trainingId"
+            where te.id = ${input.eventId}
+            limit 1`,
+          `select t.id, t."nurseId", t."trainingId", t."eventId", t."participationRole",
+                  t."completionDate"::text as "completionDate", t."scheduledDate"::text as "scheduledDate",
+                  t.status, t."trainingHours", t."cpdUnits", t.remarks
+             from nursetrack."nurseTrainings" t
+            where t."eventId" = ${input.eventId}
+            order by t."completionDate" desc nulls last`,
+          `select t.id, t."nurseId", t."trainingId", t."eventId", t."participationRole",
+                  t."completionDate"::text as "completionDate", t."scheduledDate"::text as "scheduledDate",
+                  t.status, t."trainingHours", t."cpdUnits", t.remarks
+             from nursetrack."nurseTrainings" t
+            where t."trainingId" = (select "trainingId" from nursetrack."trainingEvents" where id = ${input.eventId})
+            order by t."completionDate" desc nulls last`,
+          `select n.id, n."firstName", n."middleName", n."lastName", n.suffix,
+                  n."staffType", n."employmentStatus", n."currentAreaId", n."archivedAt"
+             from nursetrack.nurses n
+            order by n."lastName" asc, n."firstName" asc`,
+          `select a.id, a.name from nursetrack.areas a order by a."sortOrder"`,
+          `select e.id, e."startDate"::text as "startDate", e."endDate"::text as "endDate"
+             from nursetrack."trainingEvents" e
+            where e."trainingId" = (select "trainingId" from nursetrack."trainingEvents" where id = ${input.eventId})`,
+        ];
+
+        const sets = (await pg.unsafe(queries.join(";\n")).simple()) as unknown as [
+          any[], // selectedEventRows
+          any[], // records
+          any[], // allTrainingRecords
+          any[], // staff
+          any[], // areaRows
+          any[], // relatedEvents
+        ];
+
+        const [selectedRows, records, allTrainingRecords, staff, areaRows, relatedEvents] = sets;
+        const selected = selectedRows[0];
+        if (!selected) throw new TRPCError({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
+
+        const staffById = new Map(staff.map((person: any) => [person.id, person]));
+        const areaById = new Map(areaRows.map((area: any) => [area.id, area]));
+
+        const attendees = records.map((record: any) => {
+          const person = staffById.get(record.nurseId);
+          return {
+            ...record,
+            staffName: person ? nurseFullName(person) : "Unknown staff",
+            staffType: person?.staffType ?? "Registered Nurse",
+            areaName: person?.currentAreaId ? areaById.get(person.currentAreaId)?.name ?? "Unassigned" : "Unassigned",
+          };
+        });
+
+        const eventById = new Map(relatedEvents.map((event: any) => [event.id, event]));
+        const allAttendees = allTrainingRecords.map((record: any) => {
+          const person = staffById.get(record.nurseId);
+          const occurrence = record.eventId ? eventById.get(record.eventId) : undefined;
+          return {
+            ...record,
+            staffName: person ? nurseFullName(person) : "Unknown staff",
+            staffType: person?.staffType ?? "Registered Nurse",
+            areaName: person?.currentAreaId ? areaById.get(person.currentAreaId)?.name ?? "Unassigned" : "Unassigned",
+            occurrenceStartDate: occurrence?.startDate ?? record.scheduledDate,
+            occurrenceEndDate: occurrence?.endDate ?? record.scheduledDate,
+          };
+        });
+
+        const completedIds = new Set(records.filter((record: any) => record.status === "Completed").map((record: any) => record.nurseId));
+        const inactive = new Set<string>(inactiveStatuses);
+        const missing = staff
+          .filter((person: any) => !person.archivedAt)
+          .filter((person: any) => !inactive.has(person.employmentStatus))
+          .filter((person: any) => selected.targetStaffType === "All" || person.staffType === selected.targetStaffType)
+          .filter((person: any) => !completedIds.has(person.id))
+          .map((person: any) => ({
+            id: person.id,
+            staffName: nurseFullName(person),
+            staffType: person.staffType,
+            areaName: person.currentAreaId ? areaById.get(person.currentAreaId)?.name ?? "Unassigned" : "Unassigned",
+          }));
+
+        return {
+          event: {
+            id: selected.id,
+            trainingId: selected.trainingId,
+            provider: selected.provider,
+            venue: selected.venue,
+            startDate: selected.startDate,
+            endDate: selected.endDate,
+            startTime: selected.startTime,
+            endTime: selected.endTime,
+            targetStaffType: selected.targetStaffType,
+            remarks: selected.remarks,
+          },
+          training: {
+            id: selected.catalogId,
+            name: selected.catalogName,
+            category: selected.catalogCategory,
+            kind: selected.catalogKind,
+          },
+          attendees,
+          allAttendees,
+          missing,
+        };
+      }
+
       const db = await getDb();
       if (!db) {
         const detail = getLocalSeminarDetail(input.eventId);

@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { dateKey, formatDate, PARTICIPATION_ROLES, TRAINING_STATUSES } from "../../../shared/nursetrack";
-import { ArrowLeft, Download, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation, useRoute } from "wouter";
@@ -40,7 +40,44 @@ export default function SeminarDetail() {
   const [attendanceToDelete, setAttendanceToDelete] = useState<{ id: number; staffName: string } | null>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editEndTime, setEditEndTime] = useState("");
+  const [editTargetStaffType, setEditTargetStaffType] = useState<"All" | "Registered Nurse" | "Nursing Attendant">("All");
+  const [editProvider, setEditProvider] = useState("");
+  const [editVenue, setEditVenue] = useState("");
+  const [editRemarks, setEditRemarks] = useState("");
+
   const { data, isLoading, error } = trpc.seminars.detail.useQuery({ eventId }, { enabled: Number.isFinite(eventId) });
+
+  const updateSeminar = trpc.seminars.update.useMutation({
+    onSuccess: async () => {
+      toast.success("Seminar details updated.");
+      await Promise.all([
+        utils.seminars.detail.invalidate({ eventId }),
+        utils.seminars.list.invalidate(),
+        utils.calendar.listEvents.invalidate(),
+        utils.seminars.matrix.invalidate(),
+      ]);
+      setEditOpen(false);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleOpenEdit = () => {
+    if (!data) return;
+    setEditStartDate(dateKey(data.event.startDate) ?? "");
+    setEditEndDate(dateKey(data.event.endDate) ?? "");
+    setEditStartTime(data.event.startTime ?? "");
+    setEditEndTime(data.event.endTime ?? "");
+    setEditTargetStaffType((data.event.targetStaffType as any) || "All");
+    setEditProvider(data.event.provider ?? "");
+    setEditVenue(data.event.venue ?? "");
+    setEditRemarks(data.event.remarks ?? "");
+    setEditOpen(true);
+  };
   const remove = trpc.seminars.deleteEvent.useMutation({
     onSuccess: async ({ attendanceDeleted }) => {
       toast.success(`Seminar deleted. ${attendanceDeleted} attendance record(s) removed.`);
@@ -143,14 +180,23 @@ export default function SeminarDetail() {
               <div className="text-xs font-medium uppercase text-primary">{data.training.kind}</div>
               <CardTitle>{data.training.name}</CardTitle>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setDeleteConfirmOpen(true)}
-            >
-              <Trash2 className="mr-1 h-4 w-4" />Delete Seminar
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenEdit}
+              >
+                <Pencil className="mr-1 h-4 w-4" />Edit Seminar
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setDeleteConfirmOpen(true)}
+              >
+                <Trash2 className="mr-1 h-4 w-4" />Delete Seminar
+              </Button>
+            </div>
           </div>
           <div className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
             <span>Date: {formatDate(data.event.startDate)}{String(data.event.endDate) !== String(data.event.startDate) ? ` to ${formatDate(data.event.endDate)}` : ""}</span>
@@ -179,6 +225,127 @@ export default function SeminarDetail() {
         </TabsContent>
         <TabsContent value="missing"><Card className="glass-card"><CardContent className="space-y-3 pt-5"><Button variant="outline" onClick={() => exportRows(true)} disabled={!data.missing.length}><Download className="mr-1 h-4 w-4" />CSV</Button><div className="overflow-auto rounded-md border"><table className="min-w-full text-sm"><thead><tr className="bg-muted/50 text-left"><th className="px-3 py-2">Staff</th><th className="px-3 py-2">Staff Type</th><th className="px-3 py-2">Area</th></tr></thead><tbody>{data.missing.map((row) => <tr key={row.id} className="border-t"><td className="px-3 py-2"><Link href={`/nurses/${row.id}`} className="font-medium text-primary hover:underline">{row.staffName}</Link></td><td className="px-3 py-2">{row.staffType}</td><td className="px-3 py-2">{row.areaName}</td></tr>)}</tbody></table></div></CardContent></Card></TabsContent>
       </Tabs>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Seminar Details</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="edit-start-date" className="text-xs">Start Date</Label>
+                <Input
+                  id="edit-start-date"
+                  type="date"
+                  value={editStartDate}
+                  onChange={(e) => setEditStartDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-end-date" className="text-xs">End Date</Label>
+                <Input
+                  id="edit-end-date"
+                  type="date"
+                  value={editEndDate}
+                  onChange={(e) => setEditEndDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="edit-start-time" className="text-xs">Start Time (HH:MM)</Label>
+                <Input
+                  id="edit-start-time"
+                  type="time"
+                  value={editStartTime}
+                  onChange={(e) => setEditStartTime(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-end-time" className="text-xs">End Time (HH:MM)</Label>
+                <Input
+                  id="edit-end-time"
+                  type="time"
+                  value={editEndTime}
+                  onChange={(e) => setEditEndTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Target Staff</Label>
+              <Select
+                value={editTargetStaffType}
+                onValueChange={(val: any) => setEditTargetStaffType(val)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Staff</SelectItem>
+                  <SelectItem value="Registered Nurse">Registered Nurse</SelectItem>
+                  <SelectItem value="Nursing Attendant">Nursing Attendant</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="edit-provider" className="text-xs">Provider / Organizer</Label>
+              <Input
+                id="edit-provider"
+                placeholder="e.g. SPMC Nursing Service"
+                value={editProvider}
+                onChange={(e) => setEditProvider(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="edit-venue" className="text-xs">Venue / Location</Label>
+              <Input
+                id="edit-venue"
+                placeholder="e.g. 5F Auditorium / Zoom"
+                value={editVenue}
+                onChange={(e) => setEditVenue(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="edit-remarks" className="text-xs">Remarks / Notes</Label>
+              <Textarea
+                id="edit-remarks"
+                rows={3}
+                placeholder="Additional details, prerequisites, or room guidelines"
+                value={editRemarks}
+                onChange={(e) => setEditRemarks(e.target.value)}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+              <Button
+                disabled={!editStartDate || !editEndDate || updateSeminar.isPending}
+                onClick={() => {
+                  updateSeminar.mutate({
+                    id: eventId,
+                    startDate: editStartDate,
+                    endDate: editEndDate,
+                    startTime: editStartTime || undefined,
+                    endTime: editEndTime || undefined,
+                    targetStaffType: editTargetStaffType,
+                    provider: editProvider || null,
+                    venue: editVenue || null,
+                    remarks: editRemarks || null,
+                  });
+                }}
+              >
+                {updateSeminar.isPending ? "Saving…" : "Save Changes"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

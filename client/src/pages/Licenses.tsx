@@ -24,13 +24,16 @@ import { ArrowLeft, CalendarCheck, Pencil, Plus, RefreshCw, Search } from "lucid
 import { safeDateKey } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 
 const RENEWAL_STATUSES = ["Not Started", "Renewal In Progress", "Submitted", "Renewed"] as const;
 const VERIFICATION_STATUSES = ["Unverified", "Pending Verification", "Verified"] as const;
+const VALID_STATUSES = ["Expired", "Within 6 Months", "Within 1 Year", "Valid"];
 
 export default function Licenses() {
   const [, navigate] = useLocation();
+  const searchString = useSearch();
+  const urlStatus = new URLSearchParams(searchString).get("status");
   const utils = trpc.useUtils();
   // Single round-trip: server merges credentials + nurses + types.
   const { data: initial, isLoading } = trpc.credentials.initial.useQuery();
@@ -39,11 +42,19 @@ export default function Licenses() {
   const types = initial?.types;
 
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState(() =>
+    urlStatus && VALID_STATUSES.includes(urlStatus) ? urlStatus : "all"
+  );
   const [typeFilter, setTypeFilter] = useState("all");
   const [formOpen, setFormOpen] = useState(false);
   const [editCredential, setEditCredential] = useState<{ id: number; nurseId: number } | null>(null);
   const [renewCredential, setRenewCredential] = useState<{ id: number; nurseName: string } | null>(null);
+
+  useEffect(() => {
+    if (urlStatus && VALID_STATUSES.includes(urlStatus)) {
+      setStatusFilter(urlStatus);
+    }
+  }, [urlStatus]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();

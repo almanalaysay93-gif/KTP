@@ -9266,6 +9266,7 @@ import { TRPCError as TRPCError7 } from "@trpc/server";
 import { and as and8, asc as asc4, desc as desc5, eq as eq11, gte as gte3, isNull as isNull9, lte as lte4, notInArray } from "drizzle-orm";
 import { z as z11 } from "zod";
 init_db();
+init_localDb();
 init_trainingReminders();
 var dateString = z11.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const [year, month, day] = value.split("-").map(Number);
@@ -9351,6 +9352,73 @@ var seminarsRouter = router({
     });
     return { id };
   }),
+  update: adminProcedure.input(z11.object({
+    id: z11.number().int().positive(),
+    provider: z11.string().max(128).optional().nullable(),
+    venue: z11.string().max(256).optional().nullable(),
+    startDate: dateInput2.optional(),
+    endDate: dateInput2.optional(),
+    startTime: z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().nullable(),
+    endTime: z11.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().nullable(),
+    targetStaffType: z11.enum(TARGET_STAFF_TYPES).optional(),
+    remarks: z11.string().max(2e3).optional().nullable()
+  })).mutation(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) {
+      const sqlite = getSqliteDb();
+      const existing2 = sqlite.prepare("SELECT * FROM trainingEvents WHERE id = ?").get(input.id);
+      if (!existing2) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
+      const start = input.startDate ? dateKey(input.startDate) : existing2.startDate;
+      const end = input.endDate ? dateKey(input.endDate) : existing2.endDate;
+      if (start && end && end < start) {
+        throw new TRPCError7({ code: "BAD_REQUEST", message: "End date cannot be before start date." });
+      }
+      sqlite.prepare(`
+          UPDATE trainingEvents
+          SET provider = ?, venue = ?, startDate = ?, endDate = ?, startTime = ?, endTime = ?, targetStaffType = ?, remarks = ?
+          WHERE id = ?
+        `).run(
+        input.provider !== void 0 ? input.provider : existing2.provider,
+        input.venue !== void 0 ? input.venue : existing2.venue,
+        start,
+        end,
+        input.startTime !== void 0 ? input.startTime : existing2.startTime,
+        input.endTime !== void 0 ? input.endTime : existing2.endTime,
+        input.targetStaffType ?? existing2.targetStaffType,
+        input.remarks !== void 0 ? input.remarks : existing2.remarks,
+        input.id
+      );
+      return { success: true };
+    }
+    const [existing] = await db.select().from(trainingEvents).where(eq11(trainingEvents.id, input.id)).limit(1);
+    if (!existing) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
+    const startDate = input.startDate ?? existing.startDate;
+    const endDate = input.endDate ?? existing.endDate;
+    validateRange(startDate, endDate);
+    const startTime = input.startTime !== void 0 ? input.startTime : existing.startTime;
+    const endTime = input.endTime !== void 0 ? input.endTime : existing.endTime;
+    if (dateKey(startDate) === dateKey(endDate) && startTime && endTime && endTime < startTime) {
+      throw new TRPCError7({ code: "BAD_REQUEST", message: "End time cannot be before start time." });
+    }
+    await db.update(trainingEvents).set({
+      provider: input.provider !== void 0 ? input.provider : existing.provider,
+      venue: input.venue !== void 0 ? input.venue : existing.venue,
+      startDate,
+      endDate,
+      startTime,
+      endTime,
+      targetStaffType: input.targetStaffType ?? existing.targetStaffType,
+      remarks: input.remarks !== void 0 ? input.remarks : existing.remarks
+    }).where(eq11(trainingEvents.id, input.id));
+    await logActivity({
+      supervisorId: ctx.user.id,
+      actionType: "seminar.updated",
+      entityType: "trainingEvent",
+      entityId: input.id,
+      summary: `Seminar updated (event #${input.id})`
+    });
+    return { success: true };
+  }),
   deleteEvent: adminProcedure.input(z11.object({ eventId: z11.number().int().positive() })).mutation(async ({ ctx, input }) => {
     const deleted = await deleteTrainingEvent(input.eventId);
     if (!deleted) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
@@ -9364,6 +9432,98 @@ var seminarsRouter = router({
     return { success: true, attendanceDeleted: deleted.attendanceDeleted };
   }),
   detail: adminProcedure.input(z11.object({ eventId: z11.number().int().positive() })).query(async ({ input }) => {
+    const pg = getBatchClient();
+    if (pg) {
+      const queries = [
+        `select te.id, te."trainingId", te.provider, te.venue,
+                  te."startDate"::text as "startDate", te."endDate"::text as "endDate",
+                  te."startTime", te."endTime", te."targetStaffType", te.remarks,
+                  tc.id as "catalogId", tc.name as "catalogName", tc.category as "catalogCategory", tc.kind as "catalogKind"
+             from nursetrack."trainingEvents" te
+            inner join nursetrack."trainingCatalog" tc on tc.id = te."trainingId"
+            where te.id = ${input.eventId}
+            limit 1`,
+        `select t.id, t."nurseId", t."trainingId", t."eventId", t."participationRole",
+                  t."completionDate"::text as "completionDate", t."scheduledDate"::text as "scheduledDate",
+                  t.status, t."trainingHours", t."cpdUnits", t.remarks
+             from nursetrack."nurseTrainings" t
+            where t."eventId" = ${input.eventId}
+            order by t."completionDate" desc nulls last`,
+        `select t.id, t."nurseId", t."trainingId", t."eventId", t."participationRole",
+                  t."completionDate"::text as "completionDate", t."scheduledDate"::text as "scheduledDate",
+                  t.status, t."trainingHours", t."cpdUnits", t.remarks
+             from nursetrack."nurseTrainings" t
+            where t."trainingId" = (select "trainingId" from nursetrack."trainingEvents" where id = ${input.eventId})
+            order by t."completionDate" desc nulls last`,
+        `select n.id, n."firstName", n."middleName", n."lastName", n.suffix,
+                  n."staffType", n."employmentStatus", n."currentAreaId", n."archivedAt"
+             from nursetrack.nurses n
+            order by n."lastName" asc, n."firstName" asc`,
+        `select a.id, a.name from nursetrack.areas a order by a."sortOrder"`,
+        `select e.id, e."startDate"::text as "startDate", e."endDate"::text as "endDate"
+             from nursetrack."trainingEvents" e
+            where e."trainingId" = (select "trainingId" from nursetrack."trainingEvents" where id = ${input.eventId})`
+      ];
+      const sets = await pg.unsafe(queries.join(";\n")).simple();
+      const [selectedRows, records2, allTrainingRecords2, staff2, areaRows2, relatedEvents2] = sets;
+      const selected2 = selectedRows[0];
+      if (!selected2) throw new TRPCError7({ code: "NOT_FOUND", message: "Seminar occurrence not found." });
+      const staffById2 = new Map(staff2.map((person) => [person.id, person]));
+      const areaById2 = new Map(areaRows2.map((area) => [area.id, area]));
+      const attendees2 = records2.map((record) => {
+        const person = staffById2.get(record.nurseId);
+        return {
+          ...record,
+          staffName: person ? nurseFullName(person) : "Unknown staff",
+          staffType: person?.staffType ?? "Registered Nurse",
+          areaName: person?.currentAreaId ? areaById2.get(person.currentAreaId)?.name ?? "Unassigned" : "Unassigned"
+        };
+      });
+      const eventById2 = new Map(relatedEvents2.map((event) => [event.id, event]));
+      const allAttendees2 = allTrainingRecords2.map((record) => {
+        const person = staffById2.get(record.nurseId);
+        const occurrence = record.eventId ? eventById2.get(record.eventId) : void 0;
+        return {
+          ...record,
+          staffName: person ? nurseFullName(person) : "Unknown staff",
+          staffType: person?.staffType ?? "Registered Nurse",
+          areaName: person?.currentAreaId ? areaById2.get(person.currentAreaId)?.name ?? "Unassigned" : "Unassigned",
+          occurrenceStartDate: occurrence?.startDate ?? record.scheduledDate,
+          occurrenceEndDate: occurrence?.endDate ?? record.scheduledDate
+        };
+      });
+      const completedIds2 = new Set(records2.filter((record) => record.status === "Completed").map((record) => record.nurseId));
+      const inactive2 = new Set(inactiveStatuses);
+      const missing2 = staff2.filter((person) => !person.archivedAt).filter((person) => !inactive2.has(person.employmentStatus)).filter((person) => selected2.targetStaffType === "All" || person.staffType === selected2.targetStaffType).filter((person) => !completedIds2.has(person.id)).map((person) => ({
+        id: person.id,
+        staffName: nurseFullName(person),
+        staffType: person.staffType,
+        areaName: person.currentAreaId ? areaById2.get(person.currentAreaId)?.name ?? "Unassigned" : "Unassigned"
+      }));
+      return {
+        event: {
+          id: selected2.id,
+          trainingId: selected2.trainingId,
+          provider: selected2.provider,
+          venue: selected2.venue,
+          startDate: selected2.startDate,
+          endDate: selected2.endDate,
+          startTime: selected2.startTime,
+          endTime: selected2.endTime,
+          targetStaffType: selected2.targetStaffType,
+          remarks: selected2.remarks
+        },
+        training: {
+          id: selected2.catalogId,
+          name: selected2.catalogName,
+          category: selected2.catalogCategory,
+          kind: selected2.catalogKind
+        },
+        attendees: attendees2,
+        allAttendees: allAttendees2,
+        missing: missing2
+      };
+    }
     const db = await getDb();
     if (!db) {
       const detail = getLocalSeminarDetail(input.eventId);
