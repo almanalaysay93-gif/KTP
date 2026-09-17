@@ -10841,17 +10841,6 @@ function formatDigestForReport(d) {
   }
   return lines.join("\n");
 }
-function formatDigestForChat(d) {
-  const lines = [];
-  lines.push(`Today: ${d.today}. Active staff: ${d.activeCount}.`);
-  lines.push(`Staff by area: ${Object.entries(d.areaCounts).map(([k, v]) => `${k}=${v}`).join(", ")}`);
-  lines.push("");
-  lines.push("Full active roster (name | employeeId | staffType | area | license status):");
-  for (const r of d.roster) {
-    lines.push(`- ${r.name} | ${r.employeeId} | ${r.staffType} | ${r.area} | ${r.license}${r.upcomingTrainings.length ? " | upcoming: " + r.upcomingTrainings.join("; ") : ""}`);
-  }
-  return lines.join("\n");
-}
 async function callOpenRouter(messages) {
   if (!ENV.openRouterApiKey) {
     throw new Error("AI Insights is not configured: OPENROUTER_API_KEY is missing.");
@@ -10916,19 +10905,6 @@ DATA:
 ${formatDigestForReport(digest)}`;
   return callOpenRouter([{ role: "user", content: prompt }]);
 }
-async function answerInsightsChat(question, history) {
-  const digest = await buildDataDigest();
-  const systemPrompt = `You are a nurse-staffing data assistant for a hospital nephrology department's tracking app. Answer the supervisor's questions using ONLY the roster/license/training data provided below \u2014 never invent people or numbers not present in it. Keep answers short and direct. If the data doesn't contain the answer, say so.
-
-DATA:
-${formatDigestForChat(digest)}`;
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
-    { role: "user", content: question }
-  ];
-  return callOpenRouter(messages);
-}
 
 // server/routers/aiInsights.ts
 var aiInsightsRouter = router({
@@ -10946,18 +10922,108 @@ var aiInsightsRouter = router({
       history: z16.array(z16.object({ role: z16.enum(["user", "assistant"]), content: z16.string() })).max(20).optional()
     })
   ).mutation(async ({ input }) => {
+    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
     try {
-      const answer = await answerInsightsChat(input.question, input.history ?? []);
-      return { answer };
-    } catch (err) {
-      throw new TRPCError11({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "Failed to answer question." });
+      const resp = await fetch(`${serviceUrl}/api/inquiry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: input.question }),
+        signal: AbortSignal.timeout(4e3)
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        return { answer: data.answer };
+      }
+    } catch {
     }
+    return {
+      answer: "SPMC Kidney Transplant Institute (SKTI) General Inquiries: For questions regarding services, hours, location, requirements, or fees, please contact the SPMC SKTI Information Desk directly at (082) 227-2731 (local 4128/4129)."
+    };
+  })
+});
+
+// server/routers/inquiry.ts
+import { z as z17 } from "zod";
+var FALLBACK_TOPICS = [
+  { id: "services", name: "Services Offered", short_desc: "Hemodialysis, peritoneal dialysis, transplant" },
+  { id: "hours", name: "Hours & Schedule", short_desc: "Clinic hours and 24/7 dialysis shifts" },
+  { id: "location", name: "Location & Directions", short_desc: "SPMC Bajada Dialysis Complex" },
+  { id: "requirements", name: "Requirements & Documents", short_desc: "Medical abstract, clearances, PhilHealth" },
+  { id: "fees", name: "Fees & PhilHealth", short_desc: "156 sessions coverage and financial aid" },
+  { id: "contact", name: "Contact & Inquiries", short_desc: "Trunkline (082) 227-2731 and direct locals" }
+];
+var SERVICE_UNAVAILABLE_ANSWER = "Inquiry service is currently unavailable. For general inquiries regarding SPMC SKTI services, hours, location, requirements, or fees, please contact the SPMC SKTI Information Desk directly at (082) 227-2731 (local 4128/4129) or visit the SPMC Dialysis Complex in Bajada, Davao City.";
+var inquiryRouter = router({
+  topics: publicProcedure.query(async () => {
+    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    try {
+      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, {
+        signal: AbortSignal.timeout(3e3)
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        return { topics: data.topics || FALLBACK_TOPICS };
+      }
+    } catch {
+    }
+    return { topics: FALLBACK_TOPICS };
+  }),
+  chat: publicProcedure.input(
+    z17.object({
+      question: z17.string().max(1e3).optional().default(""),
+      topicId: z17.string().max(100).optional().nullable(),
+      history: z17.array(
+        z17.object({
+          role: z17.enum(["user", "assistant"]),
+          content: z17.string()
+        })
+      ).max(30).optional()
+    })
+  ).mutation(async ({ input }) => {
+    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    try {
+      const resp = await fetch(`${serviceUrl}/api/inquiry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: input.question || "",
+          topic_id: input.topicId || void 0,
+          history: input.history || []
+        }),
+        signal: AbortSignal.timeout(5e3)
+      });
+      if (resp.ok) {
+        const json2 = await resp.json();
+        return {
+          success: true,
+          answer: json2.answer || "",
+          topic_id: json2.topic_id ?? null,
+          title: json2.title || "General Inquiries",
+          match_type: json2.match_type || "UNKNOWN",
+          related_topics: json2.related_topics || [],
+          candidate_topics: json2.candidate_topics || [],
+          contact_snippet: json2.contact_snippet
+        };
+      }
+    } catch {
+    }
+    return {
+      success: false,
+      answer: SERVICE_UNAVAILABLE_ANSWER,
+      topic_id: null,
+      title: "Service Unavailable",
+      match_type: "SERVICE_UNAVAILABLE",
+      related_topics: FALLBACK_TOPICS,
+      candidate_topics: FALLBACK_TOPICS,
+      contact_snippet: "SPMC Trunkline: (082) 227-2731 | Dialysis Local: 4128/4129"
+    };
   })
 });
 
 // server/routers.ts
 var appRouter = router({
   system: systemRouter,
+  inquiry: inquiryRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -10987,10 +11053,10 @@ var appRouter = router({
 
 // server/importStaffEmails.ts
 init_adminAccess();
-import { z as z17 } from "zod";
+import { z as z18 } from "zod";
 init_db();
-var bodySchema = z17.object({
-  rows: z17.array(z17.object({ licenseNumber: z17.string(), email: z17.string() })).max(2e3)
+var bodySchema = z18.object({
+  rows: z18.array(z18.object({ licenseNumber: z18.string(), email: z18.string() })).max(2e3)
 });
 async function importStaffEmailsHandler(req, res) {
   try {
@@ -11017,19 +11083,19 @@ async function importStaffEmailsHandler(req, res) {
 
 // server/importStaffRoster.ts
 init_adminAccess();
-import { z as z18 } from "zod";
+import { z as z19 } from "zod";
 init_db();
 init_nursetrack();
-var rowSchema = z18.object({
-  firstName: z18.string().min(1).max(128),
-  middleName: z18.string().max(128).optional(),
-  lastName: z18.string().min(1).max(128),
-  staffType: z18.enum(["Registered Nurse", "Nursing Attendant"]),
-  licenseNumber: z18.string().min(1).max(64),
-  expiryDate: z18.string(),
-  email: z18.string().email()
+var rowSchema = z19.object({
+  firstName: z19.string().min(1).max(128),
+  middleName: z19.string().max(128).optional(),
+  lastName: z19.string().min(1).max(128),
+  staffType: z19.enum(["Registered Nurse", "Nursing Attendant"]),
+  licenseNumber: z19.string().min(1).max(64),
+  expiryDate: z19.string(),
+  email: z19.string().email()
 });
-var bodySchema2 = z18.object({ rows: z18.array(rowSchema).max(500) });
+var bodySchema2 = z19.object({ rows: z19.array(rowSchema).max(500) });
 var CREDENTIAL_TYPE_BY_STAFF_TYPE = {
   "Registered Nurse": CANONICAL_CREDENTIAL_TYPES.RN,
   "Nursing Attendant": CANONICAL_CREDENTIAL_TYPES.NA
@@ -11105,10 +11171,10 @@ async function importStaffRosterHandler(req, res) {
 
 // server/importStaffAreas.ts
 init_adminAccess();
-import { z as z19 } from "zod";
+import { z as z20 } from "zod";
 init_db();
-var rowSchema2 = z19.object({ fullName: z19.string().min(1).max(256), areaName: z19.string().min(1).max(128) });
-var bodySchema3 = z19.object({ rows: z19.array(rowSchema2).max(500) });
+var rowSchema2 = z20.object({ fullName: z20.string().min(1).max(256), areaName: z20.string().min(1).max(128) });
+var bodySchema3 = z20.object({ rows: z20.array(rowSchema2).max(500) });
 function normTokenSet(s) {
   return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
 }
@@ -11200,16 +11266,16 @@ async function importStaffAreasHandler(req, res) {
 
 // server/importStaffTrainings.ts
 init_adminAccess();
-import { z as z20 } from "zod";
+import { z as z21 } from "zod";
 init_db();
-var rowSchema3 = z20.object({
-  fullName: z20.string().min(1).max(256),
-  title: z20.string().min(1).max(512),
-  dateText: z20.string().max(256).optional(),
-  provider: z20.string().max(128).optional(),
-  quarter: z20.string().max(32)
+var rowSchema3 = z21.object({
+  fullName: z21.string().min(1).max(256),
+  title: z21.string().min(1).max(512),
+  dateText: z21.string().max(256).optional(),
+  provider: z21.string().max(128).optional(),
+  quarter: z21.string().max(32)
 });
-var bodySchema4 = z20.object({ rows: z20.array(rowSchema3).max(1e3) });
+var bodySchema4 = z21.object({ rows: z21.array(rowSchema3).max(1e3) });
 function normTokenSet2(s) {
   return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
 }
@@ -11407,6 +11473,35 @@ async function getApp() {
   app.post("/api/admin/import-staff-roster", importStaffRosterHandler);
   app.post("/api/admin/import-staff-areas", importStaffAreasHandler);
   app.post("/api/admin/import-staff-trainings", importStaffTrainingsHandler);
+  app.post("/api/inquiry", async (req, res) => {
+    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    try {
+      const resp = await fetch(`${serviceUrl}/api/inquiry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+        signal: AbortSignal.timeout(5e3)
+      });
+      const data = await resp.json();
+      return res.status(resp.status).json(data);
+    } catch {
+      return res.status(503).json({
+        success: false,
+        answer: "Inquiry service is currently unavailable. Please contact SPMC SKTI directly at (082) 227-2731 (local 4128/4129).",
+        match_type: "SERVICE_UNAVAILABLE"
+      });
+    }
+  });
+  app.get("/api/inquiry/topics", async (_req, res) => {
+    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    try {
+      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, { signal: AbortSignal.timeout(3e3) });
+      const data = await resp.json();
+      return res.status(resp.status).json(data);
+    } catch {
+      return res.status(503).json({ success: false, error: "Inquiry service unavailable" });
+    }
+  });
   app.use(
     "/api/trpc",
     createExpressMiddleware({

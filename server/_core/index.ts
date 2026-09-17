@@ -61,6 +61,36 @@ async function startServer() {
   app.post("/api/admin/import-staff-roster", importStaffRosterHandler);
   app.post("/api/admin/import-staff-areas", importStaffAreasHandler);
   app.post("/api/admin/import-staff-trainings", importStaffTrainingsHandler);
+  // Rule-based Inquiry API endpoints
+  app.post("/api/inquiry", async (req, res) => {
+    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    try {
+      const resp = await fetch(`${serviceUrl}/api/inquiry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await resp.json();
+      return res.status(resp.status).json(data);
+    } catch {
+      return res.status(503).json({
+        success: false,
+        answer: "Inquiry service is currently unavailable. Please contact SPMC SKTI directly at (082) 227-2731 (local 4128/4129).",
+        match_type: "SERVICE_UNAVAILABLE",
+      });
+    }
+  });
+  app.get("/api/inquiry/topics", async (_req, res) => {
+    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
+    try {
+      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, { signal: AbortSignal.timeout(3000) });
+      const data = await resp.json();
+      return res.status(resp.status).json(data);
+    } catch {
+      return res.status(503).json({ success: false, error: "Inquiry service unavailable" });
+    }
+  });
   // tRPC API
   app.use(
     "/api/trpc",

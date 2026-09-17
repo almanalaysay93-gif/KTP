@@ -16,9 +16,11 @@ import { staffAccountRouter } from "./routers/staffAccount";
 import { staffFeedRouter } from "./routers/staffFeed";
 import { smartImportRouter } from "./routers/smartImport";
 import { aiInsightsRouter } from "./routers/aiInsights";
+import { inquiryRouter } from "./routers/inquiry";
 
 export const appRouter = router({
   system: systemRouter,
+  inquiry: inquiryRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {

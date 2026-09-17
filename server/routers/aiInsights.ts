@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
-import { answerInsightsChat, generateInsightsReport } from "../_core/aiInsights";
+import { generateInsightsReport } from "../_core/aiInsights";
 
 export const aiInsightsRouter = router({
   generateReport: adminProcedure.mutation(async () => {
@@ -21,11 +21,24 @@ export const aiInsightsRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
+      const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
       try {
-        const answer = await answerInsightsChat(input.question, input.history ?? []);
-        return { answer };
-      } catch (err) {
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : "Failed to answer question." });
+        const resp = await fetch(`${serviceUrl}/api/inquiry`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: input.question }),
+          signal: AbortSignal.timeout(4000),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          return { answer: data.answer };
+        }
+      } catch {
+        // Fallback to verified hospital inquiry information
       }
+      return {
+        answer:
+          "SPMC Kidney Transplant Institute (SKTI) General Inquiries: For questions regarding services, hours, location, requirements, or fees, please contact the SPMC SKTI Information Desk directly at (082) 227-2731 (local 4128/4129).",
+      };
     }),
 });
