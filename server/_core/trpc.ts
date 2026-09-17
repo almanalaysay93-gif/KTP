@@ -10,7 +10,23 @@ const t = initTRPC.context<TrpcContext>().create({
 });
 
 export const router = t.router;
-export const publicProcedure = t.procedure;
+
+const SLOW_PROCEDURE_MS = 1000;
+
+// Logs slow procedures by path and type only. Inputs are never logged: they can hold staff data.
+const timing = t.middleware(async ({ path, type, next }) => {
+  const started = Date.now();
+  const result = await next();
+  const ms = Date.now() - started;
+  if (ms > SLOW_PROCEDURE_MS) {
+    console.warn(`[tRPC] slow ${type} ${path} ${ms}ms ok=${result.ok}`);
+  }
+  return result;
+});
+
+const baseProcedure = t.procedure.use(timing);
+
+export const publicProcedure = baseProcedure;
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
@@ -27,7 +43,7 @@ const requireUser = t.middleware(async opts => {
   });
 });
 
-export const protectedProcedure = t.procedure.use(requireUser);
+export const protectedProcedure = baseProcedure.use(requireUser);
 
 export type StaffAuthMode = "google" | "claim";
 
@@ -36,7 +52,7 @@ export type StaffAuthMode = "google" | "claim";
  * valid first-visit claim cookie — never any other nurse's id (see
  * docs/plans/2026-09-15-staff-signin-claim-then-google-design.md, section 4.4).
  */
-export const staffProcedure = t.procedure.use(
+export const staffProcedure = baseProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
@@ -64,7 +80,7 @@ export const staffProcedure = t.procedure.use(
   }),
 );
 
-export const adminProcedure = t.procedure.use(
+export const adminProcedure = baseProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 

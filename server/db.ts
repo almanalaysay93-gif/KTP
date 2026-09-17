@@ -1,6 +1,7 @@
 import { dateKey, daysUntilExpiry, INACTIVE_EMPLOYMENT_STATUSES, renewalCycleKey } from "../shared/nursetrack";
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, like, lte, not, or, sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import postgres from "postgres";
 import {
   activityLog,
@@ -30,6 +31,9 @@ import { FULL_ACCESS_EMAILS, roleForEmail } from "./adminAccess";
 import { getSqliteDb } from "./localDb";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+
+/** Any drizzle Postgres database: the app's postgres-js client, or PGlite in tests. */
+export type PgDb = PgDatabase<PgQueryResultHKT, any>;
 let _batchPg: ReturnType<typeof postgres> | null = null;
 
 /** Drizzle condition: nurse counts as part of the active roster (not archived, not resigned/retired). */
@@ -679,28 +683,37 @@ export async function getNurseLicenseStatus(nurseId: number): Promise<string | n
   return (await getNurseLicenseInfo(nurseId)).status;
 }
 
+/**
+ * Latest-expiring credential per nurse, one row each. DISTINCT ON keeps the
+ * work in Postgres instead of shipping every credential row to the function.
+ */
+export async function getLatestLicenseInfoPerNurse(db: PgDb): Promise<Map<number, NurseLicenseInfo>> {
+  const creds = await db
+    .selectDistinctOn([nurseCredentials.nurseId], {
+      nurseId: nurseCredentials.nurseId,
+      licenseNumber: nurseCredentials.licenseNumber,
+      expiryDate: nurseCredentials.expiryDate,
+      renewalStatus: nurseCredentials.renewalStatus,
+    })
+    .from(nurseCredentials)
+    .orderBy(nurseCredentials.nurseId, desc(nurseCredentials.expiryDate), desc(nurseCredentials.id));
+  const map = new Map<number, NurseLicenseInfo>();
+  for (const cred of creds) {
+    const expKey = dateKey(cred.expiryDate);
+    map.set(cred.nurseId, {
+      status: deriveLicenseStatusFromCred(cred),
+      licenseNumber: cred.licenseNumber ?? null,
+      expiryDate: expKey || null,
+      daysRemaining: expKey ? daysUntilExpiry(expKey) : null,
+    });
+  }
+  return map;
+}
+
 export async function getAllNurseLicenseInfos(): Promise<Map<number, NurseLicenseInfo>> {
   const map = new Map<number, NurseLicenseInfo>();
   const db = await getDb();
-  if (db) {
-    const creds = await db
-      .select()
-      .from(nurseCredentials)
-      .orderBy(desc(nurseCredentials.expiryDate));
-    for (const cred of creds) {
-      if (!map.has(cred.nurseId)) {
-        const expKey = dateKey(cred.expiryDate);
-        const days = expKey ? daysUntilExpiry(expKey) : null;
-        map.set(cred.nurseId, {
-          status: deriveLicenseStatusFromCred(cred),
-          licenseNumber: cred.licenseNumber ?? null,
-          expiryDate: expKey || null,
-          daysRemaining: days,
-        });
-      }
-    }
-    return map;
-  }
+  if (db) return getLatestLicenseInfoPerNurse(db);
   const sqlite = getSqliteDb();
   const creds = sqlite.prepare("SELECT * FROM nurseCredentials ORDER BY date(expiryDate) DESC").all() as any[];
   for (const cred of creds) {
@@ -1647,15 +1660,31 @@ export async function listNotifications(limit = 100) {
   return deduplicated;
 }
 
+/**
+ * SQL form of getNotificationLogicalKey. Keep the two in step: the pglite test
+ * in notification-count.test.ts compares them row for row.
+ */
+const notificationLogicalKeySql = sql`case
+  when ${notifications.type} = 'license.expired' then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', coalesce(${notifications.relatedEntityType}, ''), ':', coalesce(${notifications.relatedEntityId}::text, ''))
+  when ${notifications.type} = 'license.renewalReminder' then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', coalesce(${notifications.relatedEntityType}, ''), ':', coalesce(${notifications.relatedEntityId}::text, ''), ':', btrim(split_part(coalesce(${notifications.title}, ''), ' — ', 1)))
+  when coalesce(${notifications.relatedEntityType}, '') <> '' and coalesce(${notifications.relatedEntityId}, 0) <> 0 then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', ${notifications.relatedEntityType}, ':', ${notifications.relatedEntityId}::text)
+  else concat('notif:', ${notifications.id}::text)
+end`;
+
+/** Unread count with duplicates collapsed, computed in one aggregate query. */
+export async function countUnreadNotificationsPg(db: PgDb): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(distinct ${notificationLogicalKeySql})::int` })
+    .from(notifications)
+    .where(isNull(notifications.readAt));
+  return Number(row?.count ?? 0);
+}
+
 export async function countUnreadNotifications() {
   const db = await getDb();
-  let unreadRows: any[] = [];
-  if (db) {
-    unreadRows = await db.select().from(notifications).where(isNull(notifications.readAt));
-  } else {
-    const sqlite = getSqliteDb();
-    unreadRows = sqlite.prepare("SELECT * FROM notifications WHERE readAt IS NULL").all() as any[];
-  }
+  if (db) return countUnreadNotificationsPg(db);
+  const sqlite = getSqliteDb();
+  const unreadRows = sqlite.prepare("SELECT * FROM notifications WHERE readAt IS NULL").all() as any[];
 
   const seen = new Set<string>();
   for (const row of unreadRows) {

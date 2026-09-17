@@ -1,11 +1,12 @@
 import { trpc } from "@/lib/trpc";
 import { UNAUTHED_ERR_MSG } from '@shared/const';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { httpBatchLink, TRPCClientError } from "@trpc/client";
+import { httpBatchLink, splitLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
 import { startLogin } from "./const";
+import { nonJsonErrorMessage, SEPARATE_BATCH_PATHS, shouldRetryQuery } from "./lib/apiResponse";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -17,6 +18,8 @@ const queryClient = new QueryClient({
       gcTime: 10 * 60 * 1000,
       // Avoid refetching while switching browser tabs — pages re-validate on remount anyway.
       refetchOnWindowFocus: false,
+      // Default is 3 retries with backoff, which keeps a failed page on its skeleton for about a minute.
+      retry: shouldRetryQuery,
     },
   },
 });
@@ -48,17 +51,27 @@ queryClient.getMutationCache().subscribe(event => {
   }
 });
 
+const batchLinkOptions = {
+  url: "/api/trpc",
+  transformer: superjson,
+  async fetch(input: RequestInfo | URL, init?: RequestInit) {
+    const response = await globalThis.fetch(input, {
+      ...(init ?? {}),
+      credentials: "include",
+    });
+    const message = nonJsonErrorMessage(response.status, response.headers.get("content-type"));
+    if (message) throw new Error(message);
+    return response;
+  },
+};
+
 const trpcClient = trpc.createClient({
   links: [
-    httpBatchLink({
-      url: "/api/trpc",
-      transformer: superjson,
-      fetch(input, init) {
-        return globalThis.fetch(input, {
-          ...(init ?? {}),
-          credentials: "include",
-        });
-      },
+    // A batch waits for its slowest procedure, so layout queries travel in their own batch.
+    splitLink({
+      condition: (op) => SEPARATE_BATCH_PATHS.has(op.path),
+      true: httpBatchLink(batchLinkOptions),
+      false: httpBatchLink(batchLinkOptions),
     }),
   ],
 });
