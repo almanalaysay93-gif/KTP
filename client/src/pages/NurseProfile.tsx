@@ -60,7 +60,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useRoute } from "wouter";
-import { safeDateKey } from "@/lib/utils";
+import { cn, safeDateKey } from "@/lib/utils";
 
 const RENEWAL_STATUSES = ["Not Started", "Renewal In Progress", "Submitted", "Renewed"] as const;
 const VERIFICATION_STATUSES = ["Unverified", "Pending Verification", "Verified"] as const;
@@ -235,161 +235,261 @@ export default function NurseProfile() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-2 flex-wrap">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => {
-            if (window.history.length > 1) {
-              window.history.back();
-            } else {
-              navigate("/nurses");
-            }
-          }}
-          aria-label="Back"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <NurseAvatar nurse={nurse} size="md" />
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight truncate">{nurseFullName(nurse)}</h1>
-            <p className="text-sm text-muted-foreground">
-              <span className="font-mono">{nurseIdLabel(nurse)}</span>
-              {nurse.position ? ` · ${nurse.position}` : ""}
-              {(nurse.currentArea?.name ?? areaMap.get(nurse.currentAreaId ?? 0)) ? ` · ${nurse.currentArea?.name ?? areaMap.get(nurse.currentAreaId ?? 0)}` : ""}
-              {nurse.dateHired ? ` · Hired ${formatDate(nurse.dateHired)}` : ""}
-            </p>
+    <div className="space-y-4 max-w-full">
+      {/* Profile Header Block */}
+      <div className="space-y-3.5">
+        {/* Top: Back button + Identity details + Desktop stats */}
+        <div className="flex items-start gap-2.5 sm:gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0 mt-0.5"
+            onClick={() => {
+              if (window.history.length > 1) {
+                window.history.back();
+              } else {
+                navigate("/nurses");
+              }
+            }}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <div className="shrink-0 mt-0.5">
+              <NurseAvatar nurse={nurse} size="md" />
+            </div>
+            <div className="min-w-0 flex-1 space-y-1">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground break-words leading-tight">
+                {nurseFullName(nurse)}
+              </h1>
+              <p className="text-xs sm:text-sm text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-mono font-medium">{nurseIdLabel(nurse)}</span>
+                {nurse.position ? <span>· {nurse.position}</span> : null}
+                {(nurse.currentArea?.name ?? areaMap.get(nurse.currentAreaId ?? 0)) ? (
+                  <span>· {nurse.currentArea?.name ?? areaMap.get(nurse.currentAreaId ?? 0)}</span>
+                ) : null}
+                {nurse.dateHired ? <span>· Hired {formatDate(nurse.dateHired)}</span> : null}
+              </p>
+              {/* Status Badges */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                <EmploymentStatusBadge status={nurse.employmentStatus ?? "Active"} />
+                {nurse.licenseStatus ? (
+                  <LicenseStatusBadge
+                    status={nurse.licenseStatus as never}
+                    expiryDate={(nurse as any).licenseExpiryDate}
+                    licenseNumber={(nurse as any).licenseNumber}
+                    daysRemaining={(nurse as any).licenseDaysRemaining}
+                    showPrefix
+                  />
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {/* Desktop stats chips */}
+          <div className="hidden lg:flex items-center gap-2 shrink-0">
+            <StatChip label="Years exp." value={stats.experienceYears} />
+            <StatChip label="Areas" value={stats.areasServed} />
+            <StatChip label="Trainings" value={stats.completedTrainings} />
+            <StatChip label="Compliance" value={`${stats.compliancePct}${stats.compliancePct === "—" ? "" : "%"}`} />
           </div>
         </div>
-        <div className="hidden lg:flex items-center gap-2 mr-2">
-          <StatChip label="Years exp." value={stats.experienceYears} />
-          <StatChip label="Areas" value={stats.areasServed} />
-          <StatChip label="Trainings" value={stats.completedTrainings} />
-          <StatChip label="Compliance" value={`${stats.compliancePct}${stats.compliancePct === "—" ? "" : "%"}`} />
-        </div>
-        <div className="flex items-center gap-2">
-          <EmploymentStatusBadge status={nurse.employmentStatus ?? "Active"} />
-          {nurse.licenseStatus ? (
-            <LicenseStatusBadge
-              status={nurse.licenseStatus as never}
-              expiryDate={(nurse as any).licenseExpiryDate}
-              licenseNumber={(nurse as any).licenseNumber}
-              daysRemaining={(nurse as any).licenseDaysRemaining}
-              showPrefix
-            />
-          ) : null}
+
+        {/* Action Buttons Row: Placed below identity details, wraps into accessible rows */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t sm:border-0 border-border/40">
           <Button
             variant="outline"
             size="sm"
+            className="h-9 px-3 text-xs font-medium"
             disabled={!nurse.accountEmail}
             title={nurse.accountEmail ? `Send email to ${nurse.accountEmail}` : "Nurse does not have a linked email address"}
             onClick={() => setEmailNoticeOpen(true)}
           >
-            <Mail className="h-4 w-4 mr-1" />
+            <Mail className="h-4 w-4 mr-1.5" />
             Send Notice
           </Button>
           <Button
             variant="outline"
             size="sm"
+            className="h-9 px-3 text-xs font-medium"
             title="Send in-app message to nurse feed"
             onClick={() => navigate(`/messages?nurseId=${id}`)}
           >
-            <MessageSquare className="h-4 w-4 mr-1 text-sky-600" />
+            <MessageSquare className="h-4 w-4 mr-1.5 text-sky-600" />
             Direct Message
           </Button>
-          <Button variant="outline" size="sm" onClick={() => {
-            utils.nurses.get.invalidate();
-            // replace: true — /nurses/:id/edit must not sit as its own history
-            // entry, or Back from the profile replays it and the edit dialog
-            // (which defaults open) pops back up instead of leaving the page.
-            navigate(`/nurses/${id}/edit`, { replace: true });
-          }}>
-            <Pencil className="h-4 w-4 mr-1" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 px-3 text-xs font-medium"
+            onClick={() => {
+              utils.nurses.get.invalidate();
+              // replace: true — /nurses/:id/edit must not sit as its own history
+              // entry, or Back from the profile replays it and the edit dialog
+              // (which defaults open) pops back up instead of leaving the page.
+              navigate(`/nurses/${id}/edit`, { replace: true });
+            }}
+          >
+            <Pencil className="h-4 w-4 mr-1.5" />
             Edit
           </Button>
           {!nurse.archivedAt ? (
-            <Button variant="outline" size="sm" onClick={() => archive.mutate({ id })}>
-              <Trash2 className="h-4 w-4 mr-1" />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 px-3 text-xs font-medium"
+              onClick={() => archive.mutate({ id })}
+            >
+              <Trash2 className="h-4 w-4 mr-1.5" />
               Archive
             </Button>
           ) : (
             <Button
               variant="outline"
               size="sm"
+              className="h-9 px-3 text-xs font-medium"
               disabled={restore.isPending}
               onClick={() => restore.mutate({ id })}
             >
-              <Undo2 className="h-4 w-4 mr-1" />
+              <Undo2 className="h-4 w-4 mr-1.5" />
               Restore
             </Button>
           )}
           <Button
             variant="outline"
             size="sm"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+            className="h-9 px-3 text-xs font-medium text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
             onClick={() => setDeleteConfirmOpen(true)}
           >
-            <Trash2 className="h-4 w-4 mr-1" />
+            <Trash2 className="h-4 w-4 mr-1.5" />
             Delete
           </Button>
         </div>
       </div>
 
-      <Tabs defaultValue="assignments">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="assignments" className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> Assignments</TabsTrigger>
-          <TabsTrigger value="licenses" className="flex items-center gap-1"><CreditCard className="h-3.5 w-3.5" /> Licenses</TabsTrigger>
-          <TabsTrigger value="trainings" className="flex items-center gap-1"><CalendarCheck className="h-3.5 w-3.5" /> Trainings</TabsTrigger>
-          <TabsTrigger value="details" className="flex items-center gap-1"><FileText className="h-3.5 w-3.5" /> Details</TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="assignments" className="space-y-4">
+        <div className="w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5 pb-1">
+          <TabsList className="inline-flex w-auto min-w-full sm:min-w-0 justify-start gap-1 p-1 h-10">
+            <TabsTrigger value="assignments" className="flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm shrink-0">
+              <MapPin className="h-3.5 w-3.5" />
+              <span>Assignments</span>
+            </TabsTrigger>
+            <TabsTrigger value="licenses" className="flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm shrink-0">
+              <CreditCard className="h-3.5 w-3.5" />
+              <span>Licenses</span>
+            </TabsTrigger>
+            <TabsTrigger value="trainings" className="flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm shrink-0">
+              <CalendarCheck className="h-3.5 w-3.5" />
+              <span>Trainings</span>
+            </TabsTrigger>
+            <TabsTrigger value="details" className="flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm shrink-0">
+              <FileText className="h-3.5 w-3.5" />
+              <span>Details</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="assignments">
           <Card className="glass-card">
-            <CardContent className="pt-5">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-medium">Area Assignment History</h2>
+            <CardContent className="pt-4 sm:pt-5 space-y-3.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h2 className="font-semibold text-base">Area Assignment History</h2>
                 <Button
                   size="sm"
+                  className="h-9 px-3 text-xs"
                   onClick={() => setAreaOpen(true)}
                 >
-                  <MapPin className="h-4 w-4 mr-1" />
+                  <MapPin className="h-4 w-4 mr-1.5" />
                   Change Area
                 </Button>
               </div>
               {(assignments ?? []).length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-6">No assignments recorded.</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/50 text-left">
-                        <th className="px-3 py-2.5 font-medium">Area</th>
-                        <th className="px-3 py-2.5 font-medium">Type</th>
-                        <th className="px-3 py-2.5 font-medium">Start</th>
-                        <th className="px-3 py-2.5 font-medium">End</th>
-                        <th className="px-3 py-2.5 font-medium">Duration</th>
-                        <th className="px-3 py-2.5 font-medium">Remarks</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {(assignments ?? []).map((a) => (
-                        <tr key={a.id} className={a.isCurrent ? "bg-accent/40" : undefined}>
-                          <td className="px-3 py-2.5 font-medium">
+                <>
+                  {/* Mobile Stacked Cards (< md) */}
+                  <div className="divide-y rounded-lg border md:hidden">
+                    {(assignments ?? []).map((a) => (
+                      <div
+                        key={a.id}
+                        className={cn(
+                          "p-3 space-y-1.5 text-xs",
+                          a.isCurrent ? "bg-accent/40" : "bg-card"
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-semibold text-sm text-foreground">
                             {a.area?.name ?? a.areaName ?? areaMap.get(a.areaId) ?? (a.areaId ? `Area (${a.areaId})` : "Unassigned")}
-                            {a.isCurrent && <span className="ml-2 text-xs text-primary">Current</span>}
-                          </td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{a.assignmentType ?? "—"}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{formatDate(a.startDate)}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{a.endDate ? formatDate(a.endDate) : "Present"}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{durationBetween(a.startDate, a.endDate)}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{a.remarks ?? "—"}</td>
+                          </span>
+                          {a.isCurrent ? (
+                            <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                              Current
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">
+                              {a.assignmentType ?? "—"}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-muted-foreground pt-0.5">
+                          <div>
+                            <span className="block text-[10px] uppercase tracking-wider text-muted-foreground/70">Period</span>
+                            <span className="font-medium text-foreground">
+                              {formatDate(a.startDate)} – {a.endDate ? formatDate(a.endDate) : "Present"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="block text-[10px] uppercase tracking-wider text-muted-foreground/70">Duration</span>
+                            <span className="font-medium text-foreground">
+                              {durationBetween(a.startDate, a.endDate)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {a.remarks && (
+                          <div className="text-muted-foreground pt-1 border-t border-border/30">
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70 block">Remarks</span>
+                            <span className="italic">{a.remarks}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View (>= md) */}
+                  <div className="hidden md:block overflow-x-auto rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/50 text-left">
+                          <th className="px-3 py-2.5 font-medium">Area</th>
+                          <th className="px-3 py-2.5 font-medium">Type</th>
+                          <th className="px-3 py-2.5 font-medium">Start</th>
+                          <th className="px-3 py-2.5 font-medium">End</th>
+                          <th className="px-3 py-2.5 font-medium">Duration</th>
+                          <th className="px-3 py-2.5 font-medium">Remarks</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y">
+                        {(assignments ?? []).map((a) => (
+                          <tr key={a.id} className={a.isCurrent ? "bg-accent/40" : undefined}>
+                            <td className="px-3 py-2.5 font-medium">
+                              {a.area?.name ?? a.areaName ?? areaMap.get(a.areaId) ?? (a.areaId ? `Area (${a.areaId})` : "Unassigned")}
+                              {a.isCurrent && <span className="ml-2 text-xs text-primary font-medium">Current</span>}
+                            </td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{a.assignmentType ?? "—"}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{formatDate(a.startDate)}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{a.endDate ? formatDate(a.endDate) : "Present"}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{durationBetween(a.startDate, a.endDate)}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{a.remarks ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -436,7 +536,7 @@ export default function NurseProfile() {
                             <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{c.verificationStatus}</span>
                           </div>
                         </div>
-                        <div className="flex flex-col gap-1.5 items-end">
+                        <div className="flex flex-row sm:flex-col gap-2 items-center sm:items-end shrink-0 pt-2 sm:pt-0 border-t sm:border-0 border-border/30 w-full sm:w-auto justify-end">
                           <Button variant="ghost" size="sm" onClick={() => {
                             setEditCredId(c.id);
                             setCredOpen(true);
@@ -460,53 +560,121 @@ export default function NurseProfile() {
 
         <TabsContent value="trainings">
           <Card className="glass-card">
-            <CardContent className="pt-5">
-              <h2 className="font-medium mb-3">Training Records</h2>
+            <CardContent className="pt-4 sm:pt-5 space-y-3.5">
+              <h2 className="font-semibold text-base">Training Records</h2>
               {(trainings ?? []).length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-6">No training records yet. Add them on the Trainings page.</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/50 text-left">
-                        <th className="px-3 py-2.5 font-medium">Training</th>
-                        <th className="px-3 py-2.5 font-medium">Provider</th>
-                        <th className="px-3 py-2.5 font-medium">Scheduled</th>
-                        <th className="px-3 py-2.5 font-medium">Completed</th>
-                        <th className="px-3 py-2.5 font-medium">Role</th>
-                        <th className="px-3 py-2.5 font-medium">Hours / CPD</th>
-                        <th className="px-3 py-2.5 font-medium">Expires</th>
-                        <th className="px-3 py-2.5 font-medium">Status</th>
-                        <th className="px-3 py-2.5 font-medium text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {(trainings ?? []).map((t) => (
-                        <tr key={t.id}>
-                          <td className="px-3 py-2.5">{t.eventId ? <button className="font-medium text-primary hover:underline" onClick={() => navigate(`/seminars/${t.eventId}`)}>{t.trainingName}</button> : t.trainingName}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{t.provider ?? "—"}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{formatDate(t.scheduledDate)}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{formatDate(t.completionDate)}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{t.participationRole}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{t.trainingHours ?? "-"} / {t.cpdUnits ?? "-"}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{formatDate(t.expiryDate)}</td>
-                          <td className="px-3 py-2.5"><TrainingStatusBadge status={t.status} /></td>
-                          <td className="px-3 py-2.5 text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                              title="Remove training record"
-                              onClick={() => setTrainingToDelete({ id: t.id, name: t.trainingName })}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </td>
+                <>
+                  {/* Mobile Stacked Cards (< md) */}
+                  <div className="divide-y rounded-lg border md:hidden">
+                    {(trainings ?? []).map((t) => (
+                      <div key={t.id} className="p-3 space-y-2 text-xs bg-card">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            {t.eventId ? (
+                              <button
+                                className="font-semibold text-sm text-primary hover:underline text-left break-words"
+                                onClick={() => navigate(`/seminars/${t.eventId}`)}
+                              >
+                                {t.trainingName}
+                              </button>
+                            ) : (
+                              <span className="font-semibold text-sm text-foreground break-words">{t.trainingName}</span>
+                            )}
+                            {t.provider && (
+                              <p className="text-[11px] text-muted-foreground">{t.provider}</p>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                            title="Remove training record"
+                            onClick={() => setTrainingToDelete({ id: t.id, name: t.trainingName })}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <TrainingStatusBadge status={t.status} />
+                          {t.participationRole && (
+                            <span className="text-[11px] bg-muted px-2 py-0.5 rounded">
+                              {t.participationRole}
+                            </span>
+                          )}
+                          {(t.trainingHours != null || t.cpdUnits != null) && (
+                            <span className="text-[11px] text-muted-foreground">
+                              {t.trainingHours ?? "-"} hrs · {t.cpdUnits ?? "-"} CPD
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-muted-foreground pt-0.5">
+                          <div>
+                            <span className="block text-[10px] uppercase tracking-wider text-muted-foreground/70">Scheduled / Completed</span>
+                            <span className="font-medium text-foreground">
+                              {t.completionDate ? formatDate(t.completionDate) : (t.scheduledDate ? formatDate(t.scheduledDate) : "—")}
+                            </span>
+                          </div>
+                          {t.expiryDate && (
+                            <div>
+                              <span className="block text-[10px] uppercase tracking-wider text-muted-foreground/70">Expires</span>
+                              <span className="font-medium text-foreground">
+                                {formatDate(t.expiryDate)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table View (>= md) */}
+                  <div className="hidden md:block overflow-x-auto rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/50 text-left">
+                          <th className="px-3 py-2.5 font-medium">Training</th>
+                          <th className="px-3 py-2.5 font-medium">Provider</th>
+                          <th className="px-3 py-2.5 font-medium">Scheduled</th>
+                          <th className="px-3 py-2.5 font-medium">Completed</th>
+                          <th className="px-3 py-2.5 font-medium">Role</th>
+                          <th className="px-3 py-2.5 font-medium">Hours / CPD</th>
+                          <th className="px-3 py-2.5 font-medium">Expires</th>
+                          <th className="px-3 py-2.5 font-medium">Status</th>
+                          <th className="px-3 py-2.5 font-medium text-right">Action</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y">
+                        {(trainings ?? []).map((t) => (
+                          <tr key={t.id}>
+                            <td className="px-3 py-2.5">{t.eventId ? <button className="font-medium text-primary hover:underline" onClick={() => navigate(`/seminars/${t.eventId}`)}>{t.trainingName}</button> : t.trainingName}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{t.provider ?? "—"}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{formatDate(t.scheduledDate)}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{formatDate(t.completionDate)}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{t.participationRole}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{t.trainingHours ?? "-"} / {t.cpdUnits ?? "-"}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{formatDate(t.expiryDate)}</td>
+                            <td className="px-3 py-2.5"><TrainingStatusBadge status={t.status} /></td>
+                            <td className="px-3 py-2.5 text-right">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                title="Remove training record"
+                                onClick={() => setTrainingToDelete({ id: t.id, name: t.trainingName })}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
               {compliance && (
                 <div className="mt-4 border-t pt-4">
@@ -760,9 +928,9 @@ export default function NurseProfile() {
 
 function DetailRow({ label, value }: { label: string; value: string | null | undefined }) {
   return (
-    <div className="flex justify-between gap-4">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-1.5 border-b border-border/30 last:border-0 gap-0.5 sm:gap-4 text-xs sm:text-sm">
       <span className="text-muted-foreground shrink-0">{label}</span>
-      <span className="text-right truncate">{value ?? "—"}</span>
+      <span className="text-left sm:text-right font-medium text-foreground break-words">{value ?? "—"}</span>
     </div>
   );
 }

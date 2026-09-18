@@ -340,7 +340,7 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
           </div>
         </div>
         {isMobile && <MobileBottomNav />}
-        <main id="main-content" className="flex-1 min-w-0 p-3 md:p-5 pb-20 md:pb-5 overflow-x-auto">{children}</main>
+        <main id="main-content" className="flex-1 min-w-0 w-full max-w-full p-3 sm:p-4 md:p-5 pb-44 sm:pb-40 md:pb-8">{children}</main>
       </SidebarInset>
 
       <NurseSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
@@ -631,7 +631,7 @@ function MobileBottomNav() {
   };
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t glass-panel md:hidden">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t glass-panel md:hidden pb-[env(safe-area-inset-bottom,0px)]">
       <div className="grid grid-cols-6 items-center h-16">
         {NAV_ITEMS.slice(0, 5).map((item) => {
           const active = isItemActive(item.path);

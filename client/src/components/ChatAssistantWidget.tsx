@@ -163,7 +163,7 @@ export function ChatAssistantWidget() {
   return (
     <>
       {/* Floating launcher button */}
-      <div className="fixed bottom-[calc(1.25rem+1in)] right-5 z-40">
+      <div className="fixed bottom-[calc(1.25rem+1in+env(safe-area-inset-bottom,0px))] right-4 sm:right-5 z-40">
         <Button
           type="button"
           onClick={() => setOpen((prev) => !prev)}
@@ -189,8 +189,8 @@ export function ChatAssistantWidget() {
           className={cn(
             "fixed z-50 flex flex-col shadow-2xl border bg-background/95 backdrop-blur-md transition-all duration-200",
             isMobile
-              ? "inset-x-3 bottom-[calc(5rem+1in)] top-16 max-h-[85vh] rounded-xl"
-              : "bottom-[calc(5rem+1in)] right-5 w-[420px] h-[580px] rounded-xl"
+              ? "inset-x-3 bottom-[calc(5rem+1in+env(safe-area-inset-bottom,0px))] top-16 max-h-[85vh] rounded-xl"
+              : "bottom-[calc(5rem+1in+env(safe-area-inset-bottom,0px))] right-5 w-[420px] h-[580px] rounded-xl"
           )}
         >
           {/* Header */}
