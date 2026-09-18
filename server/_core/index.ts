@@ -7,10 +7,6 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { startDailyReminderScheduler } from "../scheduled";
-import { importStaffEmailsHandler } from "../importStaffEmails";
-import { importStaffRosterHandler } from "../importStaffRoster";
-import { importStaffAreasHandler } from "../importStaffAreas";
-import { importStaffTrainingsHandler } from "../importStaffTrainings";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { deduplicateDatabase } from "../deduplicate";
@@ -57,10 +53,22 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
-  app.post("/api/admin/import-staff-emails", importStaffEmailsHandler);
-  app.post("/api/admin/import-staff-roster", importStaffRosterHandler);
-  app.post("/api/admin/import-staff-areas", importStaffAreasHandler);
-  app.post("/api/admin/import-staff-trainings", importStaffTrainingsHandler);
+  app.post("/api/admin/import-staff-emails", async (req, res) => {
+    const { importStaffEmailsHandler } = await import("../importStaffEmails");
+    return importStaffEmailsHandler(req, res);
+  });
+  app.post("/api/admin/import-staff-roster", async (req, res) => {
+    const { importStaffRosterHandler } = await import("../importStaffRoster");
+    return importStaffRosterHandler(req, res);
+  });
+  app.post("/api/admin/import-staff-areas", async (req, res) => {
+    const { importStaffAreasHandler } = await import("../importStaffAreas");
+    return importStaffAreasHandler(req, res);
+  });
+  app.post("/api/admin/import-staff-trainings", async (req, res) => {
+    const { importStaffTrainingsHandler } = await import("../importStaffTrainings");
+    return importStaffTrainingsHandler(req, res);
+  });
   // Rule-based Inquiry API endpoints
   app.post("/api/inquiry", async (req, res) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";

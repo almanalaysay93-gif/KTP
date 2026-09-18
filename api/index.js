@@ -8,6 +8,37 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// shared/const.ts
+var COOKIE_NAME, ONE_YEAR_MS, AXIOS_TIMEOUT_MS, UNAUTHED_ERR_MSG, NOT_ADMIN_ERR_MSG, OAUTH_STATE_COOKIE, OAUTH_STATE_COOKIE_PLAIN, CLAIM_COOKIE_NAME, CLAIM_TTL_MS, decodeOAuthState;
+var init_const = __esm({
+  "shared/const.ts"() {
+    "use strict";
+    COOKIE_NAME = "app_session_id";
+    ONE_YEAR_MS = 1e3 * 60 * 60 * 24 * 365;
+    AXIOS_TIMEOUT_MS = 3e4;
+    UNAUTHED_ERR_MSG = "Please login (10001)";
+    NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
+    OAUTH_STATE_COOKIE = "__Host-oauth_state";
+    OAUTH_STATE_COOKIE_PLAIN = "oauth_state";
+    CLAIM_COOKIE_NAME = "staff_claim_session";
+    CLAIM_TTL_MS = 1e3 * 60 * 30;
+    decodeOAuthState = (state) => {
+      let decoded;
+      try {
+        decoded = atob(state);
+      } catch {
+        return { redirectUri: "" };
+      }
+      try {
+        const parsed = JSON.parse(decoded);
+        if (parsed && typeof parsed.redirectUri === "string") return parsed;
+      } catch {
+      }
+      return { redirectUri: decoded };
+    };
+  }
+});
+
 // shared/nursetrack.ts
 function dateKey(value) {
   if (value === null || value === void 0) return "";
@@ -619,18 +650,20 @@ var init_adminAccess = __esm({
 });
 
 // server/localDb.ts
-import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 function getSqliteDb() {
   if (!_sqliteDb) {
+    const DatabaseConstructor = require2("better-sqlite3");
     const dataDir = path.join(__dirname, "data");
     fs.mkdirSync(dataDir, { recursive: true });
     const dbPath = path.join(dataDir, "local.db");
-    _sqliteDb = new Database(dbPath);
-    _sqliteDb.pragma("journal_mode = WAL");
-    initSchemaAndSeed(_sqliteDb);
+    const instance = new DatabaseConstructor(dbPath);
+    instance.pragma("journal_mode = WAL");
+    initSchemaAndSeed(instance);
+    _sqliteDb = instance;
   }
   return _sqliteDb;
 }
@@ -1102,10 +1135,11 @@ function seedFromSeedJson(db) {
   );
   console.log(`[LocalDB] Seed completed successfully! ${data.staff.length} staff, ${totalAttendances} attendance records ready.`);
 }
-var __filename, __dirname, _sqliteDb;
+var require2, __filename, __dirname, _sqliteDb;
 var init_localDb = __esm({
   "server/localDb.ts"() {
     "use strict";
+    require2 = createRequire(import.meta.url);
     __filename = fileURLToPath(import.meta.url);
     __dirname = path.dirname(__filename);
     _sqliteDb = null;
@@ -3156,6 +3190,245 @@ end`;
   }
 });
 
+// shared/_core/errors.ts
+var HttpError, ForbiddenError;
+var init_errors = __esm({
+  "shared/_core/errors.ts"() {
+    "use strict";
+    HttpError = class extends Error {
+      constructor(statusCode, message) {
+        super(message);
+        this.statusCode = statusCode;
+        this.name = "HttpError";
+      }
+    };
+    ForbiddenError = (msg) => new HttpError(403, msg);
+  }
+});
+
+// server/_core/env.ts
+var ENV;
+var init_env = __esm({
+  "server/_core/env.ts"() {
+    "use strict";
+    ENV = {
+      googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
+      googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      cookieSecret: process.env.JWT_SECRET ?? "",
+      databaseUrl: process.env.DATABASE_URL ?? "",
+      ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
+      ownerEmail: process.env.OWNER_EMAIL ?? process.env.ADMIN_EMAIL ?? "",
+      adminEmails: (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean),
+      localDevAuth: process.env.LOCAL_DEV_AUTH === "1",
+      isProduction: process.env.NODE_ENV === "production",
+      s3BucketName: process.env.S3_BUCKET_NAME ?? "",
+      s3Region: process.env.AWS_REGION ?? process.env.S3_REGION ?? "",
+      openRouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
+      openRouterModel: process.env.OPENROUTER_MODEL ?? "nvidia/nemotron-3-super-120b-a12b:free"
+    };
+  }
+});
+
+// server/_core/sdk.ts
+import { randomBytes } from "crypto";
+import axios from "axios";
+import { parse as parseCookieHeader } from "cookie";
+import { SignJWT, jwtVerify } from "jose";
+var isNonEmptyString, GOOGLE_TOKEN_URL, GOOGLE_USERINFO_URL, OAuthService, createOAuthHttpClient, SDKServer, sdk;
+var init_sdk = __esm({
+  "server/_core/sdk.ts"() {
+    "use strict";
+    init_const();
+    init_errors();
+    init_db();
+    init_env();
+    isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
+    GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+    GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
+    OAuthService = class {
+      constructor(client) {
+        this.client = client;
+        if (!ENV.googleClientId || !ENV.googleClientSecret) {
+          console.error(
+            "[OAuth] ERROR: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not configured!"
+          );
+        }
+      }
+      decodeState(state) {
+        return decodeOAuthState(state).redirectUri;
+      }
+      async getTokenByCode(code, state) {
+        const { data } = await this.client.post(
+          GOOGLE_TOKEN_URL,
+          new URLSearchParams({
+            client_id: ENV.googleClientId,
+            client_secret: ENV.googleClientSecret,
+            code,
+            redirect_uri: this.decodeState(state),
+            grant_type: "authorization_code"
+          }),
+          { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+        );
+        return {
+          accessToken: data.access_token,
+          tokenType: data.token_type,
+          expiresIn: data.expires_in,
+          refreshToken: data.refresh_token,
+          scope: data.scope,
+          idToken: data.id_token
+        };
+      }
+      async getUserInfoByToken(token) {
+        const { data } = await this.client.get(
+          GOOGLE_USERINFO_URL,
+          { headers: { Authorization: `Bearer ${token.accessToken}` } }
+        );
+        if (data.email_verified !== true) {
+          throw ForbiddenError("Google email is not verified");
+        }
+        return {
+          openId: data.sub,
+          name: data.name || data.email || data.sub,
+          email: data.email ?? null,
+          loginMethod: "google"
+        };
+      }
+    };
+    createOAuthHttpClient = () => axios.create({
+      timeout: AXIOS_TIMEOUT_MS
+    });
+    SDKServer = class {
+      client;
+      oauthService;
+      constructor(client = createOAuthHttpClient()) {
+        this.client = client;
+        this.oauthService = new OAuthService(this.client);
+      }
+      /**
+       * Exchange OAuth authorization code for access token
+       * @example
+       * const tokenResponse = await sdk.exchangeCodeForToken(code, state);
+       */
+      async exchangeCodeForToken(code, state) {
+        return this.oauthService.getTokenByCode(code, state);
+      }
+      /**
+       * Get user information using access token
+       * @example
+       * const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
+       */
+      async getUserInfo(accessToken) {
+        return this.oauthService.getUserInfoByToken({
+          accessToken
+        });
+      }
+      parseCookies(cookieHeader) {
+        if (!cookieHeader) {
+          return /* @__PURE__ */ new Map();
+        }
+        const parsed = parseCookieHeader(cookieHeader);
+        return new Map(Object.entries(parsed));
+      }
+      getSessionSecret() {
+        if (ENV.isProduction && !ENV.cookieSecret) {
+          throw new Error("FATAL: JWT_SECRET environment variable is missing in production!");
+        }
+        const secret = ENV.cookieSecret || "skti-default-jwt-secret-key-32-chars-min!";
+        return new TextEncoder().encode(secret);
+      }
+      /**
+       * Create a session token for a user openId
+       * @example
+       * const sessionToken = await sdk.createSessionToken(userInfo.openId);
+       */
+      async createSessionToken(openId, options = {}) {
+        return this.signSession(
+          {
+            openId,
+            appId: ENV.googleClientId || "skti-app",
+            name: options.name || "User"
+          },
+          options
+        );
+      }
+      async signSession(payload, options = {}) {
+        const issuedAt = Date.now();
+        const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+        const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1e3);
+        const secretKey = this.getSessionSecret();
+        return new SignJWT({
+          openId: payload.openId,
+          appId: payload.appId || "skti-app",
+          name: payload.name || "User"
+        }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
+      }
+      async verifySession(cookieValue) {
+        if (!cookieValue) {
+          return null;
+        }
+        try {
+          const secretKey = this.getSessionSecret();
+          const { payload } = await jwtVerify(cookieValue, secretKey, {
+            algorithms: ["HS256"]
+          });
+          const { openId, appId, name } = payload;
+          if (!isNonEmptyString(openId)) {
+            console.warn("[Auth] Session payload missing valid openId");
+            return null;
+          }
+          return {
+            openId,
+            appId: typeof appId === "string" ? appId : "skti-app",
+            name: typeof name === "string" ? name : "User"
+          };
+        } catch (error) {
+          console.warn("[Auth] Session verification failed", String(error));
+          return null;
+        }
+      }
+      /**
+       * Sign a short-lived staff claim token binding one nurseId to the browser
+       * that identified via PRC/employee ID, before any Google login exists.
+       * Distinct `typ` claim keeps it from ever being accepted as a session token
+       * (and vice versa), even though both share the app's JWT secret.
+       */
+      async createClaimToken(nurseId) {
+        const secretKey = this.getSessionSecret();
+        const nonce = randomBytes(16).toString("hex");
+        const expirationSeconds = Math.floor((Date.now() + CLAIM_TTL_MS) / 1e3);
+        return new SignJWT({ typ: "staff-claim", nurseId, nonce }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
+      }
+      async verifyClaimToken(cookieValue) {
+        if (!cookieValue) return null;
+        try {
+          const secretKey = this.getSessionSecret();
+          const { payload } = await jwtVerify(cookieValue, secretKey, { algorithms: ["HS256"] });
+          if (payload.typ !== "staff-claim") return null;
+          const { nurseId } = payload;
+          return typeof nurseId === "number" && Number.isFinite(nurseId) ? nurseId : null;
+        } catch (error) {
+          console.warn("[Auth] Claim token verification failed", String(error));
+          return null;
+        }
+      }
+      async authenticateRequest(req) {
+        const cookies = this.parseCookies(req.headers.cookie);
+        const sessionToken = cookies.get(COOKIE_NAME);
+        const session = await this.verifySession(sessionToken);
+        if (!session) {
+          throw ForbiddenError("Invalid session cookie");
+        }
+        const user = await touchUserSession(session.openId);
+        if (!user) {
+          throw ForbiddenError("User not found");
+        }
+        return user;
+      }
+    };
+    sdk = new SDKServer();
+  }
+});
+
 // server/email/service.ts
 var service_exports = {};
 __export(service_exports, {
@@ -4259,6 +4532,429 @@ var init_reminders = __esm({
   }
 });
 
+// server/deduplicate.ts
+import { eq as eq8 } from "drizzle-orm";
+function canonicalAreaInfo(rawName) {
+  const s = rawName.trim().toUpperCase();
+  if (s.includes("MAIN") || s.includes("RDU-MAIN") || s.includes("DU MAIN")) {
+    return { code: "RDU-MAIN", name: "RDU Main" };
+  }
+  if (s.includes("ANNEX") || s.includes("RDU-ANNEX") || s.includes("DU ANNEX")) {
+    return { code: "RDU-ANNEX", name: "RDU Annex" };
+  }
+  if (s.includes("OTSU") || s.includes("SHARE")) {
+    return { code: "OTSU-SHARE", name: "OTSU / SHARE" };
+  }
+  if (s.includes("PERITONEAL") || s === "PD" || s.startsWith("PD ") || s.includes("CAPD")) {
+    return { code: "PD", name: "Peritoneal Dialysis" };
+  }
+  if (s.includes("ICU")) {
+    return { code: "SKTI-ICU", name: "SKTI ICU" };
+  }
+  if (s.includes("PAY")) {
+    return { code: "SKTI-PAY", name: "SKTI Payward" };
+  }
+  if (s.includes("WARD") || s.includes("SERVICE")) {
+    return { code: "SKTI-WARD", name: "SKTI Service Ward" };
+  }
+  if (s.includes("OFFICE") || s.includes("ADMIN")) {
+    return { code: "NEPHRO-OFFICE", name: "Nephrology Office" };
+  }
+  if (s.includes("TRIAGE") || s.includes("RECEIVING")) {
+    return { code: "TRIAGE", name: "Triage & Receiving" };
+  }
+  return null;
+}
+function nameTokens(fullName) {
+  return fullName.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t2) => t2.length > 1).sort();
+}
+function nameTokenKey(first, last, middle) {
+  const tokens = nameTokens(`${first} ${middle ?? ""} ${last}`);
+  return tokens.join("|");
+}
+function shortNameKey(first, last) {
+  const firstWord = first.trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+  const lastWord = last.trim().split(/\s+/).pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+  if (firstWord.length < 2 || lastWord.length < 2) return "";
+  return `${lastWord}|${firstWord}`;
+}
+function cleanIdKey(idStr) {
+  if (!idStr) return "";
+  const clean = idStr.trim().replace(/[^a-zA-Z0-9]/g, "");
+  if (/^\d+$/.test(clean)) {
+    return clean.replace(/^0+/, "");
+  }
+  return clean.toLowerCase();
+}
+async function deduplicateDatabase() {
+  const db = await getDb();
+  let mergedNursesCount = 0;
+  let deletedDupNursesCount = 0;
+  let deduplicatedTrainingsCount = 0;
+  let deduplicatedCredentialsCount = 0;
+  let cleanedAreasCount = 0;
+  let mergedCredentialTypesCount = 0;
+  if (db) {
+    const allCredTypesPreMerge = await db.select().from(credentialTypes);
+    const credTypeByName = new Map(allCredTypesPreMerge.map((t2) => [t2.name, t2]));
+    for (const [legacyName, canonicalName] of Object.entries(LEGACY_CREDENTIAL_TYPE_ALIASES)) {
+      const legacy = credTypeByName.get(legacyName);
+      const canonical = credTypeByName.get(canonicalName);
+      if (legacy && canonical && legacy.id !== canonical.id) {
+        await db.update(nurseCredentials).set({ credentialTypeId: canonical.id }).where(eq8(nurseCredentials.credentialTypeId, legacy.id));
+        await db.delete(credentialTypes).where(eq8(credentialTypes.id, legacy.id));
+        mergedCredentialTypesCount++;
+      }
+    }
+    for (const ca of CANONICAL_AREAS) {
+      await db.insert(areas).values({
+        code: ca.code,
+        name: ca.name,
+        description: ca.description,
+        sortOrder: ca.sortOrder,
+        active: true
+      }).onConflictDoUpdate({
+        target: areas.code,
+        set: {
+          name: ca.name,
+          description: ca.description,
+          sortOrder: ca.sortOrder,
+          active: true
+        }
+      });
+    }
+    const allDbAreas = await db.select().from(areas);
+    const canonicalByCode = new Map(
+      allDbAreas.filter((a) => CANONICAL_AREAS.some((c) => c.code === a.code || c.name.toLowerCase() === a.name.toLowerCase())).map((a) => [a.code, a])
+    );
+    const canonicalByName = new Map(
+      allDbAreas.filter((a) => CANONICAL_AREAS.some((c) => c.code === a.code || c.name.toLowerCase() === a.name.toLowerCase())).map((a) => [a.name.toLowerCase(), a])
+    );
+    for (const a of allDbAreas) {
+      const canonicalMatch = canonicalAreaInfo(a.name) || canonicalAreaInfo(a.code);
+      if (canonicalMatch) {
+        const canonicalArea = canonicalByCode.get(canonicalMatch.code) ?? canonicalByName.get(canonicalMatch.name.toLowerCase());
+        if (canonicalArea && canonicalArea.id !== a.id) {
+          await db.update(nurses).set({ currentAreaId: canonicalArea.id }).where(eq8(nurses.currentAreaId, a.id));
+          await db.update(areaAssignments).set({ areaId: canonicalArea.id }).where(eq8(areaAssignments.areaId, a.id));
+          try {
+            await db.update(areaTrainingRequirements).set({ areaId: canonicalArea.id }).where(eq8(areaTrainingRequirements.areaId, a.id));
+          } catch {
+          }
+          await db.delete(areas).where(eq8(areas.id, a.id));
+          cleanedAreasCount++;
+        }
+      }
+    }
+    const allNurses = await db.select().from(nurses);
+    const allCreds = await db.select().from(nurseCredentials);
+    const credsByNurseId = /* @__PURE__ */ new Map();
+    for (const c of allCreds) {
+      if (!credsByNurseId.has(c.nurseId)) credsByNurseId.set(c.nurseId, []);
+      credsByNurseId.get(c.nurseId).push(c);
+    }
+    const ds = new DisjointSet();
+    const byEmpId = /* @__PURE__ */ new Map();
+    const byTokenName = /* @__PURE__ */ new Map();
+    const byShortName = /* @__PURE__ */ new Map();
+    const byEmail = /* @__PURE__ */ new Map();
+    const byLicNum = /* @__PURE__ */ new Map();
+    for (const n of allNurses) {
+      const nurseId = n.id;
+      ds.find(nurseId);
+      const empKey = cleanIdKey(n.employeeId);
+      if (empKey.length >= 3) {
+        if (byEmpId.has(empKey)) {
+          ds.union(nurseId, byEmpId.get(empKey));
+        } else {
+          byEmpId.set(empKey, nurseId);
+        }
+      }
+      const tokenKey = nameTokenKey(n.firstName, n.lastName, n.middleName);
+      if (tokenKey.length > 3) {
+        if (byTokenName.has(tokenKey)) {
+          ds.union(nurseId, byTokenName.get(tokenKey));
+        } else {
+          byTokenName.set(tokenKey, nurseId);
+        }
+      }
+      const sKey = shortNameKey(n.firstName, n.lastName);
+      if (sKey.length > 4) {
+        if (byShortName.has(sKey)) {
+          ds.union(nurseId, byShortName.get(sKey));
+        } else {
+          byShortName.set(sKey, nurseId);
+        }
+      }
+      if (n.accountEmail && n.accountEmail.trim().length > 3) {
+        const emKey = n.accountEmail.trim().toLowerCase();
+        if (byEmail.has(emKey)) {
+          ds.union(nurseId, byEmail.get(emKey));
+        } else {
+          byEmail.set(emKey, nurseId);
+        }
+      }
+      const nurseCredList = credsByNurseId.get(nurseId) ?? [];
+      for (const cred of nurseCredList) {
+        const licKey = cleanIdKey(cred.licenseNumber);
+        if (licKey.length >= 4) {
+          if (byLicNum.has(licKey)) {
+            ds.union(nurseId, byLicNum.get(licKey));
+          } else {
+            byLicNum.set(licKey, nurseId);
+          }
+        }
+      }
+    }
+    const clusters = /* @__PURE__ */ new Map();
+    for (const n of allNurses) {
+      const root = ds.find(n.id);
+      if (!clusters.has(root)) clusters.set(root, []);
+      clusters.get(root).push(n);
+    }
+    const clusterEntries = Array.from(clusters.values());
+    for (let i = 0; i < clusterEntries.length; i++) {
+      const group = clusterEntries[i];
+      if (group.length <= 1) continue;
+      const score = (n) => {
+        let s = 0;
+        if (n.linkedUserId) s += 1e3;
+        if (n.accountEmail) s += 200;
+        if (n.position && n.position.toLowerCase() !== "nurse") s += 50;
+        if (n.dateHired) s += 30;
+        if (n.contactNumber) s += 20;
+        if (n.middleName) s += 10;
+        if (cleanIdKey(n.employeeId).length >= 5) s += 15;
+        s -= n.id * 1e-3;
+        return s;
+      };
+      const sorted = [...group].sort((a, b) => score(b) - score(a));
+      const primary = sorted[0];
+      const duplicates = group.filter((n) => n.id !== primary.id);
+      for (const dup of duplicates) {
+        const updates = {};
+        if (!primary.accountEmail && dup.accountEmail) updates.accountEmail = dup.accountEmail;
+        if (!primary.currentAreaId && dup.currentAreaId) updates.currentAreaId = dup.currentAreaId;
+        if (!primary.dateHired && dup.dateHired) updates.dateHired = dup.dateHired;
+        if ((!primary.position || primary.position.toLowerCase() === "nurse") && dup.position) {
+          updates.position = dup.position;
+        }
+        if (!primary.contactNumber && dup.contactNumber) updates.contactNumber = dup.contactNumber;
+        if (!primary.middleName && dup.middleName) updates.middleName = dup.middleName;
+        if (!primary.suffix && dup.suffix) updates.suffix = dup.suffix;
+        const primEmpKey = cleanIdKey(primary.employeeId);
+        const dupEmpKey = cleanIdKey(dup.employeeId);
+        let newEmployeeId = null;
+        if (primEmpKey.length < dupEmpKey.length && dupEmpKey.length >= 4) {
+          newEmployeeId = dup.employeeId;
+        }
+        if (Object.keys(updates).length > 0) {
+          try {
+            await db.update(nurses).set(updates).where(eq8(nurses.id, primary.id));
+          } catch {
+          }
+        }
+        await db.update(areaAssignments).set({ nurseId: primary.id }).where(eq8(areaAssignments.nurseId, dup.id));
+        await db.update(customCalendarEvents).set({ nurseId: primary.id }).where(eq8(customCalendarEvents.nurseId, dup.id));
+        await db.update(notifications).set({ nurseId: primary.id }).where(eq8(notifications.nurseId, dup.id));
+        const dupCreds = await db.select().from(nurseCredentials).where(eq8(nurseCredentials.nurseId, dup.id));
+        const primCreds = await db.select().from(nurseCredentials).where(eq8(nurseCredentials.nurseId, primary.id));
+        for (const dc of dupCreds) {
+          const dcLicKey = cleanIdKey(dc.licenseNumber);
+          const match = primCreds.find(
+            (pc) => pc.credentialTypeId === dc.credentialTypeId || dcLicKey && cleanIdKey(pc.licenseNumber) === dcLicKey
+          );
+          if (match) {
+            const dcExpiry = dc.expiryDate ? new Date(dc.expiryDate).getTime() : 0;
+            const matchExpiry = match.expiryDate ? new Date(match.expiryDate).getTime() : 0;
+            const credUpdates = {};
+            if (dcExpiry > matchExpiry) {
+              credUpdates.expiryDate = dc.expiryDate;
+              credUpdates.renewalStatus = dc.renewalStatus;
+              credUpdates.renewalCycleKey = dc.renewalCycleKey;
+            }
+            if (!match.licenseNumber && dc.licenseNumber) {
+              credUpdates.licenseNumber = dc.licenseNumber;
+            }
+            if (Object.keys(credUpdates).length > 0) {
+              await db.update(nurseCredentials).set(credUpdates).where(eq8(nurseCredentials.id, match.id));
+            }
+            await db.delete(nurseCredentials).where(eq8(nurseCredentials.id, dc.id));
+            deduplicatedCredentialsCount++;
+          } else {
+            await db.update(nurseCredentials).set({ nurseId: primary.id }).where(eq8(nurseCredentials.id, dc.id));
+          }
+        }
+        const dupTrainings = await db.select().from(nurseTrainings).where(eq8(nurseTrainings.nurseId, dup.id));
+        const primTrainings = await db.select().from(nurseTrainings).where(eq8(nurseTrainings.nurseId, primary.id));
+        for (const dt of dupTrainings) {
+          const dtDate = String(dt.completionDate ?? dt.scheduledDate ?? "").slice(0, 10);
+          const exists = primTrainings.some(
+            (pt) => pt.trainingId === dt.trainingId && String(pt.completionDate ?? pt.scheduledDate ?? "").slice(0, 10) === dtDate
+          );
+          if (exists) {
+            await db.delete(nurseTrainings).where(eq8(nurseTrainings.id, dt.id));
+            deduplicatedTrainingsCount++;
+          } else {
+            await db.update(nurseTrainings).set({ nurseId: primary.id }).where(eq8(nurseTrainings.id, dt.id));
+          }
+        }
+        await db.delete(nurses).where(eq8(nurses.id, dup.id));
+        if (newEmployeeId) {
+          try {
+            await db.update(nurses).set({ employeeId: newEmployeeId }).where(eq8(nurses.id, primary.id));
+          } catch {
+          }
+        }
+        deletedDupNursesCount++;
+      }
+      mergedNursesCount++;
+    }
+    const allTrainings = await db.select().from(nurseTrainings);
+    const seenTrainings = /* @__PURE__ */ new Set();
+    for (const t2 of allTrainings) {
+      const dateStr = String(t2.completionDate ?? t2.scheduledDate ?? "").slice(0, 10);
+      const key = `${t2.nurseId}-${t2.trainingId}-${dateStr}`;
+      if (seenTrainings.has(key)) {
+        await db.delete(nurseTrainings).where(eq8(nurseTrainings.id, t2.id));
+        deduplicatedTrainingsCount++;
+      } else {
+        seenTrainings.add(key);
+      }
+    }
+    const allCredsAfterMerge = await db.select().from(nurseCredentials);
+    const credsByNurseAndType = /* @__PURE__ */ new Map();
+    for (const c of allCredsAfterMerge) {
+      const key = `${c.nurseId}-${c.credentialTypeId}`;
+      if (!credsByNurseAndType.has(key)) credsByNurseAndType.set(key, []);
+      credsByNurseAndType.get(key).push(c);
+    }
+    const credGroups = Array.from(credsByNurseAndType.values());
+    for (const group of credGroups) {
+      if (group.length > 1) {
+        group.sort((a, b) => {
+          const aExp = a.expiryDate ? new Date(a.expiryDate).getTime() : 0;
+          const bExp = b.expiryDate ? new Date(b.expiryDate).getTime() : 0;
+          return bExp - aExp || b.id - a.id;
+        });
+        const primaryCred = group[0];
+        const dups = group.slice(1);
+        for (const dc of dups) {
+          if (!primaryCred.licenseNumber && dc.licenseNumber) {
+            await db.update(nurseCredentials).set({ licenseNumber: dc.licenseNumber }).where(eq8(nurseCredentials.id, primaryCred.id));
+          }
+          await db.delete(nurseCredentials).where(eq8(nurseCredentials.id, dc.id));
+          deduplicatedCredentialsCount++;
+        }
+      }
+    }
+  } else {
+    const sqlite = getSqliteDb();
+    const allNurses = sqlite.prepare("SELECT * FROM nurses").all();
+    const ds = new DisjointSet();
+    const byEmpId = /* @__PURE__ */ new Map();
+    const byTokenName = /* @__PURE__ */ new Map();
+    const byShortName = /* @__PURE__ */ new Map();
+    for (const n of allNurses) {
+      const nurseId = n.id;
+      ds.find(nurseId);
+      const empKey = cleanIdKey(n.employeeId);
+      if (empKey.length >= 3) {
+        if (byEmpId.has(empKey)) ds.union(nurseId, byEmpId.get(empKey));
+        else byEmpId.set(empKey, nurseId);
+      }
+      const tokenKey = nameTokenKey(n.firstName, n.lastName, n.middleName);
+      if (tokenKey.length > 3) {
+        if (byTokenName.has(tokenKey)) ds.union(nurseId, byTokenName.get(tokenKey));
+        else byTokenName.set(tokenKey, nurseId);
+      }
+      const sKey = shortNameKey(n.firstName, n.lastName);
+      if (sKey.length > 4) {
+        if (byShortName.has(sKey)) ds.union(nurseId, byShortName.get(sKey));
+        else byShortName.set(sKey, nurseId);
+      }
+    }
+    const clusters = /* @__PURE__ */ new Map();
+    for (const n of allNurses) {
+      const root = ds.find(n.id);
+      if (!clusters.has(root)) clusters.set(root, []);
+      clusters.get(root).push(n);
+    }
+    const clusterEntries = Array.from(clusters.values());
+    for (let i = 0; i < clusterEntries.length; i++) {
+      const group = clusterEntries[i];
+      if (group.length <= 1) continue;
+      const sorted = [...group].sort((a, b) => (b.linkedUserId ? 1 : 0) - (a.linkedUserId ? 1 : 0) || a.id - b.id);
+      const primary = sorted[0];
+      const duplicates = group.filter((n) => n.id !== primary.id);
+      for (const dup of duplicates) {
+        sqlite.prepare("UPDATE areaAssignments SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
+        sqlite.prepare("UPDATE customCalendarEvents SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
+        sqlite.prepare("UPDATE notifications SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
+        sqlite.prepare("UPDATE nurseCredentials SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
+        sqlite.prepare("UPDATE nurseTrainings SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
+        sqlite.prepare("DELETE FROM nurses WHERE id = ?").run(dup.id);
+        deletedDupNursesCount++;
+      }
+      mergedNursesCount++;
+    }
+  }
+  return {
+    mergedNursesGroups: mergedNursesCount,
+    deletedDuplicateNurses: deletedDupNursesCount,
+    deduplicatedTrainings: deduplicatedTrainingsCount,
+    deduplicatedCredentials: deduplicatedCredentialsCount,
+    cleanedAreasCount,
+    mergedCredentialTypesCount
+  };
+}
+var CANONICAL_AREAS, CANONICAL_CREDENTIAL_TYPES, LEGACY_CREDENTIAL_TYPE_ALIASES, DisjointSet;
+var init_deduplicate = __esm({
+  "server/deduplicate.ts"() {
+    "use strict";
+    init_db();
+    init_localDb();
+    init_schema();
+    CANONICAL_AREAS = [
+      { code: "NEPHRO-OFFICE", name: "Nephrology Office", description: "Nephrology Nursing Office & Administrative Center", sortOrder: 1 },
+      { code: "PD", name: "Peritoneal Dialysis", description: "Peritoneal Dialysis Unit & Outpatient CAPD/APD", sortOrder: 2 },
+      { code: "OTSU-SHARE", name: "OTSU / SHARE", description: "Organ Transplant Specialty Unit & SHARE Programs", sortOrder: 3 },
+      { code: "RDU-MAIN", name: "RDU Main", description: "Renal Dialysis Unit - Main Building (Station 1-28)", sortOrder: 4 },
+      { code: "RDU-ANNEX", name: "RDU Annex", description: "Renal Dialysis Unit - Annex Center", sortOrder: 5 },
+      { code: "SKTI-WARD", name: "SKTI Service Ward", description: "Southern Philippines Kidney Transplant Institute - Inpatient Ward", sortOrder: 6 },
+      { code: "SKTI-PAY", name: "SKTI Payward", description: "SKTI Pay Patients Inpatient Unit", sortOrder: 7 },
+      { code: "SKTI-ICU", name: "SKTI ICU", description: "SKTI Intensive Care Unit", sortOrder: 8 },
+      { code: "TRIAGE", name: "Triage & Receiving", description: "Nephrology Triage and Outpatient Receiving", sortOrder: 9 }
+    ];
+    CANONICAL_CREDENTIAL_TYPES = {
+      RN: "PRC Registered Nurse License",
+      NA: "TESDA NC II / PRC Attendant Certification"
+    };
+    LEGACY_CREDENTIAL_TYPE_ALIASES = {
+      "PRC License": CANONICAL_CREDENTIAL_TYPES.RN,
+      "PRC / NC II License": CANONICAL_CREDENTIAL_TYPES.NA
+    };
+    DisjointSet = class {
+      parent = /* @__PURE__ */ new Map();
+      find(i) {
+        if (!this.parent.has(i)) this.parent.set(i, i);
+        const p = this.parent.get(i);
+        if (p === i) return i;
+        const root = this.find(p);
+        this.parent.set(i, root);
+        return root;
+      }
+      union(i, j) {
+        const rootI = this.find(i);
+        const rootJ = this.find(j);
+        if (rootI !== rootJ) {
+          this.parent.set(rootI, rootJ);
+        }
+      }
+    };
+  }
+});
+
 // server/email/dispatcher.ts
 var dispatcher_exports = {};
 __export(dispatcher_exports, {
@@ -4580,42 +5276,417 @@ var init_scheduled = __esm({
   }
 });
 
+// server/importStaffEmails.ts
+var importStaffEmails_exports = {};
+__export(importStaffEmails_exports, {
+  importStaffEmailsHandler: () => importStaffEmailsHandler
+});
+import { z as z18 } from "zod";
+async function importStaffEmailsHandler(req, res) {
+  try {
+    let user;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      return res.status(403).json({ error: "not-authenticated" });
+    }
+    if (!hasFullAccess(user.email)) {
+      return res.status(403).json({ error: "admin-only" });
+    }
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "invalid-body", details: parsed.error.flatten() });
+    }
+    const result = await bulkSetAccountEmailsByLicense(parsed.data.rows);
+    res.json({ ok: true, ...result, total: parsed.data.rows.length });
+  } catch (error) {
+    console.error("[ImportStaffEmails] failed:", error);
+    res.status(500).json({ error: String(error) });
+  }
+}
+var bodySchema;
+var init_importStaffEmails = __esm({
+  "server/importStaffEmails.ts"() {
+    "use strict";
+    init_adminAccess();
+    init_sdk();
+    init_db();
+    bodySchema = z18.object({
+      rows: z18.array(z18.object({ licenseNumber: z18.string(), email: z18.string() })).max(2e3)
+    });
+  }
+});
+
+// server/importStaffRoster.ts
+var importStaffRoster_exports = {};
+__export(importStaffRoster_exports, {
+  importStaffRosterHandler: () => importStaffRosterHandler
+});
+import { z as z19 } from "zod";
+async function importStaffRosterHandler(req, res) {
+  try {
+    let user;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      return res.status(403).json({ error: "not-authenticated" });
+    }
+    if (!hasFullAccess(user.email)) {
+      return res.status(403).json({ error: "admin-only" });
+    }
+    const parsed = bodySchema2.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "invalid-body", details: parsed.error.flatten() });
+    }
+    const typeIdByName = /* @__PURE__ */ new Map();
+    for (const t2 of await listCredentialTypes()) typeIdByName.set(t2.name, t2.id);
+    const allExistingNurses = await listNurses();
+    const nurseByName = new Map(
+      allExistingNurses.map((n) => [`${n.lastName.trim()} ${n.firstName.trim()}`.toLowerCase().replace(/[^a-z0-9]/g, ""), n])
+    );
+    let created = 0;
+    let skipped = 0;
+    const errors = [];
+    for (const row of parsed.data.rows) {
+      try {
+        const nameKey = `${row.lastName.trim()} ${row.firstName.trim()}`.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const existing = await getNurseByEmployeeId(row.licenseNumber) ?? nurseByName.get(nameKey);
+        if (existing) {
+          if (!existing.accountEmail && row.email) {
+            await updateNurse(existing.id, { accountEmail: row.email });
+          }
+          skipped++;
+          continue;
+        }
+        const typeName = CREDENTIAL_TYPE_BY_STAFF_TYPE[row.staffType];
+        let credentialTypeId = typeIdByName.get(typeName);
+        if (!credentialTypeId) {
+          credentialTypeId = await createCredentialType(typeName);
+          typeIdByName.set(typeName, credentialTypeId);
+        }
+        const nurseId = await createNurse({
+          employeeId: row.licenseNumber,
+          firstName: row.firstName,
+          middleName: row.middleName ?? null,
+          lastName: row.lastName,
+          staffType: row.staffType,
+          employmentStatus: "Active",
+          accountEmail: row.email
+        });
+        await createCredential({
+          nurseId,
+          credentialTypeId,
+          licenseNumber: row.licenseNumber,
+          expiryDate: row.expiryDate,
+          renewalCycleKey: renewalCycleKey(`import-${nurseId}`)
+        });
+        created++;
+      } catch (rowError) {
+        errors.push({ licenseNumber: row.licenseNumber, error: String(rowError) });
+      }
+    }
+    res.json({ ok: true, created, skipped, errors, total: parsed.data.rows.length });
+  } catch (error) {
+    console.error("[ImportStaffRoster] failed:", error);
+    res.status(500).json({ error: String(error) });
+  }
+}
+var rowSchema, bodySchema2, CREDENTIAL_TYPE_BY_STAFF_TYPE;
+var init_importStaffRoster = __esm({
+  "server/importStaffRoster.ts"() {
+    "use strict";
+    init_adminAccess();
+    init_sdk();
+    init_db();
+    init_nursetrack();
+    init_deduplicate();
+    rowSchema = z19.object({
+      firstName: z19.string().min(1).max(128),
+      middleName: z19.string().max(128).optional(),
+      lastName: z19.string().min(1).max(128),
+      staffType: z19.enum(["Registered Nurse", "Nursing Attendant"]),
+      licenseNumber: z19.string().min(1).max(64),
+      expiryDate: z19.string(),
+      email: z19.string().email()
+    });
+    bodySchema2 = z19.object({ rows: z19.array(rowSchema).max(500) });
+    CREDENTIAL_TYPE_BY_STAFF_TYPE = {
+      "Registered Nurse": CANONICAL_CREDENTIAL_TYPES.RN,
+      "Nursing Attendant": CANONICAL_CREDENTIAL_TYPES.NA
+    };
+  }
+});
+
+// server/importStaffAreas.ts
+var importStaffAreas_exports = {};
+__export(importStaffAreas_exports, {
+  importStaffAreasHandler: () => importStaffAreasHandler
+});
+import { z as z20 } from "zod";
+function normTokenSet(s) {
+  return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
+}
+function rowShortKey(fullName) {
+  const [lastPart, ...restParts] = fullName.split(",");
+  if (restParts.length === 0) return normTokenSet(fullName);
+  const firstToken = restParts.join(",").trim().split(/\s+/)[0] ?? "";
+  return normTokenSet(`${firstToken} ${lastPart}`);
+}
+function areaCode(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+async function importStaffAreasHandler(req, res) {
+  try {
+    let user;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      return res.status(403).json({ error: "not-authenticated" });
+    }
+    if (!hasFullAccess(user.email)) {
+      return res.status(403).json({ error: "admin-only" });
+    }
+    const parsed = bodySchema3.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "invalid-body", details: parsed.error.flatten() });
+    }
+    const nurses2 = await listNurses();
+    const byFullKey = /* @__PURE__ */ new Map();
+    const byShortKey = /* @__PURE__ */ new Map();
+    for (const n of nurses2) {
+      const full = normTokenSet(`${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.suffix ?? ""}`);
+      const short = normTokenSet(`${n.firstName} ${n.lastName}`);
+      if (!byFullKey.has(full)) byFullKey.set(full, []);
+      byFullKey.get(full).push(n);
+      if (!byShortKey.has(short)) byShortKey.set(short, []);
+      byShortKey.get(short).push(n);
+    }
+    const areaIdByName = /* @__PURE__ */ new Map();
+    for (const a of await listAreas()) areaIdByName.set(a.name, a.id);
+    let assigned = 0;
+    let alreadySet = 0;
+    const notFound = [];
+    const ambiguous = [];
+    for (const row of parsed.data.rows) {
+      const canonical = canonicalAreaInfo(row.areaName);
+      const targetAreaName = canonical ? canonical.name : row.areaName;
+      const targetAreaCode = canonical ? canonical.code : areaCode(row.areaName);
+      let areaId = areaIdByName.get(targetAreaName);
+      if (!areaId) {
+        areaId = await createArea({ code: targetAreaCode, name: targetAreaName });
+        areaIdByName.set(targetAreaName, areaId);
+      }
+      const fullKey = normTokenSet(row.fullName);
+      let candidates = byFullKey.get(fullKey) ?? [];
+      if (candidates.length === 0) {
+        candidates = byShortKey.get(rowShortKey(row.fullName)) ?? [];
+      }
+      if (candidates.length === 0) {
+        notFound.push(row.fullName);
+        continue;
+      }
+      const uniqueIds = Array.from(new Set(candidates.map((c) => c.id)));
+      if (uniqueIds.length > 1) {
+        ambiguous.push(row.fullName);
+        continue;
+      }
+      const nurse = candidates[0];
+      if (nurse.currentAreaId) {
+        alreadySet++;
+        continue;
+      }
+      await updateNurse(nurse.id, { currentAreaId: areaId });
+      await createAssignment({
+        nurseId: nurse.id,
+        areaId,
+        startDate: /* @__PURE__ */ new Date(),
+        assignmentType: "Permanent Transfer",
+        isCurrent: true
+      });
+      assigned++;
+    }
+    res.json({ ok: true, assigned, alreadySet, notFound, ambiguous, total: parsed.data.rows.length, areas: Array.from(areaIdByName.keys()) });
+  } catch (error) {
+    console.error("[ImportStaffAreas] failed:", error);
+    res.status(500).json({ error: String(error) });
+  }
+}
+var rowSchema2, bodySchema3;
+var init_importStaffAreas = __esm({
+  "server/importStaffAreas.ts"() {
+    "use strict";
+    init_adminAccess();
+    init_sdk();
+    init_db();
+    init_deduplicate();
+    rowSchema2 = z20.object({ fullName: z20.string().min(1).max(256), areaName: z20.string().min(1).max(128) });
+    bodySchema3 = z20.object({ rows: z20.array(rowSchema2).max(500) });
+  }
+});
+
+// server/importStaffTrainings.ts
+var importStaffTrainings_exports = {};
+__export(importStaffTrainings_exports, {
+  importStaffTrainingsHandler: () => importStaffTrainingsHandler
+});
+import { z as z21 } from "zod";
+function normTokenSet2(s) {
+  return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
+}
+function rowShortKey2(fullName) {
+  const [lastPart, ...restParts] = fullName.split(",");
+  if (restParts.length === 0) return normTokenSet2(fullName);
+  const firstToken = restParts.join(",").trim().split(/\s+/)[0] ?? "";
+  return normTokenSet2(`${firstToken} ${lastPart}`);
+}
+function parseBestEffortDate(text2) {
+  if (!text2) return null;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(text2)) {
+    const d = new Date(text2);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const monthMatch = text2.match(new RegExp(`\\b(${MONTHS})\\b`, "i"));
+  const yearMatch = text2.match(/\b(20\d{2})\b/);
+  if (monthMatch && yearMatch) {
+    const afterMonth = text2.slice((monthMatch.index ?? 0) + monthMatch[0].length);
+    const dayMatch = afterMonth.match(/\d{1,2}/);
+    if (dayMatch) {
+      const d = /* @__PURE__ */ new Date(`${monthMatch[0]} ${dayMatch[0]}, ${yearMatch[1]}`);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+  }
+  const slashMatch = text2.match(/^(\d{1,2})\/(\d{1,2})(?:[-,]\d{1,2})*\/(\d{2,4})/);
+  if (slashMatch) {
+    const month = Number(slashMatch[1]);
+    const day = Number(slashMatch[2]);
+    let year = Number(slashMatch[3]);
+    if (year < 100) year += 2e3;
+    const d = new Date(year, month - 1, day);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+async function importStaffTrainingsHandler(req, res) {
+  try {
+    let user;
+    try {
+      user = await sdk.authenticateRequest(req);
+    } catch {
+      return res.status(403).json({ error: "not-authenticated" });
+    }
+    if (!hasFullAccess(user.email)) {
+      return res.status(403).json({ error: "admin-only" });
+    }
+    const parsed = bodySchema4.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "invalid-body", details: parsed.error.flatten() });
+    }
+    const nurses2 = await listNurses();
+    const byFullKey = /* @__PURE__ */ new Map();
+    const byShortKey = /* @__PURE__ */ new Map();
+    for (const n of nurses2) {
+      const full = normTokenSet2(`${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.suffix ?? ""}`);
+      const short = normTokenSet2(`${n.firstName} ${n.lastName}`);
+      if (!byFullKey.has(full)) byFullKey.set(full, []);
+      byFullKey.get(full).push(n);
+      if (!byShortKey.has(short)) byShortKey.set(short, []);
+      byShortKey.get(short).push(n);
+    }
+    const catalogIdByName = /* @__PURE__ */ new Map();
+    for (const t2 of await listTrainingCatalog(true)) catalogIdByName.set(t2.name.toLowerCase(), t2.id);
+    const existing = await listNurseTrainings();
+    const existingKeys = new Set(existing.map((e) => `${e.nurseId}:${e.trainingId}:${e.remarks ?? ""}`));
+    let created = 0;
+    let skippedDuplicate = 0;
+    let notFound = 0;
+    let ambiguous = 0;
+    const unmatched = [];
+    for (const row of parsed.data.rows) {
+      const fullKey = normTokenSet2(row.fullName);
+      let candidates = byFullKey.get(fullKey) ?? [];
+      if (candidates.length === 0) candidates = byShortKey.get(rowShortKey2(row.fullName)) ?? [];
+      if (candidates.length === 0) {
+        notFound++;
+        unmatched.push(row.fullName);
+        continue;
+      }
+      const uniqueIds = Array.from(new Set(candidates.map((c) => c.id)));
+      if (uniqueIds.length > 1) {
+        ambiguous++;
+        unmatched.push(row.fullName);
+        continue;
+      }
+      const nurse = candidates[0];
+      const title = row.title.trim();
+      let trainingId = catalogIdByName.get(title.toLowerCase());
+      if (!trainingId) {
+        try {
+          trainingId = await createTrainingType({ name: title, kind: "Seminar" });
+        } catch {
+          const fresh = await listTrainingCatalog(true);
+          const match = fresh.find((t2) => t2.name.toLowerCase() === title.toLowerCase());
+          if (!match) throw new Error(`Could not create or find training catalog entry for "${title}"`);
+          trainingId = match.id;
+        }
+        catalogIdByName.set(title.toLowerCase(), trainingId);
+      }
+      const resolvedTrainingId = trainingId;
+      const remarks = `${row.quarter}: ${row.dateText ?? ""}`.trim();
+      const dedupeKey = `${nurse.id}:${resolvedTrainingId}:${remarks}`;
+      if (existingKeys.has(dedupeKey)) {
+        skippedDuplicate++;
+        continue;
+      }
+      const completionDate = parseBestEffortDate(row.dateText);
+      await createNurseTraining({
+        nurseId: nurse.id,
+        trainingId: resolvedTrainingId,
+        status: "Completed",
+        completionDate,
+        provider: row.provider,
+        remarks
+      });
+      existingKeys.add(dedupeKey);
+      created++;
+    }
+    res.json({ ok: true, created, skippedDuplicate, notFound, ambiguous, unmatched, total: parsed.data.rows.length });
+  } catch (error) {
+    console.error("[ImportStaffTrainings] failed:", error);
+    res.status(500).json({ error: String(error) });
+  }
+}
+var rowSchema3, bodySchema4, MONTHS;
+var init_importStaffTrainings = __esm({
+  "server/importStaffTrainings.ts"() {
+    "use strict";
+    init_adminAccess();
+    init_sdk();
+    init_db();
+    rowSchema3 = z21.object({
+      fullName: z21.string().min(1).max(256),
+      title: z21.string().min(1).max(512),
+      dateText: z21.string().max(256).optional(),
+      provider: z21.string().max(128).optional(),
+      quarter: z21.string().max(32)
+    });
+    bodySchema4 = z21.object({ rows: z21.array(rowSchema3).max(1e3) });
+    MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+  }
+});
+
 // server/vercel.ts
 import "dotenv/config";
 import crypto2 from "crypto";
 import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 
-// shared/const.ts
-var COOKIE_NAME = "app_session_id";
-var ONE_YEAR_MS = 1e3 * 60 * 60 * 24 * 365;
-var AXIOS_TIMEOUT_MS = 3e4;
-var UNAUTHED_ERR_MSG = "Please login (10001)";
-var NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
-var OAUTH_STATE_COOKIE = "__Host-oauth_state";
-var OAUTH_STATE_COOKIE_PLAIN = "oauth_state";
-var CLAIM_COOKIE_NAME = "staff_claim_session";
-var CLAIM_TTL_MS = 1e3 * 60 * 30;
-var decodeOAuthState = (state) => {
-  let decoded;
-  try {
-    decoded = atob(state);
-  } catch {
-    return { redirectUri: "" };
-  }
-  try {
-    const parsed = JSON.parse(decoded);
-    if (parsed && typeof parsed.redirectUri === "string") return parsed;
-  } catch {
-  }
-  return { redirectUri: decoded };
-};
-
 // server/_core/oauth.ts
+init_const();
 init_db();
 import { parse as parseCookieHeader2 } from "cookie";
 
 // server/_core/cookies.ts
+init_const();
 function isSecureRequest(req) {
   if (req.protocol === "https") return true;
   const forwardedProto = req.headers["x-forwarded-proto"];
@@ -4636,229 +5707,8 @@ function getClaimCookieOptions(req) {
   return { ...getSessionCookieOptions(req), maxAge: CLAIM_TTL_MS };
 }
 
-// server/_core/sdk.ts
-import { randomBytes } from "crypto";
-
-// shared/_core/errors.ts
-var HttpError = class extends Error {
-  constructor(statusCode, message) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "HttpError";
-  }
-};
-var ForbiddenError = (msg) => new HttpError(403, msg);
-
-// server/_core/sdk.ts
-init_db();
-import axios from "axios";
-import { parse as parseCookieHeader } from "cookie";
-import { SignJWT, jwtVerify } from "jose";
-
-// server/_core/env.ts
-var ENV = {
-  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
-  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
-  databaseUrl: process.env.DATABASE_URL ?? "",
-  ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
-  ownerEmail: process.env.OWNER_EMAIL ?? process.env.ADMIN_EMAIL ?? "",
-  adminEmails: (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean),
-  localDevAuth: process.env.LOCAL_DEV_AUTH === "1",
-  isProduction: process.env.NODE_ENV === "production",
-  s3BucketName: process.env.S3_BUCKET_NAME ?? "",
-  s3Region: process.env.AWS_REGION ?? process.env.S3_REGION ?? "",
-  openRouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
-  openRouterModel: process.env.OPENROUTER_MODEL ?? "nvidia/nemotron-3-super-120b-a12b:free"
-};
-
-// server/_core/sdk.ts
-var isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
-var GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-var GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
-var OAuthService = class {
-  constructor(client) {
-    this.client = client;
-    if (!ENV.googleClientId || !ENV.googleClientSecret) {
-      console.error(
-        "[OAuth] ERROR: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not configured!"
-      );
-    }
-  }
-  decodeState(state) {
-    return decodeOAuthState(state).redirectUri;
-  }
-  async getTokenByCode(code, state) {
-    const { data } = await this.client.post(
-      GOOGLE_TOKEN_URL,
-      new URLSearchParams({
-        client_id: ENV.googleClientId,
-        client_secret: ENV.googleClientSecret,
-        code,
-        redirect_uri: this.decodeState(state),
-        grant_type: "authorization_code"
-      }),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
-    return {
-      accessToken: data.access_token,
-      tokenType: data.token_type,
-      expiresIn: data.expires_in,
-      refreshToken: data.refresh_token,
-      scope: data.scope,
-      idToken: data.id_token
-    };
-  }
-  async getUserInfoByToken(token) {
-    const { data } = await this.client.get(
-      GOOGLE_USERINFO_URL,
-      { headers: { Authorization: `Bearer ${token.accessToken}` } }
-    );
-    if (data.email_verified !== true) {
-      throw ForbiddenError("Google email is not verified");
-    }
-    return {
-      openId: data.sub,
-      name: data.name || data.email || data.sub,
-      email: data.email ?? null,
-      loginMethod: "google"
-    };
-  }
-};
-var createOAuthHttpClient = () => axios.create({
-  timeout: AXIOS_TIMEOUT_MS
-});
-var SDKServer = class {
-  client;
-  oauthService;
-  constructor(client = createOAuthHttpClient()) {
-    this.client = client;
-    this.oauthService = new OAuthService(this.client);
-  }
-  /**
-   * Exchange OAuth authorization code for access token
-   * @example
-   * const tokenResponse = await sdk.exchangeCodeForToken(code, state);
-   */
-  async exchangeCodeForToken(code, state) {
-    return this.oauthService.getTokenByCode(code, state);
-  }
-  /**
-   * Get user information using access token
-   * @example
-   * const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
-   */
-  async getUserInfo(accessToken) {
-    return this.oauthService.getUserInfoByToken({
-      accessToken
-    });
-  }
-  parseCookies(cookieHeader) {
-    if (!cookieHeader) {
-      return /* @__PURE__ */ new Map();
-    }
-    const parsed = parseCookieHeader(cookieHeader);
-    return new Map(Object.entries(parsed));
-  }
-  getSessionSecret() {
-    if (ENV.isProduction && !ENV.cookieSecret) {
-      throw new Error("FATAL: JWT_SECRET environment variable is missing in production!");
-    }
-    const secret = ENV.cookieSecret || "skti-default-jwt-secret-key-32-chars-min!";
-    return new TextEncoder().encode(secret);
-  }
-  /**
-   * Create a session token for a user openId
-   * @example
-   * const sessionToken = await sdk.createSessionToken(userInfo.openId);
-   */
-  async createSessionToken(openId, options = {}) {
-    return this.signSession(
-      {
-        openId,
-        appId: ENV.googleClientId || "skti-app",
-        name: options.name || "User"
-      },
-      options
-    );
-  }
-  async signSession(payload, options = {}) {
-    const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
-    const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1e3);
-    const secretKey = this.getSessionSecret();
-    return new SignJWT({
-      openId: payload.openId,
-      appId: payload.appId || "skti-app",
-      name: payload.name || "User"
-    }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
-  }
-  async verifySession(cookieValue) {
-    if (!cookieValue) {
-      return null;
-    }
-    try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secretKey, {
-        algorithms: ["HS256"]
-      });
-      const { openId, appId, name } = payload;
-      if (!isNonEmptyString(openId)) {
-        console.warn("[Auth] Session payload missing valid openId");
-        return null;
-      }
-      return {
-        openId,
-        appId: typeof appId === "string" ? appId : "skti-app",
-        name: typeof name === "string" ? name : "User"
-      };
-    } catch (error) {
-      console.warn("[Auth] Session verification failed", String(error));
-      return null;
-    }
-  }
-  /**
-   * Sign a short-lived staff claim token binding one nurseId to the browser
-   * that identified via PRC/employee ID, before any Google login exists.
-   * Distinct `typ` claim keeps it from ever being accepted as a session token
-   * (and vice versa), even though both share the app's JWT secret.
-   */
-  async createClaimToken(nurseId) {
-    const secretKey = this.getSessionSecret();
-    const nonce = randomBytes(16).toString("hex");
-    const expirationSeconds = Math.floor((Date.now() + CLAIM_TTL_MS) / 1e3);
-    return new SignJWT({ typ: "staff-claim", nurseId, nonce }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).setExpirationTime(expirationSeconds).sign(secretKey);
-  }
-  async verifyClaimToken(cookieValue) {
-    if (!cookieValue) return null;
-    try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secretKey, { algorithms: ["HS256"] });
-      if (payload.typ !== "staff-claim") return null;
-      const { nurseId } = payload;
-      return typeof nurseId === "number" && Number.isFinite(nurseId) ? nurseId : null;
-    } catch (error) {
-      console.warn("[Auth] Claim token verification failed", String(error));
-      return null;
-    }
-  }
-  async authenticateRequest(req) {
-    const cookies = this.parseCookies(req.headers.cookie);
-    const sessionToken = cookies.get(COOKIE_NAME);
-    const session = await this.verifySession(sessionToken);
-    if (!session) {
-      throw ForbiddenError("Invalid session cookie");
-    }
-    const user = await touchUserSession(session.openId);
-    if (!user) {
-      throw ForbiddenError("User not found");
-    }
-    return user;
-  }
-};
-var sdk = new SDKServer();
-
 // server/_core/oauth.ts
+init_sdk();
 function getQueryParam(req, key) {
   const value = req.query[key];
   return typeof value === "string" ? value : void 0;
@@ -4913,16 +5763,16 @@ function registerOAuthRoutes(app) {
 }
 
 // server/storage.ts
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+init_env();
 init_db();
 var _client = null;
-function getClient() {
+async function getClient() {
   if (!ENV.s3BucketName) {
     return null;
   }
   if (!_client) {
-    _client = new S3Client(ENV.s3Region ? { region: ENV.s3Region } : {});
+    const { S3Client: Client } = await import("@aws-sdk/client-s3");
+    _client = new Client(ENV.s3Region ? { region: ENV.s3Region } : {});
   }
   return _client;
 }
@@ -4938,53 +5788,67 @@ function appendHashSuffix(relKey) {
 async function storagePut(relKey, data, contentType = "application/octet-stream") {
   const key = appendHashSuffix(normalizeKey(relKey));
   const buffer = typeof data === "string" ? Buffer.from(data, "utf-8") : Buffer.from(data);
-  const client = getClient();
-  if (client && ENV.s3BucketName) {
-    try {
-      await client.send(
-        new PutObjectCommand({
-          Bucket: ENV.s3BucketName,
-          Key: key,
-          Body: buffer,
-          ContentType: contentType
-        })
-      );
-      return { key, url: `/storage/${key}` };
-    } catch (err) {
-      console.warn("[Storage] S3 PutObject failed, falling back to database storage:", err);
+  if (ENV.s3BucketName) {
+    const client = await getClient();
+    if (client) {
+      try {
+        const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+        await client.send(
+          new PutObjectCommand({
+            Bucket: ENV.s3BucketName,
+            Key: key,
+            Body: buffer,
+            ContentType: contentType
+          })
+        );
+        return { key, url: `/storage/${key}` };
+      } catch (err) {
+        console.warn("[Storage] S3 PutObject failed, falling back to database storage:", err);
+      }
     }
   }
   await saveStoredFile(key, buffer.toString("base64"), contentType, buffer.length);
   return { key, url: `/storage/${key}` };
 }
 async function storageGetSignedUrl(relKey) {
-  const client = getClient();
   const key = normalizeKey(relKey);
-  if (!client || !ENV.s3BucketName) {
+  if (!ENV.s3BucketName) {
     return `/storage/${key}`;
   }
+  const client = await getClient();
+  if (!client) {
+    return `/storage/${key}`;
+  }
+  const [{ GetObjectCommand }, { getSignedUrl }] = await Promise.all([
+    import("@aws-sdk/client-s3"),
+    import("@aws-sdk/s3-request-presigner")
+  ]);
   return getSignedUrl(client, new GetObjectCommand({ Bucket: ENV.s3BucketName, Key: key }), { expiresIn: 300 });
 }
 async function storageDelete(relKey) {
   if (!relKey) return;
   const key = normalizeKey(relKey);
-  const client = getClient();
-  if (client && ENV.s3BucketName) {
-    try {
-      await client.send(
-        new DeleteObjectCommand({
-          Bucket: ENV.s3BucketName,
-          Key: key
-        })
-      );
-    } catch (err) {
-      console.warn("[Storage] S3 DeleteObject failed:", err);
+  if (ENV.s3BucketName) {
+    const client = await getClient();
+    if (client) {
+      try {
+        const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
+        await client.send(
+          new DeleteObjectCommand({
+            Bucket: ENV.s3BucketName,
+            Key: key
+          })
+        );
+      } catch (err) {
+        console.warn("[Storage] S3 DeleteObject failed:", err);
+      }
     }
   }
   await deleteStoredFile(key);
 }
 
 // server/_core/storageProxy.ts
+init_env();
 init_db();
 function registerStorageProxy(app) {
   app.get("/storage/*", async (req, res) => {
@@ -5016,11 +5880,15 @@ function registerStorageProxy(app) {
   });
 }
 
+// server/routers.ts
+init_const();
+
 // server/_core/systemRouter.ts
 import { z } from "zod";
 
 // server/_core/trpc.ts
 init_adminAccess();
+init_const();
 init_db();
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
@@ -8515,424 +9383,8 @@ if (isDirectCliInvocation) {
   });
 }
 
-// server/deduplicate.ts
-init_db();
-init_localDb();
-init_schema();
-import { eq as eq8 } from "drizzle-orm";
-var CANONICAL_AREAS = [
-  { code: "NEPHRO-OFFICE", name: "Nephrology Office", description: "Nephrology Nursing Office & Administrative Center", sortOrder: 1 },
-  { code: "PD", name: "Peritoneal Dialysis", description: "Peritoneal Dialysis Unit & Outpatient CAPD/APD", sortOrder: 2 },
-  { code: "OTSU-SHARE", name: "OTSU / SHARE", description: "Organ Transplant Specialty Unit & SHARE Programs", sortOrder: 3 },
-  { code: "RDU-MAIN", name: "RDU Main", description: "Renal Dialysis Unit - Main Building (Station 1-28)", sortOrder: 4 },
-  { code: "RDU-ANNEX", name: "RDU Annex", description: "Renal Dialysis Unit - Annex Center", sortOrder: 5 },
-  { code: "SKTI-WARD", name: "SKTI Service Ward", description: "Southern Philippines Kidney Transplant Institute - Inpatient Ward", sortOrder: 6 },
-  { code: "SKTI-PAY", name: "SKTI Payward", description: "SKTI Pay Patients Inpatient Unit", sortOrder: 7 },
-  { code: "SKTI-ICU", name: "SKTI ICU", description: "SKTI Intensive Care Unit", sortOrder: 8 },
-  { code: "TRIAGE", name: "Triage & Receiving", description: "Nephrology Triage and Outpatient Receiving", sortOrder: 9 }
-];
-var CANONICAL_CREDENTIAL_TYPES = {
-  RN: "PRC Registered Nurse License",
-  NA: "TESDA NC II / PRC Attendant Certification"
-};
-var LEGACY_CREDENTIAL_TYPE_ALIASES = {
-  "PRC License": CANONICAL_CREDENTIAL_TYPES.RN,
-  "PRC / NC II License": CANONICAL_CREDENTIAL_TYPES.NA
-};
-function canonicalAreaInfo(rawName) {
-  const s = rawName.trim().toUpperCase();
-  if (s.includes("MAIN") || s.includes("RDU-MAIN") || s.includes("DU MAIN")) {
-    return { code: "RDU-MAIN", name: "RDU Main" };
-  }
-  if (s.includes("ANNEX") || s.includes("RDU-ANNEX") || s.includes("DU ANNEX")) {
-    return { code: "RDU-ANNEX", name: "RDU Annex" };
-  }
-  if (s.includes("OTSU") || s.includes("SHARE")) {
-    return { code: "OTSU-SHARE", name: "OTSU / SHARE" };
-  }
-  if (s.includes("PERITONEAL") || s === "PD" || s.startsWith("PD ") || s.includes("CAPD")) {
-    return { code: "PD", name: "Peritoneal Dialysis" };
-  }
-  if (s.includes("ICU")) {
-    return { code: "SKTI-ICU", name: "SKTI ICU" };
-  }
-  if (s.includes("PAY")) {
-    return { code: "SKTI-PAY", name: "SKTI Payward" };
-  }
-  if (s.includes("WARD") || s.includes("SERVICE")) {
-    return { code: "SKTI-WARD", name: "SKTI Service Ward" };
-  }
-  if (s.includes("OFFICE") || s.includes("ADMIN")) {
-    return { code: "NEPHRO-OFFICE", name: "Nephrology Office" };
-  }
-  if (s.includes("TRIAGE") || s.includes("RECEIVING")) {
-    return { code: "TRIAGE", name: "Triage & Receiving" };
-  }
-  return null;
-}
-var DisjointSet = class {
-  parent = /* @__PURE__ */ new Map();
-  find(i) {
-    if (!this.parent.has(i)) this.parent.set(i, i);
-    const p = this.parent.get(i);
-    if (p === i) return i;
-    const root = this.find(p);
-    this.parent.set(i, root);
-    return root;
-  }
-  union(i, j) {
-    const rootI = this.find(i);
-    const rootJ = this.find(j);
-    if (rootI !== rootJ) {
-      this.parent.set(rootI, rootJ);
-    }
-  }
-};
-function nameTokens(fullName) {
-  return fullName.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t2) => t2.length > 1).sort();
-}
-function nameTokenKey(first, last, middle) {
-  const tokens = nameTokens(`${first} ${middle ?? ""} ${last}`);
-  return tokens.join("|");
-}
-function shortNameKey(first, last) {
-  const firstWord = first.trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
-  const lastWord = last.trim().split(/\s+/).pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
-  if (firstWord.length < 2 || lastWord.length < 2) return "";
-  return `${lastWord}|${firstWord}`;
-}
-function cleanIdKey(idStr) {
-  if (!idStr) return "";
-  const clean = idStr.trim().replace(/[^a-zA-Z0-9]/g, "");
-  if (/^\d+$/.test(clean)) {
-    return clean.replace(/^0+/, "");
-  }
-  return clean.toLowerCase();
-}
-async function deduplicateDatabase() {
-  const db = await getDb();
-  let mergedNursesCount = 0;
-  let deletedDupNursesCount = 0;
-  let deduplicatedTrainingsCount = 0;
-  let deduplicatedCredentialsCount = 0;
-  let cleanedAreasCount = 0;
-  let mergedCredentialTypesCount = 0;
-  if (db) {
-    const allCredTypesPreMerge = await db.select().from(credentialTypes);
-    const credTypeByName = new Map(allCredTypesPreMerge.map((t2) => [t2.name, t2]));
-    for (const [legacyName, canonicalName] of Object.entries(LEGACY_CREDENTIAL_TYPE_ALIASES)) {
-      const legacy = credTypeByName.get(legacyName);
-      const canonical = credTypeByName.get(canonicalName);
-      if (legacy && canonical && legacy.id !== canonical.id) {
-        await db.update(nurseCredentials).set({ credentialTypeId: canonical.id }).where(eq8(nurseCredentials.credentialTypeId, legacy.id));
-        await db.delete(credentialTypes).where(eq8(credentialTypes.id, legacy.id));
-        mergedCredentialTypesCount++;
-      }
-    }
-    for (const ca of CANONICAL_AREAS) {
-      await db.insert(areas).values({
-        code: ca.code,
-        name: ca.name,
-        description: ca.description,
-        sortOrder: ca.sortOrder,
-        active: true
-      }).onConflictDoUpdate({
-        target: areas.code,
-        set: {
-          name: ca.name,
-          description: ca.description,
-          sortOrder: ca.sortOrder,
-          active: true
-        }
-      });
-    }
-    const allDbAreas = await db.select().from(areas);
-    const canonicalByCode = new Map(
-      allDbAreas.filter((a) => CANONICAL_AREAS.some((c) => c.code === a.code || c.name.toLowerCase() === a.name.toLowerCase())).map((a) => [a.code, a])
-    );
-    const canonicalByName = new Map(
-      allDbAreas.filter((a) => CANONICAL_AREAS.some((c) => c.code === a.code || c.name.toLowerCase() === a.name.toLowerCase())).map((a) => [a.name.toLowerCase(), a])
-    );
-    for (const a of allDbAreas) {
-      const canonicalMatch = canonicalAreaInfo(a.name) || canonicalAreaInfo(a.code);
-      if (canonicalMatch) {
-        const canonicalArea = canonicalByCode.get(canonicalMatch.code) ?? canonicalByName.get(canonicalMatch.name.toLowerCase());
-        if (canonicalArea && canonicalArea.id !== a.id) {
-          await db.update(nurses).set({ currentAreaId: canonicalArea.id }).where(eq8(nurses.currentAreaId, a.id));
-          await db.update(areaAssignments).set({ areaId: canonicalArea.id }).where(eq8(areaAssignments.areaId, a.id));
-          try {
-            await db.update(areaTrainingRequirements).set({ areaId: canonicalArea.id }).where(eq8(areaTrainingRequirements.areaId, a.id));
-          } catch {
-          }
-          await db.delete(areas).where(eq8(areas.id, a.id));
-          cleanedAreasCount++;
-        }
-      }
-    }
-    const allNurses = await db.select().from(nurses);
-    const allCreds = await db.select().from(nurseCredentials);
-    const credsByNurseId = /* @__PURE__ */ new Map();
-    for (const c of allCreds) {
-      if (!credsByNurseId.has(c.nurseId)) credsByNurseId.set(c.nurseId, []);
-      credsByNurseId.get(c.nurseId).push(c);
-    }
-    const ds = new DisjointSet();
-    const byEmpId = /* @__PURE__ */ new Map();
-    const byTokenName = /* @__PURE__ */ new Map();
-    const byShortName = /* @__PURE__ */ new Map();
-    const byEmail = /* @__PURE__ */ new Map();
-    const byLicNum = /* @__PURE__ */ new Map();
-    for (const n of allNurses) {
-      const nurseId = n.id;
-      ds.find(nurseId);
-      const empKey = cleanIdKey(n.employeeId);
-      if (empKey.length >= 3) {
-        if (byEmpId.has(empKey)) {
-          ds.union(nurseId, byEmpId.get(empKey));
-        } else {
-          byEmpId.set(empKey, nurseId);
-        }
-      }
-      const tokenKey = nameTokenKey(n.firstName, n.lastName, n.middleName);
-      if (tokenKey.length > 3) {
-        if (byTokenName.has(tokenKey)) {
-          ds.union(nurseId, byTokenName.get(tokenKey));
-        } else {
-          byTokenName.set(tokenKey, nurseId);
-        }
-      }
-      const sKey = shortNameKey(n.firstName, n.lastName);
-      if (sKey.length > 4) {
-        if (byShortName.has(sKey)) {
-          ds.union(nurseId, byShortName.get(sKey));
-        } else {
-          byShortName.set(sKey, nurseId);
-        }
-      }
-      if (n.accountEmail && n.accountEmail.trim().length > 3) {
-        const emKey = n.accountEmail.trim().toLowerCase();
-        if (byEmail.has(emKey)) {
-          ds.union(nurseId, byEmail.get(emKey));
-        } else {
-          byEmail.set(emKey, nurseId);
-        }
-      }
-      const nurseCredList = credsByNurseId.get(nurseId) ?? [];
-      for (const cred of nurseCredList) {
-        const licKey = cleanIdKey(cred.licenseNumber);
-        if (licKey.length >= 4) {
-          if (byLicNum.has(licKey)) {
-            ds.union(nurseId, byLicNum.get(licKey));
-          } else {
-            byLicNum.set(licKey, nurseId);
-          }
-        }
-      }
-    }
-    const clusters = /* @__PURE__ */ new Map();
-    for (const n of allNurses) {
-      const root = ds.find(n.id);
-      if (!clusters.has(root)) clusters.set(root, []);
-      clusters.get(root).push(n);
-    }
-    const clusterEntries = Array.from(clusters.values());
-    for (let i = 0; i < clusterEntries.length; i++) {
-      const group = clusterEntries[i];
-      if (group.length <= 1) continue;
-      const score = (n) => {
-        let s = 0;
-        if (n.linkedUserId) s += 1e3;
-        if (n.accountEmail) s += 200;
-        if (n.position && n.position.toLowerCase() !== "nurse") s += 50;
-        if (n.dateHired) s += 30;
-        if (n.contactNumber) s += 20;
-        if (n.middleName) s += 10;
-        if (cleanIdKey(n.employeeId).length >= 5) s += 15;
-        s -= n.id * 1e-3;
-        return s;
-      };
-      const sorted = [...group].sort((a, b) => score(b) - score(a));
-      const primary = sorted[0];
-      const duplicates = group.filter((n) => n.id !== primary.id);
-      for (const dup of duplicates) {
-        const updates = {};
-        if (!primary.accountEmail && dup.accountEmail) updates.accountEmail = dup.accountEmail;
-        if (!primary.currentAreaId && dup.currentAreaId) updates.currentAreaId = dup.currentAreaId;
-        if (!primary.dateHired && dup.dateHired) updates.dateHired = dup.dateHired;
-        if ((!primary.position || primary.position.toLowerCase() === "nurse") && dup.position) {
-          updates.position = dup.position;
-        }
-        if (!primary.contactNumber && dup.contactNumber) updates.contactNumber = dup.contactNumber;
-        if (!primary.middleName && dup.middleName) updates.middleName = dup.middleName;
-        if (!primary.suffix && dup.suffix) updates.suffix = dup.suffix;
-        const primEmpKey = cleanIdKey(primary.employeeId);
-        const dupEmpKey = cleanIdKey(dup.employeeId);
-        let newEmployeeId = null;
-        if (primEmpKey.length < dupEmpKey.length && dupEmpKey.length >= 4) {
-          newEmployeeId = dup.employeeId;
-        }
-        if (Object.keys(updates).length > 0) {
-          try {
-            await db.update(nurses).set(updates).where(eq8(nurses.id, primary.id));
-          } catch {
-          }
-        }
-        await db.update(areaAssignments).set({ nurseId: primary.id }).where(eq8(areaAssignments.nurseId, dup.id));
-        await db.update(customCalendarEvents).set({ nurseId: primary.id }).where(eq8(customCalendarEvents.nurseId, dup.id));
-        await db.update(notifications).set({ nurseId: primary.id }).where(eq8(notifications.nurseId, dup.id));
-        const dupCreds = await db.select().from(nurseCredentials).where(eq8(nurseCredentials.nurseId, dup.id));
-        const primCreds = await db.select().from(nurseCredentials).where(eq8(nurseCredentials.nurseId, primary.id));
-        for (const dc of dupCreds) {
-          const dcLicKey = cleanIdKey(dc.licenseNumber);
-          const match = primCreds.find(
-            (pc) => pc.credentialTypeId === dc.credentialTypeId || dcLicKey && cleanIdKey(pc.licenseNumber) === dcLicKey
-          );
-          if (match) {
-            const dcExpiry = dc.expiryDate ? new Date(dc.expiryDate).getTime() : 0;
-            const matchExpiry = match.expiryDate ? new Date(match.expiryDate).getTime() : 0;
-            const credUpdates = {};
-            if (dcExpiry > matchExpiry) {
-              credUpdates.expiryDate = dc.expiryDate;
-              credUpdates.renewalStatus = dc.renewalStatus;
-              credUpdates.renewalCycleKey = dc.renewalCycleKey;
-            }
-            if (!match.licenseNumber && dc.licenseNumber) {
-              credUpdates.licenseNumber = dc.licenseNumber;
-            }
-            if (Object.keys(credUpdates).length > 0) {
-              await db.update(nurseCredentials).set(credUpdates).where(eq8(nurseCredentials.id, match.id));
-            }
-            await db.delete(nurseCredentials).where(eq8(nurseCredentials.id, dc.id));
-            deduplicatedCredentialsCount++;
-          } else {
-            await db.update(nurseCredentials).set({ nurseId: primary.id }).where(eq8(nurseCredentials.id, dc.id));
-          }
-        }
-        const dupTrainings = await db.select().from(nurseTrainings).where(eq8(nurseTrainings.nurseId, dup.id));
-        const primTrainings = await db.select().from(nurseTrainings).where(eq8(nurseTrainings.nurseId, primary.id));
-        for (const dt of dupTrainings) {
-          const dtDate = String(dt.completionDate ?? dt.scheduledDate ?? "").slice(0, 10);
-          const exists = primTrainings.some(
-            (pt) => pt.trainingId === dt.trainingId && String(pt.completionDate ?? pt.scheduledDate ?? "").slice(0, 10) === dtDate
-          );
-          if (exists) {
-            await db.delete(nurseTrainings).where(eq8(nurseTrainings.id, dt.id));
-            deduplicatedTrainingsCount++;
-          } else {
-            await db.update(nurseTrainings).set({ nurseId: primary.id }).where(eq8(nurseTrainings.id, dt.id));
-          }
-        }
-        await db.delete(nurses).where(eq8(nurses.id, dup.id));
-        if (newEmployeeId) {
-          try {
-            await db.update(nurses).set({ employeeId: newEmployeeId }).where(eq8(nurses.id, primary.id));
-          } catch {
-          }
-        }
-        deletedDupNursesCount++;
-      }
-      mergedNursesCount++;
-    }
-    const allTrainings = await db.select().from(nurseTrainings);
-    const seenTrainings = /* @__PURE__ */ new Set();
-    for (const t2 of allTrainings) {
-      const dateStr = String(t2.completionDate ?? t2.scheduledDate ?? "").slice(0, 10);
-      const key = `${t2.nurseId}-${t2.trainingId}-${dateStr}`;
-      if (seenTrainings.has(key)) {
-        await db.delete(nurseTrainings).where(eq8(nurseTrainings.id, t2.id));
-        deduplicatedTrainingsCount++;
-      } else {
-        seenTrainings.add(key);
-      }
-    }
-    const allCredsAfterMerge = await db.select().from(nurseCredentials);
-    const credsByNurseAndType = /* @__PURE__ */ new Map();
-    for (const c of allCredsAfterMerge) {
-      const key = `${c.nurseId}-${c.credentialTypeId}`;
-      if (!credsByNurseAndType.has(key)) credsByNurseAndType.set(key, []);
-      credsByNurseAndType.get(key).push(c);
-    }
-    const credGroups = Array.from(credsByNurseAndType.values());
-    for (const group of credGroups) {
-      if (group.length > 1) {
-        group.sort((a, b) => {
-          const aExp = a.expiryDate ? new Date(a.expiryDate).getTime() : 0;
-          const bExp = b.expiryDate ? new Date(b.expiryDate).getTime() : 0;
-          return bExp - aExp || b.id - a.id;
-        });
-        const primaryCred = group[0];
-        const dups = group.slice(1);
-        for (const dc of dups) {
-          if (!primaryCred.licenseNumber && dc.licenseNumber) {
-            await db.update(nurseCredentials).set({ licenseNumber: dc.licenseNumber }).where(eq8(nurseCredentials.id, primaryCred.id));
-          }
-          await db.delete(nurseCredentials).where(eq8(nurseCredentials.id, dc.id));
-          deduplicatedCredentialsCount++;
-        }
-      }
-    }
-  } else {
-    const sqlite = getSqliteDb();
-    const allNurses = sqlite.prepare("SELECT * FROM nurses").all();
-    const ds = new DisjointSet();
-    const byEmpId = /* @__PURE__ */ new Map();
-    const byTokenName = /* @__PURE__ */ new Map();
-    const byShortName = /* @__PURE__ */ new Map();
-    for (const n of allNurses) {
-      const nurseId = n.id;
-      ds.find(nurseId);
-      const empKey = cleanIdKey(n.employeeId);
-      if (empKey.length >= 3) {
-        if (byEmpId.has(empKey)) ds.union(nurseId, byEmpId.get(empKey));
-        else byEmpId.set(empKey, nurseId);
-      }
-      const tokenKey = nameTokenKey(n.firstName, n.lastName, n.middleName);
-      if (tokenKey.length > 3) {
-        if (byTokenName.has(tokenKey)) ds.union(nurseId, byTokenName.get(tokenKey));
-        else byTokenName.set(tokenKey, nurseId);
-      }
-      const sKey = shortNameKey(n.firstName, n.lastName);
-      if (sKey.length > 4) {
-        if (byShortName.has(sKey)) ds.union(nurseId, byShortName.get(sKey));
-        else byShortName.set(sKey, nurseId);
-      }
-    }
-    const clusters = /* @__PURE__ */ new Map();
-    for (const n of allNurses) {
-      const root = ds.find(n.id);
-      if (!clusters.has(root)) clusters.set(root, []);
-      clusters.get(root).push(n);
-    }
-    const clusterEntries = Array.from(clusters.values());
-    for (let i = 0; i < clusterEntries.length; i++) {
-      const group = clusterEntries[i];
-      if (group.length <= 1) continue;
-      const sorted = [...group].sort((a, b) => (b.linkedUserId ? 1 : 0) - (a.linkedUserId ? 1 : 0) || a.id - b.id);
-      const primary = sorted[0];
-      const duplicates = group.filter((n) => n.id !== primary.id);
-      for (const dup of duplicates) {
-        sqlite.prepare("UPDATE areaAssignments SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
-        sqlite.prepare("UPDATE customCalendarEvents SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
-        sqlite.prepare("UPDATE notifications SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
-        sqlite.prepare("UPDATE nurseCredentials SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
-        sqlite.prepare("UPDATE nurseTrainings SET nurseId = ? WHERE nurseId = ?").run(primary.id, dup.id);
-        sqlite.prepare("DELETE FROM nurses WHERE id = ?").run(dup.id);
-        deletedDupNursesCount++;
-      }
-      mergedNursesCount++;
-    }
-  }
-  return {
-    mergedNursesGroups: mergedNursesCount,
-    deletedDuplicateNurses: deletedDupNursesCount,
-    deduplicatedTrainings: deduplicatedTrainingsCount,
-    deduplicatedCredentials: deduplicatedCredentialsCount,
-    cleanedAreasCount,
-    mergedCredentialTypesCount
-  };
-}
-
 // server/routers/settings.ts
+init_deduplicate();
 function normalizeReminderThresholds(value) {
   const parts = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
   if (parts.length === 0) return null;
@@ -9782,6 +10234,7 @@ var seminarsRouter = router({
 });
 
 // server/routers/staffAccount.ts
+init_const();
 import { z as z12 } from "zod";
 import { TRPCError as TRPCError8 } from "@trpc/server";
 
@@ -9799,6 +10252,7 @@ function checkRateLimit(key, opts) {
 }
 
 // server/routers/staffAccount.ts
+init_sdk();
 init_db();
 init_nursetrack();
 init_trainingReminders();
@@ -10792,6 +11246,7 @@ async function extractDocx(buffer) {
 // server/_core/aiExtraction.ts
 import { z as z14 } from "zod";
 init_nursetrack();
+init_env();
 var fieldValueSchema = z14.object({
   value: z14.union([z14.string(), z14.number(), z14.boolean(), z14.null()]).nullable(),
   confidence: z14.number().min(0).max(1)
@@ -12330,359 +12785,9 @@ var appRouter = router({
   aiInsights: aiInsightsRouter
 });
 
-// server/importStaffEmails.ts
-init_adminAccess();
-import { z as z18 } from "zod";
-init_db();
-var bodySchema = z18.object({
-  rows: z18.array(z18.object({ licenseNumber: z18.string(), email: z18.string() })).max(2e3)
-});
-async function importStaffEmailsHandler(req, res) {
-  try {
-    let user;
-    try {
-      user = await sdk.authenticateRequest(req);
-    } catch {
-      return res.status(403).json({ error: "not-authenticated" });
-    }
-    if (!hasFullAccess(user.email)) {
-      return res.status(403).json({ error: "admin-only" });
-    }
-    const parsed = bodySchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "invalid-body", details: parsed.error.flatten() });
-    }
-    const result = await bulkSetAccountEmailsByLicense(parsed.data.rows);
-    res.json({ ok: true, ...result, total: parsed.data.rows.length });
-  } catch (error) {
-    console.error("[ImportStaffEmails] failed:", error);
-    res.status(500).json({ error: String(error) });
-  }
-}
-
-// server/importStaffRoster.ts
-init_adminAccess();
-import { z as z19 } from "zod";
-init_db();
-init_nursetrack();
-var rowSchema = z19.object({
-  firstName: z19.string().min(1).max(128),
-  middleName: z19.string().max(128).optional(),
-  lastName: z19.string().min(1).max(128),
-  staffType: z19.enum(["Registered Nurse", "Nursing Attendant"]),
-  licenseNumber: z19.string().min(1).max(64),
-  expiryDate: z19.string(),
-  email: z19.string().email()
-});
-var bodySchema2 = z19.object({ rows: z19.array(rowSchema).max(500) });
-var CREDENTIAL_TYPE_BY_STAFF_TYPE = {
-  "Registered Nurse": CANONICAL_CREDENTIAL_TYPES.RN,
-  "Nursing Attendant": CANONICAL_CREDENTIAL_TYPES.NA
-};
-async function importStaffRosterHandler(req, res) {
-  try {
-    let user;
-    try {
-      user = await sdk.authenticateRequest(req);
-    } catch {
-      return res.status(403).json({ error: "not-authenticated" });
-    }
-    if (!hasFullAccess(user.email)) {
-      return res.status(403).json({ error: "admin-only" });
-    }
-    const parsed = bodySchema2.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "invalid-body", details: parsed.error.flatten() });
-    }
-    const typeIdByName = /* @__PURE__ */ new Map();
-    for (const t2 of await listCredentialTypes()) typeIdByName.set(t2.name, t2.id);
-    const allExistingNurses = await listNurses();
-    const nurseByName = new Map(
-      allExistingNurses.map((n) => [`${n.lastName.trim()} ${n.firstName.trim()}`.toLowerCase().replace(/[^a-z0-9]/g, ""), n])
-    );
-    let created = 0;
-    let skipped = 0;
-    const errors = [];
-    for (const row of parsed.data.rows) {
-      try {
-        const nameKey = `${row.lastName.trim()} ${row.firstName.trim()}`.toLowerCase().replace(/[^a-z0-9]/g, "");
-        const existing = await getNurseByEmployeeId(row.licenseNumber) ?? nurseByName.get(nameKey);
-        if (existing) {
-          if (!existing.accountEmail && row.email) {
-            await updateNurse(existing.id, { accountEmail: row.email });
-          }
-          skipped++;
-          continue;
-        }
-        const typeName = CREDENTIAL_TYPE_BY_STAFF_TYPE[row.staffType];
-        let credentialTypeId = typeIdByName.get(typeName);
-        if (!credentialTypeId) {
-          credentialTypeId = await createCredentialType(typeName);
-          typeIdByName.set(typeName, credentialTypeId);
-        }
-        const nurseId = await createNurse({
-          employeeId: row.licenseNumber,
-          firstName: row.firstName,
-          middleName: row.middleName ?? null,
-          lastName: row.lastName,
-          staffType: row.staffType,
-          employmentStatus: "Active",
-          accountEmail: row.email
-        });
-        await createCredential({
-          nurseId,
-          credentialTypeId,
-          licenseNumber: row.licenseNumber,
-          expiryDate: row.expiryDate,
-          renewalCycleKey: renewalCycleKey(`import-${nurseId}`)
-        });
-        created++;
-      } catch (rowError) {
-        errors.push({ licenseNumber: row.licenseNumber, error: String(rowError) });
-      }
-    }
-    res.json({ ok: true, created, skipped, errors, total: parsed.data.rows.length });
-  } catch (error) {
-    console.error("[ImportStaffRoster] failed:", error);
-    res.status(500).json({ error: String(error) });
-  }
-}
-
-// server/importStaffAreas.ts
-init_adminAccess();
-import { z as z20 } from "zod";
-init_db();
-var rowSchema2 = z20.object({ fullName: z20.string().min(1).max(256), areaName: z20.string().min(1).max(128) });
-var bodySchema3 = z20.object({ rows: z20.array(rowSchema2).max(500) });
-function normTokenSet(s) {
-  return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
-}
-function rowShortKey(fullName) {
-  const [lastPart, ...restParts] = fullName.split(",");
-  if (restParts.length === 0) return normTokenSet(fullName);
-  const firstToken = restParts.join(",").trim().split(/\s+/)[0] ?? "";
-  return normTokenSet(`${firstToken} ${lastPart}`);
-}
-function areaCode(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-async function importStaffAreasHandler(req, res) {
-  try {
-    let user;
-    try {
-      user = await sdk.authenticateRequest(req);
-    } catch {
-      return res.status(403).json({ error: "not-authenticated" });
-    }
-    if (!hasFullAccess(user.email)) {
-      return res.status(403).json({ error: "admin-only" });
-    }
-    const parsed = bodySchema3.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "invalid-body", details: parsed.error.flatten() });
-    }
-    const nurses2 = await listNurses();
-    const byFullKey = /* @__PURE__ */ new Map();
-    const byShortKey = /* @__PURE__ */ new Map();
-    for (const n of nurses2) {
-      const full = normTokenSet(`${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.suffix ?? ""}`);
-      const short = normTokenSet(`${n.firstName} ${n.lastName}`);
-      if (!byFullKey.has(full)) byFullKey.set(full, []);
-      byFullKey.get(full).push(n);
-      if (!byShortKey.has(short)) byShortKey.set(short, []);
-      byShortKey.get(short).push(n);
-    }
-    const areaIdByName = /* @__PURE__ */ new Map();
-    for (const a of await listAreas()) areaIdByName.set(a.name, a.id);
-    let assigned = 0;
-    let alreadySet = 0;
-    const notFound = [];
-    const ambiguous = [];
-    for (const row of parsed.data.rows) {
-      const canonical = canonicalAreaInfo(row.areaName);
-      const targetAreaName = canonical ? canonical.name : row.areaName;
-      const targetAreaCode = canonical ? canonical.code : areaCode(row.areaName);
-      let areaId = areaIdByName.get(targetAreaName);
-      if (!areaId) {
-        areaId = await createArea({ code: targetAreaCode, name: targetAreaName });
-        areaIdByName.set(targetAreaName, areaId);
-      }
-      const fullKey = normTokenSet(row.fullName);
-      let candidates = byFullKey.get(fullKey) ?? [];
-      if (candidates.length === 0) {
-        candidates = byShortKey.get(rowShortKey(row.fullName)) ?? [];
-      }
-      if (candidates.length === 0) {
-        notFound.push(row.fullName);
-        continue;
-      }
-      const uniqueIds = Array.from(new Set(candidates.map((c) => c.id)));
-      if (uniqueIds.length > 1) {
-        ambiguous.push(row.fullName);
-        continue;
-      }
-      const nurse = candidates[0];
-      if (nurse.currentAreaId) {
-        alreadySet++;
-        continue;
-      }
-      await updateNurse(nurse.id, { currentAreaId: areaId });
-      await createAssignment({
-        nurseId: nurse.id,
-        areaId,
-        startDate: /* @__PURE__ */ new Date(),
-        assignmentType: "Permanent Transfer",
-        isCurrent: true
-      });
-      assigned++;
-    }
-    res.json({ ok: true, assigned, alreadySet, notFound, ambiguous, total: parsed.data.rows.length, areas: Array.from(areaIdByName.keys()) });
-  } catch (error) {
-    console.error("[ImportStaffAreas] failed:", error);
-    res.status(500).json({ error: String(error) });
-  }
-}
-
-// server/importStaffTrainings.ts
-init_adminAccess();
-import { z as z21 } from "zod";
-init_db();
-var rowSchema3 = z21.object({
-  fullName: z21.string().min(1).max(256),
-  title: z21.string().min(1).max(512),
-  dateText: z21.string().max(256).optional(),
-  provider: z21.string().max(128).optional(),
-  quarter: z21.string().max(32)
-});
-var bodySchema4 = z21.object({ rows: z21.array(rowSchema3).max(1e3) });
-function normTokenSet2(s) {
-  return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
-}
-function rowShortKey2(fullName) {
-  const [lastPart, ...restParts] = fullName.split(",");
-  if (restParts.length === 0) return normTokenSet2(fullName);
-  const firstToken = restParts.join(",").trim().split(/\s+/)[0] ?? "";
-  return normTokenSet2(`${firstToken} ${lastPart}`);
-}
-var MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
-function parseBestEffortDate(text2) {
-  if (!text2) return null;
-  if (/^\d{4}-\d{2}-\d{2}T/.test(text2)) {
-    const d = new Date(text2);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  const monthMatch = text2.match(new RegExp(`\\b(${MONTHS})\\b`, "i"));
-  const yearMatch = text2.match(/\b(20\d{2})\b/);
-  if (monthMatch && yearMatch) {
-    const afterMonth = text2.slice((monthMatch.index ?? 0) + monthMatch[0].length);
-    const dayMatch = afterMonth.match(/\d{1,2}/);
-    if (dayMatch) {
-      const d = /* @__PURE__ */ new Date(`${monthMatch[0]} ${dayMatch[0]}, ${yearMatch[1]}`);
-      if (!Number.isNaN(d.getTime())) return d;
-    }
-  }
-  const slashMatch = text2.match(/^(\d{1,2})\/(\d{1,2})(?:[-,]\d{1,2})*\/(\d{2,4})/);
-  if (slashMatch) {
-    const month = Number(slashMatch[1]);
-    const day = Number(slashMatch[2]);
-    let year = Number(slashMatch[3]);
-    if (year < 100) year += 2e3;
-    const d = new Date(year, month - 1, day);
-    if (!Number.isNaN(d.getTime())) return d;
-  }
-  return null;
-}
-async function importStaffTrainingsHandler(req, res) {
-  try {
-    let user;
-    try {
-      user = await sdk.authenticateRequest(req);
-    } catch {
-      return res.status(403).json({ error: "not-authenticated" });
-    }
-    if (!hasFullAccess(user.email)) {
-      return res.status(403).json({ error: "admin-only" });
-    }
-    const parsed = bodySchema4.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "invalid-body", details: parsed.error.flatten() });
-    }
-    const nurses2 = await listNurses();
-    const byFullKey = /* @__PURE__ */ new Map();
-    const byShortKey = /* @__PURE__ */ new Map();
-    for (const n of nurses2) {
-      const full = normTokenSet2(`${n.firstName} ${n.middleName ?? ""} ${n.lastName} ${n.suffix ?? ""}`);
-      const short = normTokenSet2(`${n.firstName} ${n.lastName}`);
-      if (!byFullKey.has(full)) byFullKey.set(full, []);
-      byFullKey.get(full).push(n);
-      if (!byShortKey.has(short)) byShortKey.set(short, []);
-      byShortKey.get(short).push(n);
-    }
-    const catalogIdByName = /* @__PURE__ */ new Map();
-    for (const t2 of await listTrainingCatalog(true)) catalogIdByName.set(t2.name.toLowerCase(), t2.id);
-    const existing = await listNurseTrainings();
-    const existingKeys = new Set(existing.map((e) => `${e.nurseId}:${e.trainingId}:${e.remarks ?? ""}`));
-    let created = 0;
-    let skippedDuplicate = 0;
-    let notFound = 0;
-    let ambiguous = 0;
-    const unmatched = [];
-    for (const row of parsed.data.rows) {
-      const fullKey = normTokenSet2(row.fullName);
-      let candidates = byFullKey.get(fullKey) ?? [];
-      if (candidates.length === 0) candidates = byShortKey.get(rowShortKey2(row.fullName)) ?? [];
-      if (candidates.length === 0) {
-        notFound++;
-        unmatched.push(row.fullName);
-        continue;
-      }
-      const uniqueIds = Array.from(new Set(candidates.map((c) => c.id)));
-      if (uniqueIds.length > 1) {
-        ambiguous++;
-        unmatched.push(row.fullName);
-        continue;
-      }
-      const nurse = candidates[0];
-      const title = row.title.trim();
-      let trainingId = catalogIdByName.get(title.toLowerCase());
-      if (!trainingId) {
-        try {
-          trainingId = await createTrainingType({ name: title, kind: "Seminar" });
-        } catch {
-          const fresh = await listTrainingCatalog(true);
-          const match = fresh.find((t2) => t2.name.toLowerCase() === title.toLowerCase());
-          if (!match) throw new Error(`Could not create or find training catalog entry for "${title}"`);
-          trainingId = match.id;
-        }
-        catalogIdByName.set(title.toLowerCase(), trainingId);
-      }
-      const resolvedTrainingId = trainingId;
-      const remarks = `${row.quarter}: ${row.dateText ?? ""}`.trim();
-      const dedupeKey = `${nurse.id}:${resolvedTrainingId}:${remarks}`;
-      if (existingKeys.has(dedupeKey)) {
-        skippedDuplicate++;
-        continue;
-      }
-      const completionDate = parseBestEffortDate(row.dateText);
-      await createNurseTraining({
-        nurseId: nurse.id,
-        trainingId: resolvedTrainingId,
-        status: "Completed",
-        completionDate,
-        provider: row.provider,
-        remarks
-      });
-      existingKeys.add(dedupeKey);
-      created++;
-    }
-    res.json({ ok: true, created, skippedDuplicate, notFound, ambiguous, unmatched, total: parsed.data.rows.length });
-  } catch (error) {
-    console.error("[ImportStaffTrainings] failed:", error);
-    res.status(500).json({ error: String(error) });
-  }
-}
-
 // server/_core/context.ts
+init_const();
+init_sdk();
 import { parse as parseCookieHeader3 } from "cookie";
 async function createContext(opts) {
   let user = null;
@@ -12748,10 +12853,22 @@ async function getApp() {
       return res.status(500).json({ error: "Daily reminder job execution failed" });
     }
   });
-  app.post("/api/admin/import-staff-emails", importStaffEmailsHandler);
-  app.post("/api/admin/import-staff-roster", importStaffRosterHandler);
-  app.post("/api/admin/import-staff-areas", importStaffAreasHandler);
-  app.post("/api/admin/import-staff-trainings", importStaffTrainingsHandler);
+  app.post("/api/admin/import-staff-emails", async (req, res) => {
+    const { importStaffEmailsHandler: importStaffEmailsHandler2 } = await Promise.resolve().then(() => (init_importStaffEmails(), importStaffEmails_exports));
+    return importStaffEmailsHandler2(req, res);
+  });
+  app.post("/api/admin/import-staff-roster", async (req, res) => {
+    const { importStaffRosterHandler: importStaffRosterHandler2 } = await Promise.resolve().then(() => (init_importStaffRoster(), importStaffRoster_exports));
+    return importStaffRosterHandler2(req, res);
+  });
+  app.post("/api/admin/import-staff-areas", async (req, res) => {
+    const { importStaffAreasHandler: importStaffAreasHandler2 } = await Promise.resolve().then(() => (init_importStaffAreas(), importStaffAreas_exports));
+    return importStaffAreasHandler2(req, res);
+  });
+  app.post("/api/admin/import-staff-trainings", async (req, res) => {
+    const { importStaffTrainingsHandler: importStaffTrainingsHandler2 } = await Promise.resolve().then(() => (init_importStaffTrainings(), importStaffTrainings_exports));
+    return importStaffTrainingsHandler2(req, res);
+  });
   app.post("/api/inquiry", async (req, res) => {
     const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
     const headers = { "Content-Type": "application/json" };

@@ -1,8 +1,10 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 
+const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -10,14 +12,16 @@ let _sqliteDb: Database.Database | null = null;
 
 export function getSqliteDb(): Database.Database {
   if (!_sqliteDb) {
+    const DatabaseConstructor = require("better-sqlite3");
     const dataDir = path.join(__dirname, "data");
     fs.mkdirSync(dataDir, { recursive: true });
     const dbPath = path.join(dataDir, "local.db");
-    _sqliteDb = new Database(dbPath);
-    _sqliteDb.pragma("journal_mode = WAL");
-    initSchemaAndSeed(_sqliteDb);
+    const instance: Database.Database = new DatabaseConstructor(dbPath);
+    instance.pragma("journal_mode = WAL");
+    initSchemaAndSeed(instance);
+    _sqliteDb = instance;
   }
-  return _sqliteDb;
+  return _sqliteDb!;
 }
 
 function initSchemaAndSeed(db: Database.Database) {

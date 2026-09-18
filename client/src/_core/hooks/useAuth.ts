@@ -2,7 +2,12 @@ import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  persistSupervisorCache,
+  restoreSupervisorCache,
+  purgeSupervisorCache,
+} from "@/lib/queryPersister";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -17,6 +22,7 @@ export function useAuth(options?: UseAuthOptions) {
   const { redirectOnUnauthenticated = false, redirectPath } = options ?? {};
   const utils = trpc.useUtils();
   const queryClient = useQueryClient();
+  const restoredUserIdRef = useRef<number | null>(null);
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
     retry: false,
@@ -43,6 +49,7 @@ export function useAuth(options?: UseAuthOptions) {
     } finally {
       utils.auth.me.setData(undefined, null);
       queryClient.clear();
+      purgeSupervisorCache();
       await utils.auth.me.invalidate();
     }
   }, [logoutMutation, queryClient, utils]);
@@ -82,6 +89,37 @@ export function useAuth(options?: UseAuthOptions) {
     meQuery.isLoading,
     state.user,
   ]);
+
+  // Hydrate cache once supervisor auth is confirmed (DL6)
+  useEffect(() => {
+    const user = state.user;
+    if (user && user.role === "admin" && restoredUserIdRef.current !== user.id) {
+      restoredUserIdRef.current = user.id;
+      restoreSupervisorCache(queryClient, user.id);
+    }
+  }, [state.user, queryClient]);
+
+  // Persist supervisor cache on successful query updates
+  useEffect(() => {
+    const user = state.user;
+    if (!user || user.role !== "admin") return;
+
+    let timeoutId: any = null;
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === "updated" && event.action.type === "success") {
+        if (timeoutId) clearTimeout(timeoutId);
+        // Debounce write by 500ms to batch rapid query resolutions
+        timeoutId = setTimeout(() => {
+          persistSupervisorCache(queryClient, user.id);
+        }, 500);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [state.user, queryClient]);
 
   return {
     ...state,

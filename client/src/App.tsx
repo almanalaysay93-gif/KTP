@@ -1,3 +1,4 @@
+import { Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -8,28 +9,38 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { SignInPanel } from "./components/SignInPanel";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAuth } from "./_core/hooks/useAuth";
-import AreaDetail from "./pages/AreaDetail";
-import Areas from "./pages/Areas";
-import CalendarPage from "./pages/Calendar";
-import Dashboard from "./pages/Dashboard";
-import Licenses from "./pages/Licenses";
-import NurseProfile from "./pages/NurseProfile";
-import { NurseEditPage } from "./pages/NurseEditPage";
-import Nurses from "./pages/Nurses";
-import MyProfilePage from "./pages/MyProfilePage";
-import StaffFeed from "./pages/StaffFeed";
-import StaffTrainingCalendar from "./pages/StaffTrainingCalendar";
-import StaffMessages from "./pages/StaffMessages";
-import StaffSignInPage from "./pages/StaffSignIn";
-import Reports from "./pages/Reports";
-import SettingsPage from "./pages/Settings";
-import Trainings from "./pages/Trainings";
-import Seminars from "./pages/Seminars";
-import SeminarDetail from "./pages/SeminarDetail";
-import SmartImportPage from "./pages/SmartImport";
-import AiInsightsPage from "./pages/AiInsights";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
-import TermsOfService from "./pages/TermsOfService";
+import { lazyWithRetry } from "./lib/lazyWithRetry";
+
+// Supervisor on-demand page chunks
+const AreaDetail = lazyWithRetry(() => import("./pages/AreaDetail"), "AreaDetail");
+const Areas = lazyWithRetry(() => import("./pages/Areas"), "Areas");
+const CalendarPage = lazyWithRetry(() => import("./pages/Calendar"), "Calendar");
+const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"), "Dashboard");
+const Licenses = lazyWithRetry(() => import("./pages/Licenses"), "Licenses");
+const NurseProfile = lazyWithRetry(() => import("./pages/NurseProfile"), "NurseProfile");
+const NurseEditPage = lazyWithRetry(
+  () => import("./pages/NurseEditPage").then((m) => ({ default: m.NurseEditPage })),
+  "NurseEditPage",
+);
+const Nurses = lazyWithRetry(() => import("./pages/Nurses"), "Nurses");
+const Reports = lazyWithRetry(() => import("./pages/Reports"), "Reports");
+const SettingsPage = lazyWithRetry(() => import("./pages/Settings"), "Settings");
+const Trainings = lazyWithRetry(() => import("./pages/Trainings"), "Trainings");
+const Seminars = lazyWithRetry(() => import("./pages/Seminars"), "Seminars");
+const SeminarDetail = lazyWithRetry(() => import("./pages/SeminarDetail"), "SeminarDetail");
+const SmartImportPage = lazyWithRetry(() => import("./pages/SmartImport"), "SmartImport");
+const AiInsightsPage = lazyWithRetry(() => import("./pages/AiInsights"), "AiInsights");
+
+// Staff portal on-demand page chunks
+const MyProfilePage = lazyWithRetry(() => import("./pages/MyProfilePage"), "MyProfilePage");
+const StaffFeed = lazyWithRetry(() => import("./pages/StaffFeed"), "StaffFeed");
+const StaffTrainingCalendar = lazyWithRetry(() => import("./pages/StaffTrainingCalendar"), "StaffTrainingCalendar");
+const StaffMessages = lazyWithRetry(() => import("./pages/StaffMessages"), "StaffMessages");
+const StaffSignInPage = lazyWithRetry(() => import("./pages/StaffSignIn"), "StaffSignIn");
+
+// Public on-demand page chunks
+const PrivacyPolicy = lazyWithRetry(() => import("./pages/PrivacyPolicy"), "PrivacyPolicy");
+const TermsOfService = lazyWithRetry(() => import("./pages/TermsOfService"), "TermsOfService");
 
 // Admin/supervisor routes. Signed-in non-admin (staff) accounts are bounced
 // to /me — they only ever get their own profile, never the full dashboard.
@@ -58,7 +69,8 @@ function LoginRoute() {
 
 function Router() {
   return (
-    <Switch>
+    <Suspense fallback={<DashboardLayoutSkeleton />}>
+      <Switch>
       <Route path="/">
         <RootRedirect />
       </Route>
@@ -166,10 +178,41 @@ function Router() {
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
+    </Suspense>
   );
 }
 
 function App() {
+  const { user } = useAuth();
+
+  // Task 4.2: Idle background code preload for top supervisor destinations
+  useEffect(() => {
+    if (!user || user.role !== "admin") return;
+    if (typeof window === "undefined") return;
+
+    // Check data saver / slow network
+    const conn = (navigator as any).connection;
+    if (conn && (conn.saveData || conn.effectiveType === "2g" || conn.effectiveType === "slow-2g")) {
+      return;
+    }
+
+    const preloadTopPages = () => {
+      // Preload top supervisor chunks in background
+      import("./pages/Dashboard").catch(() => {});
+      import("./pages/Nurses").catch(() => {});
+      import("./pages/Trainings").catch(() => {});
+      import("./pages/Licenses").catch(() => {});
+    };
+
+    if ("requestIdleCallback" in window) {
+      const handle = (window as any).requestIdleCallback(preloadTopPages, { timeout: 3000 });
+      return () => (window as any).cancelIdleCallback(handle);
+    } else {
+      const timer = setTimeout(preloadTopPages, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [user]);
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light" switchable={true}>

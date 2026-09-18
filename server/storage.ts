@@ -1,18 +1,18 @@
 // File storage via a real S3 (or S3-compatible) bucket with automatic database fallback.
 // When S3 is unconfigured or unavailable, files are persisted directly into the database.
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { S3Client } from "@aws-sdk/client-s3";
 import { ENV } from "./_core/env";
 import * as db from "./db";
 
 let _client: S3Client | null = null;
 
-function getClient(): S3Client | null {
+async function getClient(): Promise<S3Client | null> {
   if (!ENV.s3BucketName) {
     return null;
   }
   if (!_client) {
-    _client = new S3Client(ENV.s3Region ? { region: ENV.s3Region } : {});
+    const { S3Client: Client } = await import("@aws-sdk/client-s3");
+    _client = new Client(ENV.s3Region ? { region: ENV.s3Region } : {});
   }
   return _client;
 }
@@ -36,20 +36,23 @@ export async function storagePut(
   const key = appendHashSuffix(normalizeKey(relKey));
   const buffer = typeof data === "string" ? Buffer.from(data, "utf-8") : Buffer.from(data);
 
-  const client = getClient();
-  if (client && ENV.s3BucketName) {
-    try {
-      await client.send(
-        new PutObjectCommand({
-          Bucket: ENV.s3BucketName,
-          Key: key,
-          Body: buffer,
-          ContentType: contentType,
-        }),
-      );
-      return { key, url: `/storage/${key}` };
-    } catch (err) {
-      console.warn("[Storage] S3 PutObject failed, falling back to database storage:", err);
+  if (ENV.s3BucketName) {
+    const client = await getClient();
+    if (client) {
+      try {
+        const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+        await client.send(
+          new PutObjectCommand({
+            Bucket: ENV.s3BucketName,
+            Key: key,
+            Body: buffer,
+            ContentType: contentType,
+          }),
+        );
+        return { key, url: `/storage/${key}` };
+      } catch (err) {
+        console.warn("[Storage] S3 PutObject failed, falling back to database storage:", err);
+      }
     }
   }
 
@@ -64,28 +67,38 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
 }
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
-  const client = getClient();
   const key = normalizeKey(relKey);
-  if (!client || !ENV.s3BucketName) {
+  if (!ENV.s3BucketName) {
     return `/storage/${key}`;
   }
+  const client = await getClient();
+  if (!client) {
+    return `/storage/${key}`;
+  }
+  const [{ GetObjectCommand }, { getSignedUrl }] = await Promise.all([
+    import("@aws-sdk/client-s3"),
+    import("@aws-sdk/s3-request-presigner"),
+  ]);
   return getSignedUrl(client, new GetObjectCommand({ Bucket: ENV.s3BucketName, Key: key }), { expiresIn: 300 });
 }
 
 export async function storageDelete(relKey: string | null | undefined): Promise<void> {
   if (!relKey) return;
   const key = normalizeKey(relKey);
-  const client = getClient();
-  if (client && ENV.s3BucketName) {
-    try {
-      await client.send(
-        new DeleteObjectCommand({
-          Bucket: ENV.s3BucketName,
-          Key: key,
-        }),
-      );
-    } catch (err) {
-      console.warn("[Storage] S3 DeleteObject failed:", err);
+  if (ENV.s3BucketName) {
+    const client = await getClient();
+    if (client) {
+      try {
+        const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
+        await client.send(
+          new DeleteObjectCommand({
+            Bucket: ENV.s3BucketName,
+            Key: key,
+          }),
+        );
+      } catch (err) {
+        console.warn("[Storage] S3 DeleteObject failed:", err);
+      }
     }
   }
   await db.deleteStoredFile(key);

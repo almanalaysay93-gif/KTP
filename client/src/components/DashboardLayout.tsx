@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/sidebar";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
+import { useQueryClient } from "@tanstack/react-query";
+import { prefetchRoute } from "@/lib/routePrefetchTable";
 import { cn } from "@/lib/utils";
 import {
   ArrowUp,
@@ -159,17 +161,10 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
   const isMobile = useIsMobile();
   const [searchOpen, setSearchOpen] = useState(false);
   const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
 
   const handlePrefetch = (path: string) => {
-    if (path.startsWith("/nurses")) {
-      utils.nurses.initial.prefetch();
-    } else if (path === "/areas") {
-      utils.areas.list.prefetch();
-    } else if (path === "/trainings") {
-      utils.trainings.initial.prefetch();
-    } else if (path === "/seminars") {
-      utils.seminars.list.prefetch();
-    }
+    prefetchRoute(path, utils, queryClient);
   };
 
   return (
@@ -239,6 +234,8 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
                         aria-label={item.label}
                         onClick={() => setLocation(item.path)}
                         onMouseEnter={() => handlePrefetch(item.path)}
+                        onTouchStart={() => handlePrefetch(item.path)}
+                        onFocus={() => handlePrefetch(item.path)}
                         tooltip={item.label}
                         className={buttonClasses}
                       >
@@ -616,6 +613,12 @@ function MobileBottomNav() {
   const [location, setLocation] = useLocation();
   const searchString = useSearch();
   const currentStaffType = new URLSearchParams(searchString).get("type");
+  const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
+
+  const handlePrefetch = (path: string) => {
+    prefetchRoute(path, utils, queryClient);
+  };
 
   const isItemActive = (itemPath: string) => {
     if (/^https?:\/\//.test(itemPath)) return false;
@@ -639,6 +642,9 @@ function MobileBottomNav() {
             <button
               key={item.path}
               onClick={() => setLocation(item.path)}
+              onMouseEnter={() => handlePrefetch(item.path)}
+              onTouchStart={() => handlePrefetch(item.path)}
+              onFocus={() => handlePrefetch(item.path)}
               className={cn(
                 "flex flex-col items-center justify-center gap-1 h-full transition-colors",
                 active ? "text-primary font-medium" : "text-muted-foreground",
@@ -661,6 +667,12 @@ function MoreMenu() {
   const currentStaffType = new URLSearchParams(searchString).get("type");
   const [open, setOpen] = useState(false);
   const { user, logout } = useAuth();
+  const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
+
+  const handlePrefetch = (path: string) => {
+    prefetchRoute(path, utils, queryClient);
+  };
 
   const isItemActive = (itemPath: string) => {
     if (/^https?:\/\//.test(itemPath)) return false;
@@ -722,6 +734,9 @@ function MoreMenu() {
                     setOpen(false);
                     setLocation(item.path);
                   }}
+                  onMouseEnter={() => handlePrefetch(item.path)}
+                  onTouchStart={() => handlePrefetch(item.path)}
+                  onFocus={() => handlePrefetch(item.path)}
                   className={cn(
                     "flex flex-col items-center gap-1.5 p-2 rounded-lg transition-colors",
                     active ? "bg-primary/15 text-primary font-medium" : "hover:bg-accent",
