@@ -18,16 +18,35 @@ import {
   Info,
   CalendarDays,
   ShieldCheck,
+  Megaphone,
 } from "lucide-react";
-import { formatDate } from "@shared/nursetrack";
+import { formatDate, MEMO_TYPE_LABELS, type MemoType } from "@shared/nursetrack";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 export default function StaffFeed() {
   const utils = trpc.useUtils();
   const { data: messages, isLoading: isMsgLoading } = trpc.staffFeed.myFeed.useQuery();
+  const { data: memos, isLoading: isMemosLoading } = trpc.staffAccount.myMemoFeed.useQuery();
   const { data: activities, isLoading: isActLoading } = trpc.staffFeed.myActivity.useQuery({ limit: 10 });
   const { data: calendarItems, isLoading: isCalLoading } = trpc.staffAccount.myTrainingCalendar.useQuery({
     status: "Scheduled",
   });
+  const [selectedMemo, setSelectedMemo] = useState<any | null>(null);
+
+  const markMemoReadMutation = trpc.staffAccount.markMemoRead.useMutation({
+    onSuccess: () => {
+      utils.staffAccount.myMemoFeed.invalidate();
+      utils.staffAccount.unreadMemoCount.invalidate();
+    },
+  });
+
+  const openMemo = (memo: any) => {
+    setSelectedMemo(memo);
+    if (!memo.readAt) {
+      markMemoReadMutation.mutate({ memoId: memo.id });
+    }
+  };
 
   const markReadMutation = trpc.staffFeed.markRead.useMutation({
     onSuccess: () => {
@@ -91,17 +110,107 @@ export default function StaffFeed() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Feed: Supervisor Messages */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Bell className="h-5 w-5 text-primary" />
-                <h2 className="text-lg font-bold tracking-tight">Supervisor Messages</h2>
+          {/* Main Feed Column */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Department & Hospital Broadcast Memos Table */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Megaphone className="h-5 w-5 text-sky-600" />
+                  <h2 className="text-lg font-bold tracking-tight">Memos & Announcements</h2>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {memos ? `${memos.length} memo${memos.length === 1 ? "" : "s"}` : "Loading..."}
+                </span>
               </div>
-              <span className="text-xs text-muted-foreground">
-                {messages ? `${messages.length} message${messages.length === 1 ? "" : "s"}` : "Loading..."}
-              </span>
+
+              {isMemosLoading ? (
+                <Skeleton className="h-28 w-full rounded-lg" />
+              ) : !memos || memos.length === 0 ? (
+                <Card className="glass-card p-6 text-center text-muted-foreground">
+                  <p className="font-medium text-xs text-foreground">No active memos</p>
+                  <p className="text-xs mt-0.5">No announcements posted for your department or nursing cluster.</p>
+                </Card>
+              ) : (
+                <Card className="glass-card overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/40 text-xs">
+                          <TableHead className="w-[120px]">Type</TableHead>
+                          <TableHead>Title</TableHead>
+                          <TableHead className="w-[110px]">Date</TableHead>
+                          <TableHead className="w-[85px]">Status</TableHead>
+                          <TableHead className="w-[70px] text-right">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {memos.map((memo) => (
+                          <TableRow
+                            key={memo.id}
+                            onClick={() => openMemo(memo)}
+                            className={`cursor-pointer text-xs transition-colors hover:bg-muted/60 ${
+                              !memo.readAt ? "bg-sky-50/50 dark:bg-sky-950/20 font-medium" : ""
+                            }`}
+                          >
+                            <TableCell>
+                              <Badge variant="outline" className="text-[11px] font-normal">
+                                {MEMO_TYPE_LABELS[memo.memoType as MemoType] || memo.memoType}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-medium text-foreground">
+                              <div className="flex items-center gap-1.5">
+                                {!memo.readAt && (
+                                  <span className="h-2 w-2 rounded-full bg-sky-600 shrink-0" title="Unread" />
+                                )}
+                                <span className="line-clamp-1">{memo.title}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground whitespace-nowrap">
+                              {formatDate(memo.sentAt)}
+                            </TableCell>
+                            <TableCell>
+                              {!memo.readAt ? (
+                                <Badge className="bg-sky-600 text-white hover:bg-sky-700 text-[10px] px-1.5 py-0 h-4">
+                                  Unread
+                                </Badge>
+                              ) : (
+                                <span className="text-[11px] text-muted-foreground">Read</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs px-2 text-sky-600 hover:bg-sky-100 dark:hover:bg-sky-900/40"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openMemo(memo);
+                                }}
+                              >
+                                View
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </Card>
+              )}
             </div>
+
+            {/* Direct Supervisor Messages */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bell className="h-5 w-5 text-primary" />
+                  <h2 className="text-lg font-bold tracking-tight">Supervisor Messages</h2>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {messages ? `${messages.length} message${messages.length === 1 ? "" : "s"}` : "Loading..."}
+                </span>
+              </div>
 
             {isMsgLoading ? (
               <div className="space-y-3">
@@ -185,8 +294,9 @@ export default function StaffFeed() {
               </div>
             )}
           </div>
+        </div>
 
-          {/* Right Column: In-App Activity & Quick Links */}
+        {/* Right Column: In-App Activity & Quick Links */}
           <div className="space-y-6">
             <div className="space-y-4">
               <div className="flex items-center gap-2">
@@ -242,6 +352,28 @@ export default function StaffFeed() {
           </div>
         </div>
       </div>
+
+      {/* Memo Detail Sheet */}
+      <Sheet open={Boolean(selectedMemo)} onOpenChange={(open) => !open && setSelectedMemo(null)}>
+        <SheetContent className="overflow-y-auto w-full sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle className="text-base font-semibold">{selectedMemo?.title ?? "Memo"}</SheetTitle>
+          </SheetHeader>
+          {selectedMemo && (
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline">
+                  {MEMO_TYPE_LABELS[selectedMemo.memoType as MemoType] || selectedMemo.memoType}
+                </Badge>
+                <span className="text-xs text-muted-foreground">{formatDate(selectedMemo.sentAt)}</span>
+              </div>
+              <div className="p-4 rounded-lg bg-muted/40 border text-xs sm:text-sm whitespace-pre-wrap leading-relaxed">
+                {selectedMemo.body}
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </StaffLayout>
   );
 }

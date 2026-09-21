@@ -20,7 +20,6 @@ import { toast } from "sonner";
 import { ArrowLeft, FileCheck, LogOut, Plus, Upload, CheckCircle2 } from "lucide-react";
 
 import StaffLayout from "@/components/StaffLayout";
-import { StaffMemoFeed } from "@/components/nursetrack/StaffMemoFeed";
 
 function StaffShell({ children }: { children: React.ReactNode }) {
   return (
@@ -323,7 +322,6 @@ function MyProfileView({ profile }: { profile: any }) {
 
   return (
     <div className="space-y-4">
-      <StaffMemoFeed />
       {profile.authMode === "claim" ? <ClaimEmailCard accountEmail={profile.accountEmail} /> : null}
 
       <Card className="glass-card p-6">

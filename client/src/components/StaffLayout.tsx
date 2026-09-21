@@ -23,12 +23,18 @@ export default function StaffLayout({ children }: StaffLayoutProps) {
     enabled: Boolean(linkData?.linked),
     refetchInterval: 30000,
   });
+  const { data: unreadMemoCount } = trpc.staffAccount.unreadMemoCount.useQuery(undefined, {
+    enabled: Boolean(linkData?.linked),
+    refetchInterval: 30000,
+  });
   const { theme, toggleTheme } = useTheme();
 
   const handleSignOut = async () => {
     await logout();
     utils.staffAccount.myLink.setData(undefined, undefined);
     utils.staffAccount.myProfile.setData(undefined, undefined);
+    utils.staffAccount.myMemoFeed.setData(undefined, undefined);
+    utils.staffAccount.unreadMemoCount.setData(undefined, undefined);
     utils.staffFeed.myFeed.setData(undefined, undefined);
     utils.staffFeed.unreadCount.setData(undefined, undefined);
     navigate("/staff-signin");
@@ -39,7 +45,7 @@ export default function StaffLayout({ children }: StaffLayoutProps) {
     return null;
   }
 
-  const unreadCount = unreadData?.count ?? 0;
+  const unreadCount = (unreadData?.count ?? 0) + (unreadMemoCount ?? 0);
   const isFeed = location === "/me" || location === "/me/";
   const isCalendar = location === "/me/calendar";
   const isProfile = location === "/me/profile";
