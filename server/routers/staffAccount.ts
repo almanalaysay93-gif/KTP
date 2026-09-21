@@ -6,6 +6,7 @@ import { getClaimCookieOptions } from "../_core/cookies";
 import { checkRateLimit } from "../_core/rateLimit";
 import { sdk } from "../_core/sdk";
 import * as db from "../db";
+import * as memosDb from "../memosDb";
 import { dateKey, daysUntilExpiry, deriveLicenseStatus, nurseFullName, sanitizeFilename, storageKey, validateMime } from "../../shared/nursetrack";
 import { storageDelete, storagePut } from "../storage";
 import { listResolvedTrainingSchedules, resolveTrainingSchedule } from "../trainingReminders";
@@ -525,5 +526,24 @@ export const staffAccountRouter = router({
       });
 
       return { ok: true, url };
+    }),
+
+  myMemoFeed: staffProcedure.query(async ({ ctx }) => {
+    return memosDb.listFeedForNurse(ctx.nurseId);
+  }),
+
+  unreadMemoCount: staffProcedure.query(async ({ ctx }) => {
+    return memosDb.countUnreadForNurse(ctx.nurseId);
+  }),
+
+  markMemoRead: staffProcedure
+    .input(z.object({ memoId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await memosDb.markMemoRead({ memoId: input.memoId, nurseId: ctx.nurseId });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not mark memo as read.";
+        throw new TRPCError({ code: "BAD_REQUEST", message });
+      }
     }),
 });

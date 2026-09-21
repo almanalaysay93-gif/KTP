@@ -306,3 +306,12 @@ export function storageKey(bucket: "profile-photos" | "license-documents" | "cer
   const ts = Date.now();
   return `nursetrack/${bucket}/nurse-${nurseId}-${ts}-${safe}`;
 }
+
+/** Audience-scoped broadcast memo types. */
+export const MEMO_TYPES = ["department", "nursing", "hospital"] as const;
+export type MemoType = (typeof MEMO_TYPES)[number];
+export const MEMO_TYPE_LABELS: Record<MemoType, string> = {
+  department: "Department",
+  nursing: "Nursing",
+  hospital: "Hospital",
+};

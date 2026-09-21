@@ -30,6 +30,7 @@ const Seminars = lazyWithRetry(() => import("./pages/Seminars"), "Seminars");
 const SeminarDetail = lazyWithRetry(() => import("./pages/SeminarDetail"), "SeminarDetail");
 const SmartImportPage = lazyWithRetry(() => import("./pages/SmartImport"), "SmartImport");
 const AiInsightsPage = lazyWithRetry(() => import("./pages/AiInsights"), "AiInsights");
+const MemosPage = lazyWithRetry(() => import("./pages/Memos"), "Memos");
 
 // Staff portal on-demand page chunks
 const MyProfilePage = lazyWithRetry(() => import("./pages/MyProfilePage"), "MyProfilePage");
@@ -162,6 +163,11 @@ function Router() {
       <Route path="/ai-insights">
         <Protected>
           <AiInsightsPage />
+        </Protected>
+      </Route>
+      <Route path="/memos">
+        <Protected>
+          <MemosPage />
         </Protected>
       </Route>
       <Route path="/settings">

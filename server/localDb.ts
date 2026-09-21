@@ -319,6 +319,28 @@ function initSchemaAndSeed(db: Database.Database) {
       fileSize INTEGER NOT NULL,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS memos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memoType TEXT NOT NULL,
+      areaId INTEGER,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      authorUserId INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'sent',
+      sentAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      retractedAt TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memoRecipients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memoId INTEGER NOT NULL,
+      nurseId INTEGER NOT NULL,
+      linkedAtSend INTEGER NOT NULL DEFAULT 0,
+      readAt TEXT
+    );
   `);
 
   // Migrate existing SQLite schema if missing newly added columns
@@ -327,6 +349,12 @@ function initSchemaAndSeed(db: Database.Database) {
   if (!colSet.has("contactNumber")) db.exec("ALTER TABLE nurses ADD COLUMN contactNumber TEXT");
   if (!colSet.has("accountEmail")) db.exec("ALTER TABLE nurses ADD COLUMN accountEmail TEXT");
   if (!colSet.has("linkedUserId")) db.exec("ALTER TABLE nurses ADD COLUMN linkedUserId INTEGER");
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_memo_nurse ON memoRecipients(memoId, nurseId);
+    CREATE INDEX IF NOT EXISTS idx_memo_rcp_nurse ON memoRecipients(nurseId);
+    CREATE INDEX IF NOT EXISTS idx_memo_rcp_memo ON memoRecipients(memoId);
+    CREATE INDEX IF NOT EXISTS idx_memos_sent ON memos(sentAt);
+  `);
 
   const ntCols = db.prepare("PRAGMA table_info(nurseTrainings)").all() as { name: string }[];
   const ntColSet = new Set(ntCols.map((c) => c.name));

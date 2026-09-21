@@ -143,7 +143,7 @@ function storageKey(bucket, nurseId, name) {
   const ts = Date.now();
   return `nursetrack/${bucket}/nurse-${nurseId}-${ts}-${safe}`;
 }
-var ASSIGNMENT_TYPES, EMPLOYMENT_STATUSES, INACTIVE_EMPLOYMENT_STATUSES, STAFF_TYPES, TRAINING_KINDS, PARTICIPATION_ROLES, TARGET_STAFF_TYPES, RENEWAL_STATUSES, VERIFICATION_STATUSES, TRAINING_STATUSES, ALLOWED_PHOTO_MIMES, ALLOWED_DOCUMENT_MIMES, ALLOWED_SMART_IMPORT_MIMES, MAX_FILE_BYTES;
+var ASSIGNMENT_TYPES, EMPLOYMENT_STATUSES, INACTIVE_EMPLOYMENT_STATUSES, STAFF_TYPES, TRAINING_KINDS, PARTICIPATION_ROLES, TARGET_STAFF_TYPES, RENEWAL_STATUSES, VERIFICATION_STATUSES, TRAINING_STATUSES, ALLOWED_PHOTO_MIMES, ALLOWED_DOCUMENT_MIMES, ALLOWED_SMART_IMPORT_MIMES, MAX_FILE_BYTES, MEMO_TYPES;
 var init_nursetrack = __esm({
   "shared/nursetrack.ts"() {
     "use strict";
@@ -197,6 +197,7 @@ var init_nursetrack = __esm({
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ];
     MAX_FILE_BYTES = 10 * 1024 * 1024;
+    MEMO_TYPES = ["department", "nursing", "hospital"];
   }
 });
 
@@ -215,7 +216,7 @@ import {
   uniqueIndex,
   varchar
 } from "drizzle-orm/pg-core";
-var nursetrack, pgTable, touchedOnUpdate, date, users, areas, nurses, areaAssignments, credentialTypes, nurseCredentials, licenseReminders, trainingCatalog, trainingEvents, areaTrainingRequirements, nurseTrainings, customCalendarEvents, notifications, activityLog, appSettings, emailLogs, staffMessages, staffMessageRecipients, staffMessageAcknowledgments, trainingOutbox, trainingActivity, storedFiles;
+var nursetrack, pgTable, touchedOnUpdate, date, users, areas, nurses, areaAssignments, credentialTypes, nurseCredentials, licenseReminders, trainingCatalog, trainingEvents, areaTrainingRequirements, nurseTrainings, customCalendarEvents, notifications, activityLog, appSettings, emailLogs, staffMessages, staffMessageRecipients, staffMessageAcknowledgments, trainingOutbox, trainingActivity, storedFiles, memos, memoRecipients;
 var init_schema = __esm({
   "drizzle/schema.ts"() {
     "use strict";
@@ -628,6 +629,38 @@ var init_schema = __esm({
       },
       (t2) => [uniqueIndex("uniq_stored_file_key").on(t2.key)]
     );
+    memos = pgTable(
+      "memos",
+      {
+        id: serial("id").primaryKey(),
+        memoType: varchar("memoType", { length: 32, enum: ["department", "nursing", "hospital"] }).notNull(),
+        areaId: integer("areaId"),
+        title: varchar("title", { length: 256 }).notNull(),
+        body: text("body").notNull(),
+        authorUserId: integer("authorUserId").notNull(),
+        status: varchar("status", { length: 16, enum: ["sent", "retracted"] }).default("sent").notNull(),
+        sentAt: timestamp("sentAt").defaultNow().notNull(),
+        retractedAt: timestamp("retractedAt"),
+        createdAt: timestamp("createdAt").defaultNow().notNull(),
+        updatedAt: timestamp("updatedAt").defaultNow().$onUpdate(touchedOnUpdate).notNull()
+      },
+      (t2) => [index("idx_memos_sent").on(t2.sentAt), index("idx_memos_type").on(t2.memoType)]
+    );
+    memoRecipients = pgTable(
+      "memoRecipients",
+      {
+        id: serial("id").primaryKey(),
+        memoId: integer("memoId").notNull(),
+        nurseId: integer("nurseId").notNull(),
+        linkedAtSend: boolean("linkedAtSend").default(false).notNull(),
+        readAt: timestamp("readAt")
+      },
+      (t2) => [
+        uniqueIndex("uniq_memo_nurse").on(t2.memoId, t2.nurseId),
+        index("idx_memo_rcp_nurse").on(t2.nurseId),
+        index("idx_memo_rcp_memo").on(t2.memoId)
+      ]
+    );
   }
 });
 
@@ -961,12 +994,40 @@ function initSchemaAndSeed(db) {
       fileSize INTEGER NOT NULL,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS memos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memoType TEXT NOT NULL,
+      areaId INTEGER,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      authorUserId INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'sent',
+      sentAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      retractedAt TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memoRecipients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memoId INTEGER NOT NULL,
+      nurseId INTEGER NOT NULL,
+      linkedAtSend INTEGER NOT NULL DEFAULT 0,
+      readAt TEXT
+    );
   `);
   const cols = db.prepare("PRAGMA table_info(nurses)").all();
   const colSet = new Set(cols.map((c) => c.name));
   if (!colSet.has("contactNumber")) db.exec("ALTER TABLE nurses ADD COLUMN contactNumber TEXT");
   if (!colSet.has("accountEmail")) db.exec("ALTER TABLE nurses ADD COLUMN accountEmail TEXT");
   if (!colSet.has("linkedUserId")) db.exec("ALTER TABLE nurses ADD COLUMN linkedUserId INTEGER");
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_memo_nurse ON memoRecipients(memoId, nurseId);
+    CREATE INDEX IF NOT EXISTS idx_memo_rcp_nurse ON memoRecipients(nurseId);
+    CREATE INDEX IF NOT EXISTS idx_memo_rcp_memo ON memoRecipients(memoId);
+    CREATE INDEX IF NOT EXISTS idx_memos_sent ON memos(sentAt);
+  `);
   const ntCols = db.prepare("PRAGMA table_info(nurseTrainings)").all();
   const ntColSet = new Set(ntCols.map((c) => c.name));
   if (!ntColSet.has("scheduleVersion")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN scheduleVersion INTEGER DEFAULT 1 NOT NULL");
@@ -5281,7 +5342,7 @@ var importStaffEmails_exports = {};
 __export(importStaffEmails_exports, {
   importStaffEmailsHandler: () => importStaffEmailsHandler
 });
-import { z as z18 } from "zod";
+import { z as z19 } from "zod";
 async function importStaffEmailsHandler(req, res) {
   try {
     let user;
@@ -5311,8 +5372,8 @@ var init_importStaffEmails = __esm({
     init_adminAccess();
     init_sdk();
     init_db();
-    bodySchema = z18.object({
-      rows: z18.array(z18.object({ licenseNumber: z18.string(), email: z18.string() })).max(2e3)
+    bodySchema = z19.object({
+      rows: z19.array(z19.object({ licenseNumber: z19.string(), email: z19.string() })).max(2e3)
     });
   }
 });
@@ -5322,7 +5383,7 @@ var importStaffRoster_exports = {};
 __export(importStaffRoster_exports, {
   importStaffRosterHandler: () => importStaffRosterHandler
 });
-import { z as z19 } from "zod";
+import { z as z20 } from "zod";
 async function importStaffRosterHandler(req, res) {
   try {
     let user;
@@ -5400,16 +5461,16 @@ var init_importStaffRoster = __esm({
     init_db();
     init_nursetrack();
     init_deduplicate();
-    rowSchema = z19.object({
-      firstName: z19.string().min(1).max(128),
-      middleName: z19.string().max(128).optional(),
-      lastName: z19.string().min(1).max(128),
-      staffType: z19.enum(["Registered Nurse", "Nursing Attendant"]),
-      licenseNumber: z19.string().min(1).max(64),
-      expiryDate: z19.string(),
-      email: z19.string().email()
+    rowSchema = z20.object({
+      firstName: z20.string().min(1).max(128),
+      middleName: z20.string().max(128).optional(),
+      lastName: z20.string().min(1).max(128),
+      staffType: z20.enum(["Registered Nurse", "Nursing Attendant"]),
+      licenseNumber: z20.string().min(1).max(64),
+      expiryDate: z20.string(),
+      email: z20.string().email()
     });
-    bodySchema2 = z19.object({ rows: z19.array(rowSchema).max(500) });
+    bodySchema2 = z20.object({ rows: z20.array(rowSchema).max(500) });
     CREDENTIAL_TYPE_BY_STAFF_TYPE = {
       "Registered Nurse": CANONICAL_CREDENTIAL_TYPES.RN,
       "Nursing Attendant": CANONICAL_CREDENTIAL_TYPES.NA
@@ -5422,7 +5483,7 @@ var importStaffAreas_exports = {};
 __export(importStaffAreas_exports, {
   importStaffAreasHandler: () => importStaffAreasHandler
 });
-import { z as z20 } from "zod";
+import { z as z21 } from "zod";
 function normTokenSet(s) {
   return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
 }
@@ -5519,8 +5580,8 @@ var init_importStaffAreas = __esm({
     init_sdk();
     init_db();
     init_deduplicate();
-    rowSchema2 = z20.object({ fullName: z20.string().min(1).max(256), areaName: z20.string().min(1).max(128) });
-    bodySchema3 = z20.object({ rows: z20.array(rowSchema2).max(500) });
+    rowSchema2 = z21.object({ fullName: z21.string().min(1).max(256), areaName: z21.string().min(1).max(128) });
+    bodySchema3 = z21.object({ rows: z21.array(rowSchema2).max(500) });
   }
 });
 
@@ -5529,7 +5590,7 @@ var importStaffTrainings_exports = {};
 __export(importStaffTrainings_exports, {
   importStaffTrainingsHandler: () => importStaffTrainingsHandler
 });
-import { z as z21 } from "zod";
+import { z as z22 } from "zod";
 function normTokenSet2(s) {
   return s.split(",").join(" ").split(/\s+/).map((t2) => t2.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean).sort().join("|");
 }
@@ -5662,14 +5723,14 @@ var init_importStaffTrainings = __esm({
     init_adminAccess();
     init_sdk();
     init_db();
-    rowSchema3 = z21.object({
-      fullName: z21.string().min(1).max(256),
-      title: z21.string().min(1).max(512),
-      dateText: z21.string().max(256).optional(),
-      provider: z21.string().max(128).optional(),
-      quarter: z21.string().max(32)
+    rowSchema3 = z22.object({
+      fullName: z22.string().min(1).max(256),
+      title: z22.string().min(1).max(512),
+      dateText: z22.string().max(256).optional(),
+      provider: z22.string().max(128).optional(),
+      quarter: z22.string().max(32)
     });
-    bodySchema4 = z21.object({ rows: z21.array(rowSchema3).max(1e3) });
+    bodySchema4 = z22.object({ rows: z22.array(rowSchema3).max(1e3) });
     MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
   }
 });
@@ -7913,13 +7974,13 @@ function getLocalDashboardInitial() {
 }
 function getLocalSeminarsList(input) {
   const sqlite = getSqliteDb();
-  let sql13 = `
+  let sql14 = `
     SELECT e.*, c.id as c_id, c.name as c_name, c.category as c_category, c.kind as c_kind
     FROM trainingEvents e
     INNER JOIN trainingCatalog c ON c.id = e.trainingId
     ORDER BY date(e.startDate) DESC, c.name ASC
   `;
-  const rows = sqlite.prepare(sql13).all();
+  const rows = sqlite.prepare(sql14).all();
   const records = sqlite.prepare("SELECT eventId, status FROM nurseTrainings WHERE eventId IS NOT NULL").all();
   const counts = /* @__PURE__ */ new Map();
   for (const record of records) {
@@ -10254,6 +10315,326 @@ function checkRateLimit(key, opts) {
 // server/routers/staffAccount.ts
 init_sdk();
 init_db();
+
+// server/memosDb.ts
+init_schema();
+init_nursetrack();
+init_db();
+init_localDb();
+import { and as and9, desc as desc6, eq as eq12, inArray as inArray4, isNull as isNull10, not as not5, sql as sql11 } from "drizzle-orm";
+var TITLE_MAX = 256;
+var BODY_MAX = 8e3;
+function sanitizePlainText(value, max) {
+  return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").trim().slice(0, max);
+}
+function assertMemoType(memoType) {
+  if (!MEMO_TYPES.includes(memoType)) {
+    throw new Error("Memo type must be department, nursing, or hospital.");
+  }
+  return memoType;
+}
+function validateAudienceInput(memoType, areaId) {
+  if (memoType === "department") {
+    if (!areaId || areaId < 1) throw new Error("Department memo requires an area.");
+    return;
+  }
+  if (areaId != null) throw new Error("Nursing and hospital memos cannot target an area.");
+}
+async function store() {
+  const db = await getDb();
+  if (db) return { kind: "pg", db };
+  return { kind: "sqlite", sqlite: getSqliteDb() };
+}
+function sqliteAudienceWhere(memoType, areaId) {
+  let extra = "";
+  const params = [];
+  if (memoType === "department") {
+    extra = " AND currentAreaId = ?";
+    params.push(areaId);
+  }
+  return {
+    sql: `archivedAt IS NULL AND employmentStatus NOT IN (${INACTIVE_STATUS_SQL_LIST})${extra}`,
+    params
+  };
+}
+async function previewAudience(input) {
+  const memoType = assertMemoType(input.memoType);
+  validateAudienceInput(memoType, input.areaId);
+  const audience = await listAudience(memoType, input.areaId);
+  let areaName = null;
+  if (memoType === "department" && input.areaId) {
+    areaName = await getAreaName(input.areaId);
+  }
+  return {
+    count: audience.length,
+    areaName,
+    sample: audience.slice(0, 8).map((n) => ({ id: n.id, name: nurseFullName(n) }))
+  };
+}
+async function getAreaName(areaId) {
+  const s = await store();
+  if (s.kind === "pg") {
+    const rows = await s.db.select({ name: areas.name }).from(areas).where(eq12(areas.id, areaId)).limit(1);
+    return rows[0]?.name ?? null;
+  }
+  const row = s.sqlite.prepare("SELECT name FROM areas WHERE id = ?").get(areaId);
+  return row?.name ?? null;
+}
+async function listAudience(memoType, areaId) {
+  const s = await store();
+  if (s.kind === "pg") {
+    const conds = [isNull10(nurses.archivedAt), not5(inArray4(nurses.employmentStatus, INACTIVE_EMPLOYMENT_STATUSES))];
+    if (memoType === "department") conds.push(eq12(nurses.currentAreaId, areaId));
+    const rows = await s.db.select({
+      id: nurses.id,
+      firstName: nurses.firstName,
+      lastName: nurses.lastName,
+      currentAreaId: nurses.currentAreaId,
+      linkedUserId: nurses.linkedUserId,
+      staffType: nurses.staffType
+    }).from(nurses).where(and9(...conds));
+    return rows;
+  }
+  const where = sqliteAudienceWhere(memoType, areaId);
+  return s.sqlite.prepare(
+    `SELECT id, firstName, lastName, currentAreaId, linkedUserId, staffType FROM nurses WHERE ${where.sql} ORDER BY lastName, firstName`
+  ).all(...where.params);
+}
+async function createMemo(input) {
+  const memoType = assertMemoType(input.memoType);
+  validateAudienceInput(memoType, input.areaId);
+  const title = sanitizePlainText(input.title, TITLE_MAX);
+  const body = sanitizePlainText(input.body, BODY_MAX);
+  if (!title) throw new Error("Title is required.");
+  if (!body) throw new Error("Body is required.");
+  if (memoType === "department") {
+    const name = await getAreaName(input.areaId);
+    if (!name) throw new Error("Area not found.");
+  }
+  const audience = await listAudience(memoType, input.areaId);
+  const s = await store();
+  let memoId;
+  if (s.kind === "pg") {
+    const inserted = await s.db.insert(memos).values({
+      memoType,
+      areaId: memoType === "department" ? input.areaId : null,
+      title,
+      body,
+      authorUserId: input.authorUserId,
+      status: "sent"
+    }).returning({ id: memos.id });
+    memoId = inserted[0].id;
+    if (audience.length > 0) {
+      await s.db.insert(memoRecipients).values(
+        audience.map((n) => ({
+          memoId,
+          nurseId: n.id,
+          linkedAtSend: Boolean(n.linkedUserId)
+        }))
+      );
+    }
+  } else {
+    const result = s.sqlite.prepare(
+      `INSERT INTO memos (memoType, areaId, title, body, authorUserId, status) VALUES (?, ?, ?, ?, ?, 'sent')`
+    ).run(memoType, memoType === "department" ? input.areaId : null, title, body, input.authorUserId);
+    memoId = Number(result.lastInsertRowid);
+    const insertR = s.sqlite.prepare(
+      `INSERT INTO memoRecipients (memoId, nurseId, linkedAtSend) VALUES (?, ?, ?)`
+    );
+    const tx = s.sqlite.transaction((rows) => {
+      for (const n of rows) insertR.run(memoId, n.id, n.linkedUserId ? 1 : 0);
+    });
+    tx(audience);
+  }
+  await logActivity({
+    supervisorId: input.authorUserId,
+    actionType: "memo.sent",
+    entityType: "memo",
+    entityId: memoId,
+    summary: `Sent ${memoType} memo: "${title}"`
+  });
+  return { id: memoId };
+}
+async function listMemos(opts = {}) {
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+  const s = await store();
+  if (s.kind === "pg") {
+    const rows2 = opts.memoType ? await s.db.select().from(memos).where(eq12(memos.memoType, opts.memoType)).orderBy(desc6(memos.sentAt)).limit(limit) : await s.db.select().from(memos).orderBy(desc6(memos.sentAt)).limit(limit);
+    const ids2 = rows2.map((r) => r.id);
+    const counts2 = await loadReceiptCounts(ids2);
+    return rows2.map((r) => ({ ...r, ...counts2.get(r.id) }));
+  }
+  const typeFilter = opts.memoType ? "WHERE memoType = ?" : "";
+  const params = opts.memoType ? [opts.memoType, limit] : [limit];
+  const rows = s.sqlite.prepare(`SELECT * FROM memos ${typeFilter} ORDER BY datetime(sentAt) DESC LIMIT ?`).all(...params);
+  const ids = rows.map((r) => r.id);
+  const counts = await loadReceiptCounts(ids);
+  return rows.map((r) => ({ ...r, ...counts.get(r.id) }));
+}
+async function loadReceiptCounts(memoIds) {
+  const empty = { total: 0, read: 0, unread: 0, notLinked: 0 };
+  const map = /* @__PURE__ */ new Map();
+  for (const id of memoIds) map.set(id, { ...empty });
+  if (memoIds.length === 0) return map;
+  const s = await store();
+  if (s.kind === "pg") {
+    const rows2 = await s.db.select({
+      memoId: memoRecipients.memoId,
+      total: sql11`count(*)`,
+      read: sql11`sum(case when ${memoRecipients.readAt} is not null then 1 else 0 end)`,
+      notLinked: sql11`sum(case when ${memoRecipients.linkedAtSend} = false then 1 else 0 end)`
+    }).from(memoRecipients).where(inArray4(memoRecipients.memoId, memoIds)).groupBy(memoRecipients.memoId);
+    for (const r of rows2) {
+      const total = Number(r.total);
+      const read = Number(r.read);
+      const notLinked = Number(r.notLinked);
+      map.set(r.memoId, { total, read, unread: total - read, notLinked });
+    }
+    return map;
+  }
+  const placeholders = memoIds.map(() => "?").join(",");
+  const rows = s.sqlite.prepare(
+    `SELECT memoId,
+              COUNT(*) as total,
+              SUM(CASE WHEN readAt IS NOT NULL THEN 1 ELSE 0 END) as readCount,
+              SUM(CASE WHEN linkedAtSend = 0 THEN 1 ELSE 0 END) as notLinked
+       FROM memoRecipients WHERE memoId IN (${placeholders}) GROUP BY memoId`
+  ).all(...memoIds);
+  for (const r of rows) {
+    map.set(r.memoId, {
+      total: Number(r.total),
+      read: Number(r.readCount),
+      unread: Number(r.total) - Number(r.readCount),
+      notLinked: Number(r.notLinked)
+    });
+  }
+  return map;
+}
+async function getMemo(id) {
+  const s = await store();
+  let memo;
+  if (s.kind === "pg") {
+    const rows = await s.db.select().from(memos).where(eq12(memos.id, id)).limit(1);
+    memo = rows[0];
+  } else {
+    memo = s.sqlite.prepare("SELECT * FROM memos WHERE id = ?").get(id);
+  }
+  if (!memo) return null;
+  const counts = await loadReceiptCounts([id]);
+  return { ...memo, ...counts.get(id) };
+}
+async function listMemoReceipts(memoId) {
+  const s = await store();
+  if (s.kind === "pg") {
+    const rows2 = await s.db.select({
+      nurseId: memoRecipients.nurseId,
+      linkedAtSend: memoRecipients.linkedAtSend,
+      readAt: memoRecipients.readAt,
+      firstName: nurses.firstName,
+      lastName: nurses.lastName,
+      middleName: nurses.middleName,
+      suffix: nurses.suffix,
+      areaName: areas.name
+    }).from(memoRecipients).innerJoin(nurses, eq12(nurses.id, memoRecipients.nurseId)).leftJoin(areas, eq12(areas.id, nurses.currentAreaId)).where(eq12(memoRecipients.memoId, memoId)).orderBy(nurses.lastName, nurses.firstName);
+    return rows2.map((r) => ({
+      nurseId: r.nurseId,
+      name: nurseFullName(r),
+      areaName: r.areaName ?? null,
+      linkedAtSend: Boolean(r.linkedAtSend),
+      readAt: r.readAt
+    }));
+  }
+  const rows = s.sqlite.prepare(
+    `SELECT r.nurseId, r.linkedAtSend, r.readAt, n.firstName, n.lastName, n.middleName, n.suffix, a.name as areaName
+       FROM memoRecipients r
+       INNER JOIN nurses n ON n.id = r.nurseId
+       LEFT JOIN areas a ON a.id = n.currentAreaId
+       WHERE r.memoId = ?
+       ORDER BY n.lastName, n.firstName`
+  ).all(memoId);
+  return rows.map((r) => ({
+    nurseId: r.nurseId,
+    name: nurseFullName(r),
+    areaName: r.areaName ?? null,
+    linkedAtSend: Boolean(r.linkedAtSend),
+    readAt: r.readAt ?? null
+  }));
+}
+async function retractMemo(input) {
+  const memo = await getMemo(input.memoId);
+  if (!memo) throw new Error("Memo not found.");
+  if (memo.status === "retracted") return { ok: true };
+  const s = await store();
+  if (s.kind === "pg") {
+    await s.db.update(memos).set({ status: "retracted", retractedAt: /* @__PURE__ */ new Date() }).where(eq12(memos.id, input.memoId));
+  } else {
+    s.sqlite.prepare("UPDATE memos SET status = 'retracted', retractedAt = CURRENT_TIMESTAMP, updatedAt = CURRENT_TIMESTAMP WHERE id = ?").run(input.memoId);
+  }
+  await logActivity({
+    supervisorId: input.authorUserId,
+    actionType: "memo.retracted",
+    entityType: "memo",
+    entityId: input.memoId,
+    summary: `Retracted memo: "${memo.title}"`
+  });
+  return { ok: true };
+}
+async function listFeedForNurse(nurseId) {
+  const s = await store();
+  if (s.kind === "pg") {
+    const rows = await s.db.select({
+      id: memos.id,
+      memoType: memos.memoType,
+      title: memos.title,
+      body: memos.body,
+      sentAt: memos.sentAt,
+      areaId: memos.areaId,
+      readAt: memoRecipients.readAt
+    }).from(memoRecipients).innerJoin(memos, eq12(memos.id, memoRecipients.memoId)).where(and9(eq12(memoRecipients.nurseId, nurseId), eq12(memos.status, "sent"))).orderBy(desc6(memos.sentAt));
+    return rows;
+  }
+  return s.sqlite.prepare(
+    `SELECT m.id, m.memoType, m.title, m.body, m.sentAt, m.areaId, r.readAt
+       FROM memoRecipients r
+       INNER JOIN memos m ON m.id = r.memoId
+       WHERE r.nurseId = ? AND m.status = 'sent'
+       ORDER BY datetime(m.sentAt) DESC`
+  ).all(nurseId);
+}
+async function countUnreadForNurse(nurseId) {
+  const s = await store();
+  if (s.kind === "pg") {
+    const rows = await s.db.select({ count: sql11`count(*)` }).from(memoRecipients).innerJoin(memos, eq12(memos.id, memoRecipients.memoId)).where(and9(eq12(memoRecipients.nurseId, nurseId), eq12(memos.status, "sent"), isNull10(memoRecipients.readAt)));
+    return Number(rows[0]?.count ?? 0);
+  }
+  const row = s.sqlite.prepare(
+    `SELECT COUNT(*) as count
+       FROM memoRecipients r
+       INNER JOIN memos m ON m.id = r.memoId
+       WHERE r.nurseId = ? AND m.status = 'sent' AND r.readAt IS NULL`
+  ).get(nurseId);
+  return Number(row.count);
+}
+async function markMemoRead(input) {
+  const s = await store();
+  if (s.kind === "pg") {
+    const rows = await s.db.select().from(memoRecipients).where(and9(eq12(memoRecipients.memoId, input.memoId), eq12(memoRecipients.nurseId, input.nurseId))).limit(1);
+    const existing2 = rows[0];
+    if (!existing2) throw new Error("You are not a recipient of this memo.");
+    if (existing2.readAt) return { alreadyRead: true, readAt: existing2.readAt };
+    const readAt = /* @__PURE__ */ new Date();
+    await s.db.update(memoRecipients).set({ readAt }).where(and9(eq12(memoRecipients.memoId, input.memoId), eq12(memoRecipients.nurseId, input.nurseId), isNull10(memoRecipients.readAt)));
+    return { alreadyRead: false, readAt };
+  }
+  const existing = s.sqlite.prepare("SELECT readAt FROM memoRecipients WHERE memoId = ? AND nurseId = ?").get(input.memoId, input.nurseId);
+  if (!existing) throw new Error("You are not a recipient of this memo.");
+  if (existing.readAt) return { alreadyRead: true, readAt: existing.readAt };
+  s.sqlite.prepare("UPDATE memoRecipients SET readAt = CURRENT_TIMESTAMP WHERE memoId = ? AND nurseId = ? AND readAt IS NULL").run(input.memoId, input.nurseId);
+  const updated = s.sqlite.prepare("SELECT readAt FROM memoRecipients WHERE memoId = ? AND nurseId = ?").get(input.memoId, input.nurseId);
+  return { alreadyRead: false, readAt: updated.readAt };
+}
+
+// server/routers/staffAccount.ts
 init_nursetrack();
 init_trainingReminders();
 var GENERIC_CLAIM_ERROR = "No matching staff record, or this profile already has a sign-in email.";
@@ -10678,6 +11059,20 @@ var staffAccountRouter = router({
       summary: `Training completion evidence submitted for ${resolved.trainingName}`
     });
     return { ok: true, url };
+  }),
+  myMemoFeed: staffProcedure.query(async ({ ctx }) => {
+    return listFeedForNurse(ctx.nurseId);
+  }),
+  unreadMemoCount: staffProcedure.query(async ({ ctx }) => {
+    return countUnreadForNurse(ctx.nurseId);
+  }),
+  markMemoRead: staffProcedure.input(z12.object({ memoId: z12.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    try {
+      return await markMemoRead({ memoId: input.memoId, nurseId: ctx.nurseId });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not mark memo as read.";
+      throw new TRPCError8({ code: "BAD_REQUEST", message });
+    }
   })
 });
 
@@ -10689,7 +11084,7 @@ import { TRPCError as TRPCError9 } from "@trpc/server";
 init_db();
 init_localDb();
 init_schema();
-import { eq as eq12, and as and9, desc as desc6, isNull as isNull10, sql as sql11, inArray as inArray4 } from "drizzle-orm";
+import { eq as eq13, and as and10, desc as desc7, isNull as isNull11, sql as sql12, inArray as inArray5 } from "drizzle-orm";
 async function createStaffMessage(input) {
   const title = input.title.trim();
   const body = input.body.trim();
@@ -10737,7 +11132,7 @@ async function listSentStaffMessages(limit = 50) {
       createdAt: staffMessages.createdAt,
       updatedAt: staffMessages.updatedAt,
       senderName: users.name
-    }).from(staffMessages).leftJoin(users, eq12(users.id, staffMessages.senderUserId)).orderBy(desc6(staffMessages.createdAt)).limit(limit);
+    }).from(staffMessages).leftJoin(users, eq13(users.id, staffMessages.senderUserId)).orderBy(desc7(staffMessages.createdAt)).limit(limit);
     if (messages.length === 0) return [];
     const msgIds = messages.map((m) => m.id);
     const recips = await db.select({
@@ -10745,11 +11140,11 @@ async function listSentStaffMessages(limit = 50) {
       nurseId: staffMessageRecipients.nurseId,
       readAt: staffMessageRecipients.readAt,
       lastReadRevision: staffMessageRecipients.lastReadRevision
-    }).from(staffMessageRecipients).where(inArray4(staffMessageRecipients.messageId, msgIds));
+    }).from(staffMessageRecipients).where(inArray5(staffMessageRecipients.messageId, msgIds));
     const acks = await db.select({
       messageId: staffMessageAcknowledgments.messageId,
       revision: staffMessageAcknowledgments.revision
-    }).from(staffMessageAcknowledgments).where(inArray4(staffMessageAcknowledgments.messageId, msgIds));
+    }).from(staffMessageAcknowledgments).where(inArray5(staffMessageAcknowledgments.messageId, msgIds));
     return messages.map((m) => {
       const mRecips = recips.filter((r) => r.messageId === m.id);
       const mAcks = acks.filter((a) => a.messageId === m.id && a.revision === m.revision);
@@ -10787,7 +11182,7 @@ async function getStaffMessageDetail(messageId) {
       createdAt: staffMessages.createdAt,
       updatedAt: staffMessages.updatedAt,
       senderName: users.name
-    }).from(staffMessages).leftJoin(users, eq12(users.id, staffMessages.senderUserId)).where(eq12(staffMessages.id, messageId));
+    }).from(staffMessages).leftJoin(users, eq13(users.id, staffMessages.senderUserId)).where(eq13(staffMessages.id, messageId));
     if (!msg2) return null;
     const recipients2 = await db.select({
       nurseId: staffMessageRecipients.nurseId,
@@ -10796,12 +11191,12 @@ async function getStaffMessageDetail(messageId) {
       employeeId: nurses.employeeId,
       firstName: nurses.firstName,
       lastName: nurses.lastName
-    }).from(staffMessageRecipients).innerJoin(nurses, eq12(nurses.id, staffMessageRecipients.nurseId)).where(eq12(staffMessageRecipients.messageId, messageId));
+    }).from(staffMessageRecipients).innerJoin(nurses, eq13(nurses.id, staffMessageRecipients.nurseId)).where(eq13(staffMessageRecipients.messageId, messageId));
     const acks = await db.select({
       nurseId: staffMessageAcknowledgments.nurseId,
       revision: staffMessageAcknowledgments.revision,
       acknowledgedAt: staffMessageAcknowledgments.acknowledgedAt
-    }).from(staffMessageAcknowledgments).where(eq12(staffMessageAcknowledgments.messageId, messageId));
+    }).from(staffMessageAcknowledgments).where(eq13(staffMessageAcknowledgments.messageId, messageId));
     const ackMap = new Map(acks.map((a) => [`${a.nurseId}:${a.revision}`, a.acknowledgedAt]));
     return {
       ...msg2,
@@ -10839,14 +11234,14 @@ async function updateStaffMessage(messageId, title, body) {
   if (!trimmedBody || trimmedBody.length > 5e3) throw new Error("Body must be between 1 and 5000 characters");
   const db = await getDb();
   if (db) {
-    const [msg2] = await db.select().from(staffMessages).where(eq12(staffMessages.id, messageId));
+    const [msg2] = await db.select().from(staffMessages).where(eq13(staffMessages.id, messageId));
     if (!msg2) throw new Error("Message not found");
     const [updated] = await db.update(staffMessages).set({
       title: trimmedTitle,
       body: trimmedBody,
       revision: msg2.revision + 1,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq12(staffMessages.id, messageId)).returning();
+    }).where(eq13(staffMessages.id, messageId)).returning();
     return updated;
   }
   const sqlite = getSqliteDb();
@@ -10858,7 +11253,7 @@ async function updateStaffMessage(messageId, title, body) {
 async function archiveStaffMessage(messageId) {
   const db = await getDb();
   if (db) {
-    await db.update(staffMessages).set({ archivedAt: /* @__PURE__ */ new Date() }).where(eq12(staffMessages.id, messageId));
+    await db.update(staffMessages).set({ archivedAt: /* @__PURE__ */ new Date() }).where(eq13(staffMessages.id, messageId));
     return;
   }
   const sqlite = getSqliteDb();
@@ -10877,14 +11272,14 @@ async function listNurseFeed(nurseId, limit = 50) {
       senderName: users.name,
       readAt: staffMessageRecipients.readAt,
       lastReadRevision: staffMessageRecipients.lastReadRevision
-    }).from(staffMessageRecipients).innerJoin(staffMessages, eq12(staffMessages.id, staffMessageRecipients.messageId)).leftJoin(users, eq12(users.id, staffMessages.senderUserId)).where(and9(eq12(staffMessageRecipients.nurseId, nurseId), isNull10(staffMessages.archivedAt))).orderBy(desc6(staffMessages.createdAt)).limit(limit);
+    }).from(staffMessageRecipients).innerJoin(staffMessages, eq13(staffMessages.id, staffMessageRecipients.messageId)).leftJoin(users, eq13(users.id, staffMessages.senderUserId)).where(and10(eq13(staffMessageRecipients.nurseId, nurseId), isNull11(staffMessages.archivedAt))).orderBy(desc7(staffMessages.createdAt)).limit(limit);
     if (rows2.length === 0) return [];
     const msgIds = rows2.map((r) => r.id);
     const acks = await db.select({
       messageId: staffMessageAcknowledgments.messageId,
       revision: staffMessageAcknowledgments.revision,
       acknowledgedAt: staffMessageAcknowledgments.acknowledgedAt
-    }).from(staffMessageAcknowledgments).where(and9(eq12(staffMessageAcknowledgments.nurseId, nurseId), inArray4(staffMessageAcknowledgments.messageId, msgIds)));
+    }).from(staffMessageAcknowledgments).where(and10(eq13(staffMessageAcknowledgments.nurseId, nurseId), inArray5(staffMessageAcknowledgments.messageId, msgIds)));
     const ackMap = new Map(acks.map((a) => [`${a.messageId}:${a.revision}`, a.acknowledgedAt]));
     return rows2.map((r) => {
       const isRead = r.readAt != null && (r.lastReadRevision ?? 0) >= r.revision;
@@ -10922,11 +11317,11 @@ async function listNurseFeed(nurseId, limit = 50) {
 async function countUnreadNurseMessages(nurseId) {
   const db = await getDb();
   if (db) {
-    const rows = await db.select({ count: sql11`count(*)` }).from(staffMessageRecipients).innerJoin(staffMessages, eq12(staffMessages.id, staffMessageRecipients.messageId)).where(
-      and9(
-        eq12(staffMessageRecipients.nurseId, nurseId),
-        isNull10(staffMessages.archivedAt),
-        sql11`(${staffMessageRecipients.readAt} IS NULL OR ${staffMessageRecipients.lastReadRevision} < ${staffMessages.revision})`
+    const rows = await db.select({ count: sql12`count(*)` }).from(staffMessageRecipients).innerJoin(staffMessages, eq13(staffMessages.id, staffMessageRecipients.messageId)).where(
+      and10(
+        eq13(staffMessageRecipients.nurseId, nurseId),
+        isNull11(staffMessages.archivedAt),
+        sql12`(${staffMessageRecipients.readAt} IS NULL OR ${staffMessageRecipients.lastReadRevision} < ${staffMessages.revision})`
       )
     );
     return Number(rows[0]?.count ?? 0);
@@ -10942,12 +11337,12 @@ async function countUnreadNurseMessages(nurseId) {
 async function markNurseMessageRead(nurseId, messageId) {
   const db = await getDb();
   if (db) {
-    const [msg2] = await db.select().from(staffMessages).where(eq12(staffMessages.id, messageId));
+    const [msg2] = await db.select().from(staffMessages).where(eq13(staffMessages.id, messageId));
     if (!msg2) return;
     await db.update(staffMessageRecipients).set({
       readAt: /* @__PURE__ */ new Date(),
       lastReadRevision: msg2.revision
-    }).where(and9(eq12(staffMessageRecipients.messageId, messageId), eq12(staffMessageRecipients.nurseId, nurseId)));
+    }).where(and10(eq13(staffMessageRecipients.messageId, messageId), eq13(staffMessageRecipients.nurseId, nurseId)));
     return;
   }
   const sqlite = getSqliteDb();
@@ -10958,12 +11353,12 @@ async function markNurseMessageRead(nurseId, messageId) {
 async function acknowledgeNurseMessage(nurseId, messageId, revision) {
   const db = await getDb();
   if (db) {
-    const [msg2] = await db.select().from(staffMessages).where(eq12(staffMessages.id, messageId));
+    const [msg2] = await db.select().from(staffMessages).where(eq13(staffMessages.id, messageId));
     if (!msg2) throw new Error("Message not found");
     if (msg2.revision !== revision) {
       throw new Error(`Message was updated to revision ${msg2.revision}. Please review the updated content before acknowledging.`);
     }
-    const [recipient2] = await db.select().from(staffMessageRecipients).where(and9(eq12(staffMessageRecipients.messageId, messageId), eq12(staffMessageRecipients.nurseId, nurseId)));
+    const [recipient2] = await db.select().from(staffMessageRecipients).where(and10(eq13(staffMessageRecipients.messageId, messageId), eq13(staffMessageRecipients.nurseId, nurseId)));
     if (!recipient2) throw new Error("You are not a recipient of this message");
     await db.insert(staffMessageAcknowledgments).values({
       messageId,
@@ -10973,7 +11368,7 @@ async function acknowledgeNurseMessage(nurseId, messageId, revision) {
     await db.update(staffMessageRecipients).set({
       readAt: /* @__PURE__ */ new Date(),
       lastReadRevision: msg2.revision
-    }).where(and9(eq12(staffMessageRecipients.messageId, messageId), eq12(staffMessageRecipients.nurseId, nurseId)));
+    }).where(and10(eq13(staffMessageRecipients.messageId, messageId), eq13(staffMessageRecipients.nurseId, nurseId)));
     return { success: true, messageId, revision };
   }
   const sqlite = getSqliteDb();
@@ -10994,7 +11389,7 @@ init_trainingReminders();
 init_db();
 init_localDb();
 init_schema();
-import { desc as desc7, eq as eq13 } from "drizzle-orm";
+import { desc as desc8, eq as eq14 } from "drizzle-orm";
 var staffFeedRouter = router({
   // --- SUPERVISOR PROCEDURES (adminProcedure) ---
   createMessage: adminProcedure.input(
@@ -11085,7 +11480,7 @@ var staffFeedRouter = router({
     const limit = input?.limit ?? 20;
     const db = await getDb();
     if (db) {
-      return db.select().from(trainingActivity).where(eq13(trainingActivity.nurseId, ctx.nurseId)).orderBy(desc7(trainingActivity.createdAt)).limit(limit);
+      return db.select().from(trainingActivity).where(eq14(trainingActivity.nurseId, ctx.nurseId)).orderBy(desc8(trainingActivity.createdAt)).limit(limit);
     }
     const sqlite = getSqliteDb();
     return sqlite.prepare("SELECT * FROM trainingActivity WHERE nurseId = ? ORDER BY datetime(createdAt) DESC LIMIT ?").all(ctx.nurseId, limit);
@@ -11842,7 +12237,7 @@ init_db();
 init_schema();
 init_nursetrack();
 init_localDb();
-import { and as and10, asc as asc5, eq as eq14, isNull as isNull11, sql as sql12 } from "drizzle-orm";
+import { and as and11, asc as asc5, eq as eq15, isNull as isNull12, sql as sql13 } from "drizzle-orm";
 var FALLBACK_TOPICS = [
   { id: "needs_attention", name: "Needs Attention", short_desc: "Expiring & overdue records" },
   { id: "find_staff", name: "Find Staff", short_desc: "Nurses & attendants" },
@@ -11957,11 +12352,11 @@ async function getAreaCountsSummary(isAuthorized = false) {
     const fetchAreas = async () => {
       const dbConn = await getDb();
       if (dbConn) {
-        const areaRows = await dbConn.select().from(areas).where(eq14(areas.active, true)).orderBy(areas.sortOrder);
+        const areaRows = await dbConn.select().from(areas).where(eq15(areas.active, true)).orderBy(areas.sortOrder);
         const countMap = /* @__PURE__ */ new Map();
         let total = 0;
         if (isAuthorized) {
-          const nurseCounts = await dbConn.select({ areaId: nurses.currentAreaId, count: sql12`count(*)::int` }).from(nurses).where(activeNurseCondition()).groupBy(nurses.currentAreaId);
+          const nurseCounts = await dbConn.select({ areaId: nurses.currentAreaId, count: sql13`count(*)::int` }).from(nurses).where(activeNurseCondition()).groupBy(nurses.currentAreaId);
           for (const c of nurseCounts) {
             if (c.areaId !== null && c.areaId !== void 0) {
               const cnt = Number(c.count);
@@ -12028,7 +12423,7 @@ async function getAlertsSummary(todayManila) {
           renewalStatus: nurseCredentials.renewalStatus,
           firstName: nurses.firstName,
           lastName: nurses.lastName
-        }).from(nurseCredentials).innerJoin(nurses, eq14(nurseCredentials.nurseId, nurses.id)).where(isNull11(nurses.archivedAt));
+        }).from(nurseCredentials).innerJoin(nurses, eq15(nurseCredentials.nurseId, nurses.id)).where(isNull12(nurses.archivedAt));
         for (const c of creds) {
           const d = dateKey(c.expiryDate);
           const status = deriveLicenseStatus(d, todayManila);
@@ -12051,7 +12446,7 @@ async function getAlertsSummary(todayManila) {
           trainingName: trainingCatalog.name,
           firstName: nurses.firstName,
           lastName: nurses.lastName
-        }).from(nurseTrainings).innerJoin(nurses, eq14(nurseTrainings.nurseId, nurses.id)).innerJoin(trainingCatalog, eq14(nurseTrainings.trainingId, trainingCatalog.id)).where(isNull11(nurses.archivedAt));
+        }).from(nurseTrainings).innerJoin(nurses, eq15(nurseTrainings.nurseId, nurses.id)).innerJoin(trainingCatalog, eq15(nurseTrainings.trainingId, trainingCatalog.id)).where(isNull12(nurses.archivedAt));
         for (const t2 of trainings) {
           const schedDate = dateKey(t2.scheduledDate);
           const expDate = dateKey(t2.expiryDate);
@@ -12149,7 +12544,7 @@ async function getStaffSummaryOrSearch(isAuthorized, queryTerm) {
       const cleanedSearch = qClean ? qClean.replace(/^(find|search|look up|who is)\s+(nurse|staff|attendant)?\s*/i, "").trim() : "";
       const dbConn = await getDb();
       if (dbConn) {
-        const activeCondition = and10(isNull11(nurses.archivedAt), activeNurseCondition());
+        const activeCondition = and11(isNull12(nurses.archivedAt), activeNurseCondition());
         if (cleanedSearch && cleanedSearch.length >= 2) {
           const matched = await dbConn.select({
             id: nurses.id,
@@ -12158,10 +12553,10 @@ async function getStaffSummaryOrSearch(isAuthorized, queryTerm) {
             staffType: nurses.staffType,
             employeeId: nurses.employeeId,
             areaName: areas.name
-          }).from(nurses).leftJoin(areas, eq14(nurses.currentAreaId, areas.id)).where(
-            and10(
+          }).from(nurses).leftJoin(areas, eq15(nurses.currentAreaId, areas.id)).where(
+            and11(
               activeCondition,
-              sql12`lower(${nurses.firstName} || ' ' || ${nurses.lastName}) LIKE ${`%${cleanedSearch}%`} OR lower(${nurses.employeeId}) LIKE ${`%${cleanedSearch}%`}`
+              sql13`lower(${nurses.firstName} || ' ' || ${nurses.lastName}) LIKE ${`%${cleanedSearch}%`} OR lower(${nurses.employeeId}) LIKE ${`%${cleanedSearch}%`}`
             )
           ).limit(5);
           return {
@@ -12244,7 +12639,7 @@ async function getLicensesSummary(todayManila) {
           expiryDate: nurseCredentials.expiryDate,
           firstName: nurses.firstName,
           lastName: nurses.lastName
-        }).from(nurseCredentials).innerJoin(nurses, eq14(nurseCredentials.nurseId, nurses.id)).where(isNull11(nurses.archivedAt));
+        }).from(nurseCredentials).innerJoin(nurses, eq15(nurseCredentials.nurseId, nurses.id)).where(isNull12(nurses.archivedAt));
         total = rows.length;
         for (const r of rows) {
           const d = dateKey(r.expiryDate);
@@ -12333,7 +12728,7 @@ async function getTrainingFollowupSummary() {
           evidenceStatus: nurseTrainings.evidenceStatus,
           attendanceOutcome: nurseTrainings.attendanceOutcome,
           accountEmail: nurses.accountEmail
-        }).from(nurseTrainings).innerJoin(nurses, eq14(nurseTrainings.nurseId, nurses.id)).where(and10(isNull11(nurses.archivedAt), sql12`${nurseTrainings.status} != 'Cancelled'`));
+        }).from(nurseTrainings).innerJoin(nurses, eq15(nurseTrainings.nurseId, nurses.id)).where(and11(isNull12(nurses.archivedAt), sql13`${nurseTrainings.status} != 'Cancelled'`));
         total = rows.length;
         for (const r of rows) {
           if (!r.staffResponse || r.staffResponse === "Pending") pendingResponse++;
@@ -12391,11 +12786,11 @@ async function getUpcomingSeminarsSummary(todayManila) {
           startDate: trainingEvents.startDate,
           endDate: trainingEvents.endDate,
           title: trainingCatalog.name
-        }).from(trainingEvents).innerJoin(trainingCatalog, eq14(trainingCatalog.id, trainingEvents.trainingId)).where(sql12`(${trainingEvents.endDate} >= (${todayManila})::date OR ${trainingEvents.startDate} >= (${todayManila})::date)`).orderBy(asc5(trainingEvents.startDate)).limit(5);
+        }).from(trainingEvents).innerJoin(trainingCatalog, eq15(trainingCatalog.id, trainingEvents.trainingId)).where(sql13`(${trainingEvents.endDate} >= (${todayManila})::date OR ${trainingEvents.startDate} >= (${todayManila})::date)`).orderBy(asc5(trainingEvents.startDate)).limit(5);
         const eventIds = rows.map((r) => r.id);
         const countMap = /* @__PURE__ */ new Map();
         if (eventIds.length > 0) {
-          const counts = await dbConn.select({ eventId: nurseTrainings.eventId, count: sql12`count(*)::int` }).from(nurseTrainings).where(sql12`${nurseTrainings.eventId} IN (${sql12.join(eventIds.map((id) => sql12`${id}`), sql12`, `)})`).groupBy(nurseTrainings.eventId);
+          const counts = await dbConn.select({ eventId: nurseTrainings.eventId, count: sql13`count(*)::int` }).from(nurseTrainings).where(sql13`${nurseTrainings.eventId} IN (${sql13.join(eventIds.map((id) => sql13`${id}`), sql13`, `)})`).groupBy(nurseTrainings.eventId);
           for (const c of counts) {
             if (c.eventId) countMap.set(c.eventId, Number(c.count));
           }
@@ -12449,7 +12844,7 @@ async function getCalendarSummary(todayManila) {
       const todayEvents = [];
       const weekEvents = [];
       if (dbConn) {
-        const seminars = await dbConn.select({ title: trainingCatalog.name, startDate: trainingEvents.startDate, venue: trainingEvents.venue }).from(trainingEvents).innerJoin(trainingCatalog, eq14(trainingEvents.trainingId, trainingCatalog.id)).where(sql12`(${trainingEvents.startDate} >= (${todayManila})::date AND ${trainingEvents.startDate} <= (${weekEndStr})::date)`).limit(10);
+        const seminars = await dbConn.select({ title: trainingCatalog.name, startDate: trainingEvents.startDate, venue: trainingEvents.venue }).from(trainingEvents).innerJoin(trainingCatalog, eq15(trainingEvents.trainingId, trainingCatalog.id)).where(sql13`(${trainingEvents.startDate} >= (${todayManila})::date AND ${trainingEvents.startDate} <= (${weekEndStr})::date)`).limit(10);
         for (const s of seminars) {
           const d = dateKey(s.startDate);
           if (d === todayManila) {
@@ -12754,6 +13149,54 @@ Total Active Staff Tracked: ${liveContext.total_active_staff}`;
   })
 });
 
+// server/routers/memos.ts
+import { z as z18 } from "zod";
+import { TRPCError as TRPCError12 } from "@trpc/server";
+init_nursetrack();
+var memoTypeSchema = z18.enum(MEMO_TYPES);
+function asTrpc(err) {
+  const message = err instanceof Error ? err.message : "Memo request failed.";
+  if (/not found/i.test(message)) throw new TRPCError12({ code: "NOT_FOUND", message });
+  throw new TRPCError12({ code: "BAD_REQUEST", message });
+}
+var memosRouter = router({
+  previewAudience: adminProcedure.input(z18.object({ memoType: memoTypeSchema, areaId: z18.number().int().positive().optional() })).query(async ({ input }) => {
+    try {
+      return await previewAudience(input);
+    } catch (err) {
+      asTrpc(err);
+    }
+  }),
+  create: adminProcedure.input(
+    z18.object({
+      memoType: memoTypeSchema,
+      areaId: z18.number().int().positive().optional(),
+      title: z18.string().min(1).max(256),
+      body: z18.string().min(1).max(8e3)
+    })
+  ).mutation(async ({ ctx, input }) => {
+    try {
+      return await createMemo({ ...input, authorUserId: ctx.user.id });
+    } catch (err) {
+      asTrpc(err);
+    }
+  }),
+  list: adminProcedure.input(z18.object({ memoType: memoTypeSchema.optional(), limit: z18.number().int().min(1).max(100).optional() }).optional()).query(async ({ input }) => listMemos(input ?? {})),
+  get: adminProcedure.input(z18.object({ id: z18.number().int().positive() })).query(async ({ input }) => {
+    const memo = await getMemo(input.id);
+    if (!memo) throw new TRPCError12({ code: "NOT_FOUND", message: "Memo not found." });
+    return memo;
+  }),
+  receipts: adminProcedure.input(z18.object({ id: z18.number().int().positive() })).query(async ({ input }) => listMemoReceipts(input.id)),
+  retract: adminProcedure.input(z18.object({ id: z18.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    try {
+      return await retractMemo({ memoId: input.id, authorUserId: ctx.user.id });
+    } catch (err) {
+      asTrpc(err);
+    }
+  })
+});
+
 // server/routers.ts
 var appRouter = router({
   system: systemRouter,
@@ -12782,7 +13225,8 @@ var appRouter = router({
   staffAccount: staffAccountRouter,
   staffFeed: staffFeedRouter,
   smartImport: smartImportRouter,
-  aiInsights: aiInsightsRouter
+  aiInsights: aiInsightsRouter,
+  memos: memosRouter
 });
 
 // server/_core/context.ts

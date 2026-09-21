@@ -525,3 +525,41 @@ export const storedFiles = pgTable(
   (t) => [uniqueIndex("uniq_stored_file_key").on(t.key)],
 );
 export type StoredFile = typeof storedFiles.$inferSelect;
+
+/** Audience-scoped broadcast memos (department, nursing, hospital). */
+export const memos = pgTable(
+  "memos",
+  {
+    id: serial("id").primaryKey(),
+    memoType: varchar("memoType", { length: 32, enum: ["department", "nursing", "hospital"] }).notNull(),
+    areaId: integer("areaId"),
+    title: varchar("title", { length: 256 }).notNull(),
+    body: text("body").notNull(),
+    authorUserId: integer("authorUserId").notNull(),
+    status: varchar("status", { length: 16, enum: ["sent", "retracted"] }).default("sent").notNull(),
+    sentAt: timestamp("sentAt").defaultNow().notNull(),
+    retractedAt: timestamp("retractedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().$onUpdate(touchedOnUpdate).notNull(),
+  },
+  (t) => [index("idx_memos_sent").on(t.sentAt), index("idx_memos_type").on(t.memoType)],
+);
+export type Memo = typeof memos.$inferSelect;
+
+/** One row per intended nurse for a broadcast memo, including read receipts. */
+export const memoRecipients = pgTable(
+  "memoRecipients",
+  {
+    id: serial("id").primaryKey(),
+    memoId: integer("memoId").notNull(),
+    nurseId: integer("nurseId").notNull(),
+    linkedAtSend: boolean("linkedAtSend").default(false).notNull(),
+    readAt: timestamp("readAt"),
+  },
+  (t) => [
+    uniqueIndex("uniq_memo_nurse").on(t.memoId, t.nurseId),
+    index("idx_memo_rcp_nurse").on(t.nurseId),
+    index("idx_memo_rcp_memo").on(t.memoId),
+  ],
+);
+export type MemoRecipient = typeof memoRecipients.$inferSelect;

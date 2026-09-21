@@ -17,6 +17,7 @@ import { staffFeedRouter } from "./routers/staffFeed";
 import { smartImportRouter } from "./routers/smartImport";
 import { aiInsightsRouter } from "./routers/aiInsights";
 import { inquiryRouter } from "./routers/inquiry";
+import { memosRouter } from "./routers/memos";
 
 export const appRouter = router({
   system: systemRouter,
@@ -49,6 +50,7 @@ export const appRouter = router({
   staffFeed: staffFeedRouter,
   smartImport: smartImportRouter,
   aiInsights: aiInsightsRouter,
+  memos: memosRouter,
 });
 
 export type AppRouter = typeof appRouter;
