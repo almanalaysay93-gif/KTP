@@ -11,7 +11,7 @@ const SMART_IMPORT_ACCEPT =
   "image/jpeg,image/png,image/webp,application/pdf,text/plain,text/csv,.csv,.xlsx,.xls,.docx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /** Compress image using HTML Canvas to reduce resolution and file size. */
-async function compressImage(
+export async function compressImage(
   file: File,
   maxDim: number,
   quality: number,
@@ -181,6 +181,57 @@ export function pickFile(
   });
 }
 
+export function pickRawFile(
+  accept: string = "image/jpeg,image/png,image/webp,application/pdf"
+): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.style.position = "fixed";
+    input.style.top = "-9999px";
+    input.style.left = "-9999px";
+    input.style.opacity = "0";
+    input.style.pointerEvents = "none";
+    document.body.appendChild(input);
+
+    const cleanup = () => {
+      if (input.parentNode) {
+        document.body.removeChild(input);
+      }
+    };
+
+    input.onchange = () => {
+      const file = input.files?.[0] ?? null;
+      cleanup();
+      resolve(file);
+    };
+
+    const onWindowFocus = () => {
+      window.removeEventListener("focus", onWindowFocus);
+      setTimeout(() => {
+        cleanup();
+      }, 1000);
+    };
+    window.addEventListener("focus", onWindowFocus, { once: true });
+
+    input.click();
+  });
+}
+
+export async function fileToBase64(file: File): Promise<{ fileBase64: string; fileName: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(",")[1] ?? "";
+      resolve({ fileBase64: base64, fileName: file.name, mimeType: file.type || "application/octet-stream" });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export function FileUploadButton({
   kind,
   onFile,
@@ -211,3 +262,4 @@ export function FileUploadButton({
     </Button>
   );
 }
+

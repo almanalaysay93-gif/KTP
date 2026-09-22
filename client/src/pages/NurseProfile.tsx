@@ -1,5 +1,5 @@
 import { AreaSelect } from "@/components/nursetrack/AreaSelect";
-import { FileUploadButton } from "@/components/nursetrack/FileUpload";
+import { CredentialUploadButton } from "@/components/nursetrack/CredentialUploadButton";
 import { NurseAvatar } from "@/components/nursetrack/NurseAvatar";
 import {
   LicenseStatusBadge,
@@ -170,6 +170,16 @@ export default function NurseProfile() {
       setTrainingToDelete(null);
     },
     onError: (e) => toast.error(e.message),
+  });
+  const uploadDocMutation = trpc.credentials.uploadDocument.useMutation({
+    onSuccess: async () => {
+      toast.success("Document uploaded successfully.");
+      await Promise.all([
+        utils.nurses.profile.invalidate({ id }),
+        utils.credentials.invalidate(),
+      ]);
+    },
+    onError: (e) => toast.error(e.message || "Failed to upload document."),
   });
   const [editCredId, setEditCredId] = useState<number | null>(null);
   const [areaOpen, setAreaOpen] = useState(false);
@@ -543,10 +553,26 @@ export default function NurseProfile() {
                           }}>
                             Edit
                           </Button>
-                          <FileUploadButton
-                            kind="document"
+                          <CredentialUploadButton
+                            credential={{
+                              id: c.id,
+                              typeName: c.typeName,
+                              licenseNumber: c.licenseNumber,
+                              issueDate: c.issueDate,
+                              expiryDate: c.expiryDate,
+                              nurseName: nurse ? nurseFullName(nurse) : undefined,
+                            }}
                             label="Upload Document"
-                            onFile={(f) => utils.client.credentials.uploadDocument.mutate({ credentialId: c.id, ...f })}
+                            disabled={uploadDocMutation.isPending}
+                            onUpload={async ({ file, confirmedFields }) => {
+                              await uploadDocMutation.mutateAsync({
+                                credentialId: c.id,
+                                fileBase64: file.fileBase64,
+                                fileName: file.fileName,
+                                mimeType: file.mimeType,
+                                confirmedFields,
+                              });
+                            }}
                           />
                         </div>
                       </div>
