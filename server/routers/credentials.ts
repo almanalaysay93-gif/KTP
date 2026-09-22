@@ -203,6 +203,13 @@ export const credentialsRouter = router({
         fileBase64: z.string(),
         fileName: z.string().max(200),
         mimeType: z.string(),
+        confirmedFields: z
+          .object({
+            licenseNumber: z.string().trim().max(64).optional().nullable(),
+            issueDate: z.union([z.string(), z.date()]).optional().nullable(),
+            expiryDate: z.union([z.string(), z.date()]).optional().nullable(),
+          })
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -213,10 +220,96 @@ export const credentialsRouter = router({
       if (!mimeCheck.ok) throw new TRPCError({ code: "BAD_REQUEST", message: mimeCheck.error });
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+
+      const patch: Record<string, unknown> = {};
+
+      const parseDateVal = (val: string | Date | null | undefined): Date | null | undefined => {
+        if (val === undefined) return undefined;
+        if (val === null || val === "") return null;
+        if (val instanceof Date) {
+          if (isNaN(val.getTime())) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date." });
+          return val;
+        }
+        const str = String(val).trim();
+        const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (m) {
+          const y = parseInt(m[1], 10);
+          const mon = parseInt(m[2], 10);
+          const day = parseInt(m[3], 10);
+          if (y < 1950 || y > 2100 || mon < 1 || mon > 12) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date range." });
+          }
+          const daysInMonth = new Date(Date.UTC(y, mon, 0)).getUTCDate();
+          if (day < 1 || day > daysInMonth) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid calendar date." });
+          }
+          return new Date(`${m[1]}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}T00:00:00.000Z`);
+        }
+        const d = new Date(str);
+        if (isNaN(d.getTime())) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date." });
+        return d;
+      };
+
+      let parsedIssue: Date | null | undefined;
+      let parsedExpiry: Date | null | undefined;
+
+      if (input.confirmedFields) {
+        if (input.confirmedFields.licenseNumber !== undefined) {
+          const normPrc = input.confirmedFields.licenseNumber ? input.confirmedFields.licenseNumber.trim() : null;
+          if (normPrc) {
+            const matchingNurseIds = await db.findNurseIdsByLicenseNumber(normPrc);
+            if (matchingNurseIds.some((id) => id !== cred.nurseId)) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Another nurse is already registered with this PRC License Number.",
+              });
+            }
+          }
+          patch.licenseNumber = normPrc;
+        }
+
+        if (input.confirmedFields.issueDate !== undefined) {
+          parsedIssue = parseDateVal(input.confirmedFields.issueDate);
+          patch.issueDate = parsedIssue ?? null;
+        }
+
+        if (input.confirmedFields.expiryDate !== undefined) {
+          parsedExpiry = parseDateVal(input.confirmedFields.expiryDate);
+          if (parsedExpiry) {
+            patch.expiryDate = parsedExpiry;
+            const existingExpiryStr = cred.expiryDate
+              ? cred.expiryDate instanceof Date
+                ? cred.expiryDate.toISOString().slice(0, 10)
+                : String(cred.expiryDate).slice(0, 10)
+              : null;
+            const newExpiryStr = parsedExpiry.toISOString().slice(0, 10);
+            if (newExpiryStr !== existingExpiryStr) {
+              patch.renewalCycleKey = renewalCycleKey(`${cred.id}-${parsedExpiry.toISOString()}`);
+            }
+          }
+        }
+
+        const effIssue = parsedIssue !== undefined ? parsedIssue : cred.issueDate ? new Date(cred.issueDate) : null;
+        const effExpiry = parsedExpiry !== undefined ? parsedExpiry : cred.expiryDate ? new Date(cred.expiryDate) : null;
+        if (effIssue && effExpiry && effIssue > effExpiry) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+        }
+      }
+
+      const credTypes = await db.listCredentialTypes(true);
+      const credType = credTypes.find((t) => t.id === cred.credentialTypeId);
+      const isPrc = credType ? credType.name.toLowerCase().includes("prc") : false;
+      if (isPrc) {
+        patch.verificationStatus = "Pending Verification";
+      }
+
       const oldKey = cred.documentKey;
       const key = storageKey("license-documents", cred.nurseId, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
-      await db.updateCredential(input.credentialId, { documentKey: storedKey });
+
+      patch.documentKey = storedKey;
+      await db.updateCredential(input.credentialId, patch);
+
       if (oldKey && oldKey !== storedKey) {
         await storageDelete(oldKey).catch(() => {});
       }
@@ -226,7 +319,7 @@ export const credentialsRouter = router({
         actionType: "license.document.uploaded",
         entityType: "credential",
         entityId: input.credentialId,
-        summary: `License document uploaded for license #${input.credentialId}`,
+        summary: `License document uploaded for license #${input.credentialId}${input.confirmedFields ? " with reviewed fields" : ""}`,
       });
       return { url };
     }),

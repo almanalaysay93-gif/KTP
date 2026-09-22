@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { NurseAvatar } from "@/components/nursetrack/NurseAvatar";
 import { FileUploadButton } from "@/components/nursetrack/FileUpload";
+import { CredentialUploadButton } from "@/components/nursetrack/CredentialUploadButton";
 import { LicenseStatusBadge, TrainingStatusBadge } from "@/components/nursetrack/StatusBadge";
 import { LICENSE_STATUS_META, nurseIdLabel, type LicenseStatus, formatDate } from "@shared/nursetrack";
 import { toast } from "sonner";
@@ -429,16 +430,31 @@ function MyProfileView({ profile }: { profile: any }) {
                   {c.documentKey && (
                     <div className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      <span>Document verified & on file</span>
+                      <span>Document on file</span>
                     </div>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <FileUploadButton
-                    kind="document"
+                  <CredentialUploadButton
+                    credential={{
+                      id: c.id,
+                      typeName: c.typeName,
+                      licenseNumber: c.licenseNumber,
+                      issueDate: c.issueDate,
+                      expiryDate: c.expiryDate,
+                      nurseName: profile?.firstName ? `${profile.firstName} ${profile.lastName}` : undefined,
+                    }}
                     label={c.documentKey ? "Replace Document" : "Upload Document"}
                     disabled={credDocMutation.isPending}
-                    onFile={(f) => credDocMutation.mutate({ credentialId: c.id, ...f })}
+                    onUpload={async ({ file, confirmedFields }) => {
+                      await credDocMutation.mutateAsync({
+                        credentialId: c.id,
+                        fileBase64: file.fileBase64,
+                        fileName: file.fileName,
+                        mimeType: file.mimeType,
+                        confirmedFields,
+                      });
+                    }}
                   />
                 </div>
               </div>

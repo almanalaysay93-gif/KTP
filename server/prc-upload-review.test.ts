@@ -1,0 +1,348 @@
+import { describe, expect, it } from "vitest";
+import { appRouter } from "./routers";
+import type { TrpcContext } from "./_core/context";
+import * as db from "./db";
+
+type CookieCall = { name: string; value: string; options: Record<string, unknown> };
+
+function makeCtx(overrides: Partial<TrpcContext> & { req?: Partial<TrpcContext["req"]> } = {}): {
+  ctx: TrpcContext;
+  cookies: CookieCall[];
+} {
+  const cookies: CookieCall[] = [];
+  const ctx: TrpcContext = {
+    user: null,
+    claimNurseId: null,
+    req: {
+      protocol: "https",
+      headers: {},
+      ip: "127.0.0.1",
+      socket: { remoteAddress: "127.0.0.1" },
+      ...overrides.req,
+    } as TrpcContext["req"],
+    res: {
+      cookie: (name: string, value: string, options: Record<string, unknown>) => {
+        cookies.push({ name, value, options });
+      },
+      clearCookie: () => {},
+    } as unknown as TrpcContext["res"],
+    ...overrides,
+  };
+  return { ctx, cookies };
+}
+
+const adminUser = {
+  id: 1,
+  openId: "admin-don",
+  email: "almanalaysay93@gmail.com",
+  name: "Don Admin",
+  loginMethod: "google" as const,
+  role: "admin" as const,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  lastSignedIn: new Date(),
+};
+
+// Generates 7-digit PRC number with leading zero
+const uniquePrc = () => "0" + Math.floor(100000 + Math.random() * 900000);
+
+describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", () => {
+  const smallBase64 = Buffer.from("fake-image-bytes").toString("base64");
+
+  it("allows supervisor to upload document with confirmed fields, updates PRC and marks Pending Verification", async () => {
+    const { ctx } = makeCtx({ user: adminUser });
+    const caller = appRouter.createCaller(ctx);
+
+    const empId = `TEST-SUP-${Date.now()}-${Math.random()}`;
+    const prcNumber = uniquePrc();
+
+    const nurse = await caller.nurses.create({
+      employeeId: empId,
+      firstName: "Clara",
+      lastName: "Reyes",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      dateHired: new Date("2026-01-15").toISOString(),
+      licenseNumber: prcNumber,
+    });
+
+    const creds = await db.listCredentials({ nurseId: nurse.id });
+    const prcCred = creds.find((c) => c.licenseNumber === prcNumber)!;
+    expect(prcCred).toBeDefined();
+
+    const newPrcNumber = uniquePrc();
+    const res = await caller.credentials.uploadDocument({
+      credentialId: prcCred.id,
+      fileBase64: smallBase64,
+      fileName: "prc-card.jpg",
+      mimeType: "image/jpeg",
+      confirmedFields: {
+        licenseNumber: newPrcNumber,
+        issueDate: "2024-05-10",
+        expiryDate: "2027-05-10",
+      },
+    });
+
+    expect(res.url).toBeDefined();
+
+    const updatedCreds = await db.listCredentials({ nurseId: nurse.id });
+    const updated = updatedCreds.find((c) => c.id === prcCred.id)!;
+    expect(updated.licenseNumber).toBe(newPrcNumber);
+    expect(updated.licenseNumber?.startsWith("0")).toBe(true);
+    expect(updated.verificationStatus).toBe("Pending Verification");
+    expect(updated.documentKey).toBeDefined();
+    expect(updated.renewalCycleKey).toContain(String(prcCred.id));
+  });
+
+  it("allows staff member to upload document with confirmed fields on their own profile", async () => {
+    const { ctx: adminCtx } = makeCtx({ user: adminUser });
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    const empId = `TEST-STAFF-${Date.now()}-${Math.random()}`;
+    const prcNumber = uniquePrc();
+
+    const nurse = await adminCaller.nurses.create({
+      employeeId: empId,
+      firstName: "Juan",
+      lastName: "Luna",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      dateHired: new Date("2026-01-15").toISOString(),
+      licenseNumber: prcNumber,
+    });
+
+    const creds = await db.listCredentials({ nurseId: nurse.id });
+    const prcCred = creds.find((c) => c.licenseNumber === prcNumber)!;
+
+    const { ctx } = makeCtx({ claimNurseId: nurse.id });
+    const caller = appRouter.createCaller(ctx);
+
+    const updatedPrc = uniquePrc();
+    const res = await caller.staffAccount.uploadCredentialDocument({
+      credentialId: prcCred.id,
+      fileBase64: smallBase64,
+      fileName: "juan-prc.png",
+      mimeType: "image/png",
+      confirmedFields: {
+        licenseNumber: updatedPrc,
+        issueDate: "2023-01-15",
+        expiryDate: "2026-01-15",
+      },
+    });
+
+    expect(res.url).toBeDefined();
+
+    const updatedCreds = await db.listCredentials({ nurseId: nurse.id });
+    const updated = updatedCreds.find((c) => c.id === prcCred.id)!;
+    expect(updated.licenseNumber).toBe(updatedPrc);
+    expect(updated.verificationStatus).toBe("Pending Verification");
+  });
+
+  it("rejects unauthorized credential IDs for staff (cannot upload to another nurse's credential)", async () => {
+    const { ctx: adminCtx } = makeCtx({ user: adminUser });
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    const nurse1 = await adminCaller.nurses.create({
+      employeeId: `E1-${Date.now()}-${Math.random()}`,
+      firstName: "Nurse",
+      lastName: "One",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      licenseNumber: uniquePrc(),
+    });
+    const nurse2 = await adminCaller.nurses.create({
+      employeeId: `E2-${Date.now()}-${Math.random()}`,
+      firstName: "Nurse",
+      lastName: "Two",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      licenseNumber: uniquePrc(),
+    });
+
+    const creds2 = await db.listCredentials({ nurseId: nurse2.id });
+
+    // Nurse 1 tries to upload to Nurse 2's credential
+    const { ctx } = makeCtx({ claimNurseId: nurse1.id });
+    const caller = appRouter.createCaller(ctx);
+
+    await expect(
+      caller.staffAccount.uploadCredentialDocument({
+        credentialId: creds2[0].id,
+        fileBase64: smallBase64,
+        fileName: "hack.jpg",
+        mimeType: "image/jpeg",
+      })
+    ).rejects.toThrow("Credential record not found on your profile.");
+  });
+
+  it("rejects another nurse's duplicate PRC license number in confirmed fields", async () => {
+    const { ctx: adminCtx } = makeCtx({ user: adminUser });
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    const sharedPrc = uniquePrc();
+    await adminCaller.nurses.create({
+      employeeId: `DUP1-${Date.now()}-${Math.random()}`,
+      firstName: "Elena",
+      lastName: "Cruz",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      licenseNumber: sharedPrc,
+    });
+
+    const nurse2 = await adminCaller.nurses.create({
+      employeeId: `DUP2-${Date.now()}-${Math.random()}`,
+      firstName: "Paolo",
+      lastName: "Cruz",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      licenseNumber: uniquePrc(),
+    });
+    const creds2 = await db.listCredentials({ nurseId: nurse2.id });
+
+    const { ctx } = makeCtx({ claimNurseId: nurse2.id });
+    const caller = appRouter.createCaller(ctx);
+
+    await expect(
+      caller.staffAccount.uploadCredentialDocument({
+        credentialId: creds2[0].id,
+        fileBase64: smallBase64,
+        fileName: "dup.jpg",
+        mimeType: "image/jpeg",
+        confirmedFields: {
+          licenseNumber: sharedPrc,
+        },
+      })
+    ).rejects.toThrow("Another nurse is already registered with this PRC License Number.");
+  });
+
+  it("rejects invalid dates (e.g. invalid calendar date or format)", async () => {
+    const { ctx: adminCtx } = makeCtx({ user: adminUser });
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    const nurse = await adminCaller.nurses.create({
+      employeeId: `INV-${Date.now()}-${Math.random()}`,
+      firstName: "Test",
+      lastName: "Date",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      licenseNumber: uniquePrc(),
+    });
+    const creds = await db.listCredentials({ nurseId: nurse.id });
+
+    const { ctx } = makeCtx({ claimNurseId: nurse.id });
+    const caller = appRouter.createCaller(ctx);
+
+    await expect(
+      caller.staffAccount.uploadCredentialDocument({
+        credentialId: creds[0].id,
+        fileBase64: smallBase64,
+        fileName: "test.jpg",
+        mimeType: "image/jpeg",
+        confirmedFields: {
+          issueDate: "2024-02-31", // invalid date (Feb 31)
+        },
+      })
+    ).rejects.toThrow("Invalid calendar date.");
+  });
+
+  it("rejects issue date occurring after expiry date", async () => {
+    const { ctx: adminCtx } = makeCtx({ user: adminUser });
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    const nurse = await adminCaller.nurses.create({
+      employeeId: `ORDER-${Date.now()}-${Math.random()}`,
+      firstName: "Order",
+      lastName: "Check",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      licenseNumber: uniquePrc(),
+    });
+    const creds = await db.listCredentials({ nurseId: nurse.id });
+
+    const { ctx } = makeCtx({ user: adminUser });
+    const caller = appRouter.createCaller(ctx);
+
+    await expect(
+      caller.credentials.uploadDocument({
+        credentialId: creds[0].id,
+        fileBase64: smallBase64,
+        fileName: "order.jpg",
+        mimeType: "image/jpeg",
+        confirmedFields: {
+          issueDate: "2026-10-01",
+          expiryDate: "2025-10-01", // expiry is BEFORE issue
+        },
+      })
+    ).rejects.toThrow("Issue date cannot be after expiry date.");
+  });
+
+  it("preserves omitted values when confirmedFields has partial updates", async () => {
+    const { ctx: adminCtx } = makeCtx({ user: adminUser });
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    const originalPrc = uniquePrc();
+    const nurse = await adminCaller.nurses.create({
+      employeeId: `PART-${Date.now()}-${Math.random()}`,
+      firstName: "Partial",
+      lastName: "Check",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      licenseNumber: originalPrc,
+    });
+    const creds = await db.listCredentials({ nurseId: nurse.id });
+    const origExpiry = creds[0].expiryDate;
+
+    const { ctx } = makeCtx({ user: adminUser });
+    const caller = appRouter.createCaller(ctx);
+
+    // Only issueDate provided in confirmedFields
+    await caller.credentials.uploadDocument({
+      credentialId: creds[0].id,
+      fileBase64: smallBase64,
+      fileName: "partial.jpg",
+      mimeType: "image/jpeg",
+      confirmedFields: {
+        issueDate: "2024-01-01",
+      },
+    });
+
+    const updatedCreds = await db.listCredentials({ nurseId: nurse.id });
+    // License number should be preserved
+    expect(updatedCreds[0].licenseNumber).toBe(originalPrc);
+    // Expiry date should be preserved
+    expect(new Date(updatedCreds[0].expiryDate).toISOString().slice(0, 10)).toBe(
+      new Date(origExpiry).toISOString().slice(0, 10)
+    );
+  });
+
+  it("rejects oversized file payloads exceeding 10 MB limit", async () => {
+    const { ctx: adminCtx } = makeCtx({ user: adminUser });
+    const adminCaller = appRouter.createCaller(adminCtx);
+
+    const nurse = await adminCaller.nurses.create({
+      employeeId: `BIG-${Date.now()}-${Math.random()}`,
+      firstName: "Big",
+      lastName: "File",
+      staffType: "Registered Nurse",
+      employmentStatus: "Active",
+      licenseNumber: uniquePrc(),
+    });
+    const creds = await db.listCredentials({ nurseId: nurse.id });
+
+    const { ctx } = makeCtx({ user: adminUser });
+    const caller = appRouter.createCaller(ctx);
+
+    // 11 MB buffer
+    const largeBuffer = Buffer.alloc(11 * 1024 * 1024);
+    const largeBase64 = largeBuffer.toString("base64");
+
+    await expect(
+      caller.credentials.uploadDocument({
+        credentialId: creds[0].id,
+        fileBase64: largeBase64,
+        fileName: "huge.jpg",
+        mimeType: "image/jpeg",
+      })
+    ).rejects.toThrow("File too large (max 10 MB).");
+  });
+});
