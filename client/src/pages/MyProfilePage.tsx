@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Redirect, useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { NurseAvatar } from "@/components/nursetrack/NurseAvatar";
@@ -18,7 +18,7 @@ import { CredentialUploadButton } from "@/components/nursetrack/CredentialUpload
 import { LicenseStatusBadge, TrainingStatusBadge } from "@/components/nursetrack/StatusBadge";
 import { LICENSE_STATUS_META, nurseIdLabel, type LicenseStatus, formatDate } from "@shared/nursetrack";
 import { toast } from "sonner";
-import { ArrowLeft, FileCheck, LogOut, Plus, Upload, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, FileCheck, LogOut, Plus, Upload, CheckCircle2, Pencil } from "lucide-react";
 
 import StaffLayout from "@/components/StaffLayout";
 
@@ -274,24 +274,169 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   );
 }
 
+function EditPrcDetailsDialog({
+  open,
+  onOpenChange,
+  initialValues,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialValues: {
+    licenseNumber?: string | null;
+    issueDate?: string | Date | null;
+    expiryDate?: string | Date | null;
+  };
+}) {
+  const utils = trpc.useUtils();
+  const [licenseNumber, setLicenseNumber] = useState("");
+  const [issueDate, setIssueDate] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
+
+  const toDateInputStr = (val: string | Date | null | undefined): string => {
+    if (!val) return "";
+    if (val instanceof Date) {
+      return isNaN(val.getTime()) ? "" : val.toISOString().slice(0, 10);
+    }
+    const str = String(val).trim();
+    const m = str.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  };
+
+  useEffect(() => {
+    if (open) {
+      setLicenseNumber(initialValues.licenseNumber ?? "");
+      setIssueDate(toDateInputStr(initialValues.issueDate));
+      setExpiryDate(toDateInputStr(initialValues.expiryDate));
+    }
+  }, [open, initialValues.licenseNumber, initialValues.issueDate, initialValues.expiryDate]);
+
+  const saveMutation = trpc.staffAccount.updateMyPrcLicense.useMutation({
+    onSuccess: () => {
+      toast.success("PRC license details updated.");
+      utils.staffAccount.myProfile.invalidate();
+      onOpenChange(false);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleSave = () => {
+    if (issueDate && expiryDate) {
+      const d1 = new Date(issueDate);
+      const d2 = new Date(expiryDate);
+      if (!isNaN(d1.getTime()) && !isNaN(d2.getTime()) && d1 > d2) {
+        toast.error("Issue date cannot be after expiry date.");
+        return;
+      }
+    }
+    saveMutation.mutate({
+      licenseNumber: licenseNumber.trim() || null,
+      issueDate: issueDate || null,
+      expiryDate: expiryDate || null,
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader className="flex flex-row items-center gap-2 space-y-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="sm:hidden h-8 px-2 -ml-2 text-muted-foreground hover:text-foreground flex items-center gap-1 shrink-0"
+            onClick={() => onOpenChange(false)}
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-xs font-medium">Back</span>
+          </Button>
+          <DialogTitle>Enter PRC License Details</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <div className="space-y-1">
+            <Label htmlFor="manual-prc-number" className="text-xs font-semibold">
+              PRC License Number
+            </Label>
+            <Input
+              id="manual-prc-number"
+              value={licenseNumber}
+              onChange={(e) => setLicenseNumber(e.target.value)}
+              placeholder="e.g. 0123456"
+              className="font-mono text-sm"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Preserves leading zeros (e.g. 0123456).
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="manual-issue-date" className="text-xs font-semibold">
+                Issue Date
+              </Label>
+              <Input
+                id="manual-issue-date"
+                type="date"
+                value={issueDate}
+                onChange={(e) => setIssueDate(e.target.value)}
+                className="text-sm"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="manual-expiry-date" className="text-xs font-semibold">
+                Expiry Date
+              </Label>
+              <Input
+                id="manual-expiry-date"
+                type="date"
+                value={expiryDate}
+                onChange={(e) => setExpiryDate(e.target.value)}
+                className="text-sm"
+              />
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Changes to license details will mark the credential as Pending Verification until reviewed by a supervisor.
+          </p>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 pt-2">
+            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saveMutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleSave}
+              disabled={saveMutation.isPending}
+              className="flex items-center gap-1.5"
+            >
+              {saveMutation.isPending ? "Saving..." : "Save details"}
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function MyProfileView({ profile }: { profile: any }) {
   const utils = trpc.useUtils();
   const { logout } = useAuth();
   const [, setLocation] = useLocation();
   const [contactNumber, setContactNumber] = useState<string | null>(null);
-  const [prcLicense, setPrcLicense] = useState<string | null>(null);
   const [trainingDialogOpen, setTrainingDialogOpen] = useState(false);
+  const [prcDetailsDialogOpen, setPrcDetailsDialogOpen] = useState(false);
+  const [selectedPrcCred, setSelectedPrcCred] = useState<any>(null);
+
+  const prcCred = profile.credentials?.find((c: any) => c.typeName?.toLowerCase().includes("prc")) || profile.credentials?.[0];
 
   const saveMutation = trpc.staffAccount.updateMyBasicInfo.useMutation({
     onSuccess: () => {
       toast.success("Contact info saved.");
-      utils.staffAccount.myProfile.invalidate();
-    },
-    onError: (err) => toast.error(err.message),
-  });
-  const saveLicenseMutation = trpc.staffAccount.updateMyPrcLicense.useMutation({
-    onSuccess: () => {
-      toast.success("PRC License Number updated.");
       utils.staffAccount.myProfile.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -319,7 +464,6 @@ function MyProfileView({ profile }: { profile: any }) {
   });
 
   const currentContact = contactNumber ?? profile.contactNumber ?? "";
-  const currentLicense = prcLicense ?? profile.licenseNumber ?? "";
 
   return (
     <div className="space-y-4">
@@ -362,36 +506,50 @@ function MyProfileView({ profile }: { profile: any }) {
         </div>
       </Card>
 
-      <Card className="glass-card p-6 space-y-3">
+      <Card className="glass-card p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold">PRC License</h2>
-          {profile.licenseStatus ? (
-            <LicenseStatusBadge
-              status={profile.licenseStatus as never}
-              licenseNumber={profile.licenseNumber}
-              showPrefix
-            />
-          ) : (
-            <Badge variant="outline">No license on file</Badge>
-          )}
-        </div>
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Input
-              value={currentLicense}
-              onChange={(e) => setPrcLicense(e.target.value)}
-              placeholder="e.g. 0123456"
-            />
+          <div className="space-y-0.5">
+            <h2 className="font-semibold text-base">PRC License</h2>
+            <p className="text-xs text-muted-foreground">Professional Regulation Commission</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {profile.licenseStatus ? (
+              <LicenseStatusBadge
+                status={profile.licenseStatus as never}
+                licenseNumber={profile.licenseNumber}
+                showPrefix
+              />
+            ) : (
+              <Badge variant="outline">No license on file</Badge>
+            )}
             <Button
-              disabled={saveLicenseMutation.isPending || currentLicense.trim() === (profile.licenseNumber ?? "")}
-              onClick={() => saveLicenseMutation.mutate({ licenseNumber: currentLicense.trim() || null })}
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSelectedPrcCred(prcCred ?? null);
+                setPrcDetailsDialogOpen(true);
+              }}
+              className="flex items-center gap-1.5 ml-2"
             >
-              {saveLicenseMutation.isPending ? "Saving..." : "Save"}
+              <Pencil className="h-3.5 w-3.5" />
+              <span>Edit Details</span>
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Enter or update your Professional Regulation Commission (PRC) license number.
-          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t text-sm">
+          <div className="space-y-0.5">
+            <span className="text-xs text-muted-foreground">License Number</span>
+            <p className="font-mono font-medium text-foreground">{profile.licenseNumber || "—"}</p>
+          </div>
+          <div className="space-y-0.5">
+            <span className="text-xs text-muted-foreground">Issue Date</span>
+            <p className="text-foreground">{formatDate(prcCred?.issueDate) || "—"}</p>
+          </div>
+          <div className="space-y-0.5">
+            <span className="text-xs text-muted-foreground">Expiry Date</span>
+            <p className="text-foreground">{formatDate(profile.licenseExpiryDate) || "—"}</p>
+          </div>
         </div>
       </Card>
 
@@ -420,48 +578,78 @@ function MyProfileView({ profile }: { profile: any }) {
           <p className="text-sm text-muted-foreground py-2">No credentials recorded.</p>
         ) : (
           <div className="space-y-3">
-            {profile.credentials.map((c: any) => (
-              <div key={c.id} className="p-3 border rounded-lg bg-card/40 flex flex-wrap items-center justify-between gap-3">
-                <div className="space-y-1 min-w-48">
-                  <div className="font-medium text-sm">{c.typeName}</div>
-                  <div className="text-xs text-muted-foreground">
-                    Number: <span className="font-mono">{c.licenseNumber || "—"}</span> &middot; Expires: {formatDate(c.expiryDate)}
-                  </div>
-                  {c.documentKey && (
-                    <div className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      <span>Document on file</span>
+            {profile.credentials.map((c: any) => {
+              const isPrc = Boolean(c.typeName?.toLowerCase().includes("prc"));
+              return (
+                <div key={c.id} className="p-3 border rounded-lg bg-card/40 flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1 min-w-48">
+                    <div className="font-medium text-sm">{c.typeName}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Number: <span className="font-mono">{c.licenseNumber || "—"}</span> &middot; Expires: {formatDate(c.expiryDate)}
                     </div>
-                  )}
+                    {c.documentKey && (
+                      <div className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>Document on file</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isPrc && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedPrcCred(c);
+                          setPrcDetailsDialogOpen(true);
+                        }}
+                        className="flex items-center gap-1.5"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        <span>Edit Details</span>
+                      </Button>
+                    )}
+                    <CredentialUploadButton
+                      credential={{
+                        id: c.id,
+                        typeName: c.typeName,
+                        licenseNumber: c.licenseNumber,
+                        issueDate: c.issueDate,
+                        expiryDate: c.expiryDate,
+                        nurseName: profile?.firstName ? `${profile.firstName} ${profile.lastName}` : undefined,
+                      }}
+                      label={c.documentKey ? "Replace Document" : "Upload Document"}
+                      disabled={credDocMutation.isPending}
+                      onUpload={async ({ file, confirmedFields }) => {
+                        await credDocMutation.mutateAsync({
+                          credentialId: c.id,
+                          fileBase64: file.fileBase64,
+                          fileName: file.fileName,
+                          mimeType: file.mimeType,
+                          confirmedFields,
+                        });
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <CredentialUploadButton
-                    credential={{
-                      id: c.id,
-                      typeName: c.typeName,
-                      licenseNumber: c.licenseNumber,
-                      issueDate: c.issueDate,
-                      expiryDate: c.expiryDate,
-                      nurseName: profile?.firstName ? `${profile.firstName} ${profile.lastName}` : undefined,
-                    }}
-                    label={c.documentKey ? "Replace Document" : "Upload Document"}
-                    disabled={credDocMutation.isPending}
-                    onUpload={async ({ file, confirmedFields }) => {
-                      await credDocMutation.mutateAsync({
-                        credentialId: c.id,
-                        fileBase64: file.fileBase64,
-                        fileName: file.fileName,
-                        mimeType: file.mimeType,
-                        confirmedFields,
-                      });
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>
+
+      <EditPrcDetailsDialog
+        open={prcDetailsDialogOpen}
+        onOpenChange={(v) => {
+          setPrcDetailsDialogOpen(v);
+          if (!v) setSelectedPrcCred(null);
+        }}
+        initialValues={{
+          licenseNumber: selectedPrcCred?.licenseNumber ?? profile.licenseNumber,
+          issueDate: selectedPrcCred?.issueDate ?? prcCred?.issueDate,
+          expiryDate: selectedPrcCred?.expiryDate ?? profile.licenseExpiryDate,
+        }}
+      />
 
       <Card className="glass-card p-6 space-y-4">
         <div className="flex items-center justify-between">

@@ -57,15 +57,16 @@ export function CredentialUploadButton({
     }
 
     const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name);
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
 
-    // If PRC and Image: Run OCR before document compression via review dialog
-    if (isPrc && isImage) {
+    // If PRC (Image or PDF): Run OCR review for images, or manual field entry review for PDFs
+    if (isPrc && (isImage || isPdf)) {
       setSelectedFile(file);
       setReviewOpen(true);
       return;
     }
 
-    // Default flow (PDF or non-PRC credentials): direct upload without OCR review
+    // Default flow (non-PRC credentials): direct upload without OCR review
     try {
       setIsUploading(true);
       let payloadFile: { fileBase64: string; fileName: string; mimeType: string };

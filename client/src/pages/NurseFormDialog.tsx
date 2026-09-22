@@ -33,6 +33,8 @@ interface NurseEditData {
   profilePhotoKey?: string | null;
   accountEmail?: string | null;
   licenseNumber?: string | null;
+  licenseIssueDate?: Date | string | null;
+  licenseExpiryDate?: Date | string | null;
 }
 
 export function NurseFormDialog({
@@ -50,6 +52,8 @@ export function NurseFormDialog({
   const utils = trpc.useUtils();
   const [employeeId, setEmployeeId] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
+  const [licenseIssueDate, setLicenseIssueDate] = useState("");
+  const [licenseExpiryDate, setLicenseExpiryDate] = useState("");
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -64,11 +68,23 @@ export function NurseFormDialog({
   const [photo, setPhoto] = useState<{ fileBase64: string; fileName: string; mimeType: string } | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
+  const toDateInputStr = (val: string | Date | null | undefined): string => {
+    if (!val) return "";
+    if (val instanceof Date) return isNaN(val.getTime()) ? "" : val.toISOString().slice(0, 10);
+    const str = String(val).trim();
+    const m = str.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  };
+
   useEffect(() => {
     if (open) {
       if (nurse) {
         setEmployeeId(nurse.employeeId);
         setLicenseNumber(nurse.licenseNumber ?? "");
+        setLicenseIssueDate(toDateInputStr(nurse.licenseIssueDate));
+        setLicenseExpiryDate(toDateInputStr(nurse.licenseExpiryDate));
         setFirstName(nurse.firstName);
         setMiddleName(nurse.middleName ?? "");
         setLastName(nurse.lastName);
@@ -84,6 +100,8 @@ export function NurseFormDialog({
       } else {
         setEmployeeId("");
         setLicenseNumber("");
+        setLicenseIssueDate("");
+        setLicenseExpiryDate("");
         setFirstName("");
         setMiddleName("");
         setLastName("");
@@ -159,6 +177,15 @@ export function NurseFormDialog({
       contactNumber: contactNumber.trim() || undefined,
       currentAreaId: areaId ? Number(areaId) : undefined,
     };
+    if (licenseIssueDate && licenseExpiryDate) {
+      const d1 = new Date(licenseIssueDate);
+      const d2 = new Date(licenseExpiryDate);
+      if (!isNaN(d1.getTime()) && !isNaN(d2.getTime()) && d1 > d2) {
+        toast.error("PRC issue date cannot be after expiry date.");
+        return;
+      }
+    }
+
     let id = nurse?.id;
     if (nurse) {
       // "" clears accountEmail (and unlinks the account) — create's schema has
@@ -168,12 +195,16 @@ export function NurseFormDialog({
         ...data,
         accountEmail: accountEmail.trim(),
         licenseNumber: licenseNumber.trim(),
+        licenseIssueDate: licenseIssueDate ? new Date(licenseIssueDate) : null,
+        licenseExpiryDate: licenseExpiryDate ? new Date(licenseExpiryDate) : null,
       });
     } else {
       const created = await create.mutateAsync({
         ...data,
         accountEmail: accountEmail.trim() || undefined,
         licenseNumber: licenseNumber.trim() || undefined,
+        licenseIssueDate: licenseIssueDate ? new Date(licenseIssueDate) : undefined,
+        licenseExpiryDate: licenseExpiryDate ? new Date(licenseExpiryDate) : undefined,
       });
       id = created.id;
     }
@@ -224,6 +255,14 @@ export function NurseFormDialog({
           <div>
             <Label htmlFor="licenseNumber" className="mb-1 block">PRC License Number</Label>
             <Input id="licenseNumber" value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} placeholder="e.g., 0123456" />
+          </div>
+          <div>
+            <Label htmlFor="licenseIssueDate" className="mb-1 block">PRC Issue Date</Label>
+            <Input id="licenseIssueDate" type="date" value={licenseIssueDate} onChange={(e) => setLicenseIssueDate(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="licenseExpiryDate" className="mb-1 block">PRC Expiry Date</Label>
+            <Input id="licenseExpiryDate" type="date" value={licenseExpiryDate} onChange={(e) => setLicenseExpiryDate(e.target.value)} />
           </div>
           <div>
             <Label className="mb-1 block">First Name *</Label>

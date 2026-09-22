@@ -5,10 +5,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { recognizePrcImage } from "@/lib/tesseractOcr";
-import { compressImage } from "./FileUpload";
+import { compressImage, fileToBase64 } from "./FileUpload";
 import { formatDate } from "../../../../shared/nursetrack";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw, Upload } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, FileText, Loader2, Pencil, RefreshCw, Upload } from "lucide-react";
+
+function safeDateInput(val: string | Date | null | undefined): string {
+  if (!val) return "";
+  if (val instanceof Date) {
+    return isNaN(val.getTime()) ? "" : val.toISOString().slice(0, 10);
+  }
+  const str = String(val).trim();
+  const m = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
 
 export interface PrcExistingValues {
   credentialId: number;
@@ -62,6 +74,7 @@ export function PrcOcrReviewDialog({
   const [showRawText, setShowRawText] = useState<boolean>(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isPdf = Boolean(file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")));
 
   // Setup preview and run OCR when file changes / dialog opens
   useEffect(() => {
@@ -77,6 +90,18 @@ export function PrcOcrReviewDialog({
       return;
     }
 
+    if (isPdf) {
+      if (imageUrl) {
+        URL.revokeObjectURL(imageUrl);
+        setImageUrl(null);
+      }
+      setOcrStatus("review");
+      setLicenseNumber(existingValues.licenseNumber ?? "");
+      setIssueDate(safeDateInput(existingValues.issueDate));
+      setExpiryDate(safeDateInput(existingValues.expiryDate));
+      return;
+    }
+
     const objectUrl = URL.createObjectURL(file);
     setImageUrl(objectUrl);
 
@@ -89,7 +114,7 @@ export function PrcOcrReviewDialog({
         abortControllerRef.current = null;
       }
     };
-  }, [open, file]);
+  }, [open, file, isPdf]);
 
   const runOcr = async (targetFile: File) => {
     if (abortControllerRef.current) {
@@ -125,9 +150,9 @@ export function PrcOcrReviewDialog({
       if (ac.signal.aborted) return;
 
       setRawOcrText(res.text);
-      setLicenseNumber(res.extracted.licenseNumber ?? "");
-      setIssueDate(res.extracted.issueDate ?? "");
-      setExpiryDate(res.extracted.expiryDate ?? "");
+      setLicenseNumber(res.extracted.licenseNumber ?? existingValues.licenseNumber ?? "");
+      setIssueDate(res.extracted.issueDate ?? safeDateInput(existingValues.issueDate));
+      setExpiryDate(res.extracted.expiryDate ?? safeDateInput(existingValues.expiryDate));
       setOcrStatus("review");
     } catch (err: any) {
       if (ac.signal.aborted) return;
@@ -135,6 +160,23 @@ export function PrcOcrReviewDialog({
       setErrorMessage(err?.message || "Failed to extract text from this image.");
       setOcrStatus("error");
     }
+  };
+
+  const handleEnterManually = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (!licenseNumber && existingValues.licenseNumber) {
+      setLicenseNumber(existingValues.licenseNumber);
+    }
+    if (!issueDate && existingValues.issueDate) {
+      setIssueDate(safeDateInput(existingValues.issueDate));
+    }
+    if (!expiryDate && existingValues.expiryDate) {
+      setExpiryDate(safeDateInput(existingValues.expiryDate));
+    }
+    setOcrStatus("review");
   };
 
   const handleCancel = () => {
@@ -160,9 +202,9 @@ export function PrcOcrReviewDialog({
     }
 
     try {
-      const compressed = await compressImage(file, 1600, 0.82);
+      const payloadFile = isPdf ? await fileToBase64(file) : await compressImage(file, 1600, 0.82);
       await onSaveWithFields({
-        file: compressed,
+        file: payloadFile,
         confirmedFields: {
           licenseNumber: licenseNumber.trim() || null,
           issueDate: issueDate || null,
@@ -178,8 +220,8 @@ export function PrcOcrReviewDialog({
   const handleSaveDocumentOnly = async () => {
     if (!file) return;
     try {
-      const compressed = await compressImage(file, 1600, 0.82);
-      await onSaveDocumentOnly({ file: compressed });
+      const payloadFile = isPdf ? await fileToBase64(file) : await compressImage(file, 1600, 0.82);
+      await onSaveDocumentOnly({ file: payloadFile });
       onOpenChange(false);
     } catch (err: any) {
       toast.error(err?.message || "Failed to save document.");
@@ -195,11 +237,13 @@ export function PrcOcrReviewDialog({
             Review PRC License Document
           </DialogTitle>
           <DialogDescription className="text-xs sm:text-sm text-muted-foreground">
-            {ocrStatus === "analyzing"
-              ? "Running browser OCR to read license details. Values will appear for review."
-              : ocrStatus === "error"
-                ? "OCR could not read fields from this image. You can retry or proceed with document-only upload."
-                : "Verify the extracted PRC license fields against the uploaded card image before saving."}
+            {isPdf
+              ? "PDF document attached. Enter or verify the PRC license details below before saving."
+              : ocrStatus === "analyzing"
+                ? "Running browser OCR to read license details. Values will appear for review."
+                : ocrStatus === "error"
+                  ? "OCR could not read fields from this image. You can enter details manually, retry OCR, or save document only."
+                  : "Verify the extracted PRC license fields against the uploaded card image before saving."}
           </DialogDescription>
         </DialogHeader>
 
@@ -221,9 +265,13 @@ export function PrcOcrReviewDialog({
                 Processing in your browser. This worker will automatically terminate after completion or timeout.
               </p>
             </div>
-            <div className="flex justify-center pt-2">
+            <div className="flex justify-center gap-2 pt-2">
               <Button variant="ghost" size="sm" onClick={handleCancel}>
                 Cancel
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleEnterManually} className="flex items-center gap-1.5">
+                <Pencil className="h-3.5 w-3.5" />
+                Enter details manually
               </Button>
             </div>
           </div>
@@ -270,6 +318,16 @@ export function PrcOcrReviewDialog({
                 <Upload className="h-3.5 w-3.5" />
                 {isSaving ? "Saving…" : "Save document only"}
               </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleEnterManually}
+                disabled={isSaving}
+                className="flex items-center gap-1.5"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Enter details manually
+              </Button>
             </DialogFooter>
           </div>
         )}
@@ -283,10 +341,23 @@ export function PrcOcrReviewDialog({
                 <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Uploaded Document Preview
                 </Label>
-                {imageUrl && (
-                  <div className="rounded-lg border overflow-hidden bg-muted/10 max-h-64 sm:max-h-72 flex items-center justify-center">
-                    <img src={imageUrl} alt="PRC Card" className="max-h-64 sm:max-h-72 w-full object-contain" />
+                {isPdf ? (
+                  <div className="rounded-lg border border-dashed border-primary/30 p-6 bg-primary/5 flex flex-col items-center justify-center text-center space-y-2">
+                    <FileText className="h-10 w-10 text-primary/70" />
+                    <div className="text-xs font-semibold text-foreground truncate max-w-[200px]">{file?.name}</div>
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                      PDF Document ({file ? (file.size / 1024).toFixed(0) + " KB" : ""})
+                    </span>
+                    <p className="text-[11px] text-muted-foreground">
+                      Document attached. Manually enter or verify the license details.
+                    </p>
                   </div>
+                ) : (
+                  imageUrl && (
+                    <div className="rounded-lg border overflow-hidden bg-muted/10 max-h-64 sm:max-h-72 flex items-center justify-center">
+                      <img src={imageUrl} alt="PRC Card" className="max-h-64 sm:max-h-72 w-full object-contain" />
+                    </div>
+                  )
                 )}
                 <div className="p-2.5 rounded border bg-card/60 text-xs space-y-1">
                   <div className="font-medium text-foreground">Current values on file:</div>
@@ -349,22 +420,24 @@ export function PrcOcrReviewDialog({
                   </p>
                 </div>
 
-                {/* Extracted raw OCR text accordion */}
-                <div className="border rounded-md p-2 bg-muted/20 space-y-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setShowRawText(!showRawText)}
-                    className="w-full flex items-center justify-between text-xs font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    <span>View raw OCR extracted text</span>
-                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showRawText ? "rotate-180" : ""}`} />
-                  </button>
-                  {showRawText && (
-                    <pre className="mt-1 p-2 bg-background border rounded font-mono text-[10px] sm:text-[11px] text-muted-foreground max-h-28 overflow-y-auto whitespace-pre-wrap">
-                      {rawOcrText || "(No text recognized)"}
-                    </pre>
-                  )}
-                </div>
+                {/* Extracted raw OCR text accordion (when available) */}
+                {rawOcrText ? (
+                  <div className="border rounded-md p-2 bg-muted/20 space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowRawText(!showRawText)}
+                      className="w-full flex items-center justify-between text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      <span>View raw OCR extracted text</span>
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showRawText ? "rotate-180" : ""}`} />
+                    </button>
+                    {showRawText && (
+                      <pre className="mt-1 p-2 bg-background border rounded font-mono text-[10px] sm:text-[11px] text-muted-foreground max-h-28 overflow-y-auto whitespace-pre-wrap">
+                        {rawOcrText}
+                      </pre>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </div>
 

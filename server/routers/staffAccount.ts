@@ -16,6 +16,33 @@ const GENERIC_CLAIM_ERROR =
 
 const CLAIM_RATE_LIMIT = { max: 10, windowMs: 15 * 60 * 1000 };
 
+const parseDateInput = (val: string | Date | null | undefined): Date | null | undefined => {
+  if (val === undefined) return undefined;
+  if (val === null || val === "") return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date." });
+    return val;
+  }
+  const str = String(val).trim();
+  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const mon = parseInt(m[2], 10);
+    const day = parseInt(m[3], 10);
+    if (y < 1950 || y > 2100 || mon < 1 || mon > 12) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date range." });
+    }
+    const daysInMonth = new Date(Date.UTC(y, mon, 0)).getUTCDate();
+    if (day < 1 || day > daysInMonth) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid calendar date." });
+    }
+    return new Date(`${m[1]}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}T00:00:00.000Z`);
+  }
+  const d = new Date(str);
+  if (isNaN(d.getTime())) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date." });
+  return d;
+};
+
 /**
  * Self-service for non-admin (staff) accounts: first-visit claim by
  * PRC/employee ID, then view/edit that one nurse record on return Google
@@ -215,11 +242,28 @@ export const staffAccountRouter = router({
     }),
 
   updateMyPrcLicense: staffProcedure
-    .input(z.object({ licenseNumber: z.string().max(64).nullable().optional() }))
+    .input(
+      z.object({
+        licenseNumber: z.string().trim().max(64).nullable().optional(),
+        issueDate: z.union([z.string(), z.date()]).nullable().optional(),
+        expiryDate: z.union([z.string(), z.date()]).nullable().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       const nurse = await db.getNurseById(ctx.nurseId);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
-      const licResult = await db.upsertNursePrcLicense(nurse.id, input.licenseNumber ?? null);
+
+      const parsedIssue = parseDateInput(input.issueDate);
+      const parsedExpiry = parseDateInput(input.expiryDate);
+
+      if (parsedIssue && parsedExpiry && parsedIssue > parsedExpiry) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+      }
+
+      const licResult = await db.upsertNursePrcLicense(nurse.id, input.licenseNumber ?? null, {
+        issueDate: parsedIssue,
+        expiryDate: parsedExpiry,
+      });
       if (!licResult.ok) {
         throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
       }
@@ -229,7 +273,7 @@ export const staffAccountRouter = router({
         actionType: "nurse.updated",
         entityType: "nurse",
         entityId: nurse.id,
-        summary: `PRC License Number updated to ${input.licenseNumber || "none"} by ${nurseFullName(nurse)} (self-service)`,
+        summary: `PRC License updated (No: ${input.licenseNumber || "none"}, Exp: ${parsedExpiry ? parsedExpiry.toISOString().slice(0, 10) : "none"}) by ${nurseFullName(nurse)} (self-service)`,
       });
       return { ok: true };
     }),
@@ -298,33 +342,6 @@ export const staffAccountRouter = router({
 
       const patch: Record<string, unknown> = {};
 
-      const parseDateVal = (val: string | Date | null | undefined): Date | null | undefined => {
-        if (val === undefined) return undefined;
-        if (val === null || val === "") return null;
-        if (val instanceof Date) {
-          if (isNaN(val.getTime())) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date." });
-          return val;
-        }
-        const str = String(val).trim();
-        const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-        if (m) {
-          const y = parseInt(m[1], 10);
-          const mon = parseInt(m[2], 10);
-          const day = parseInt(m[3], 10);
-          if (y < 1950 || y > 2100 || mon < 1 || mon > 12) {
-            throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date range." });
-          }
-          const daysInMonth = new Date(Date.UTC(y, mon, 0)).getUTCDate();
-          if (day < 1 || day > daysInMonth) {
-            throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid calendar date." });
-          }
-          return new Date(`${m[1]}-${String(mon).padStart(2, "0")}-${String(day).padStart(2, "0")}T00:00:00.000Z`);
-        }
-        const d = new Date(str);
-        if (isNaN(d.getTime())) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid date." });
-        return d;
-      };
-
       let parsedIssue: Date | null | undefined;
       let parsedExpiry: Date | null | undefined;
 
@@ -344,12 +361,12 @@ export const staffAccountRouter = router({
         }
 
         if (input.confirmedFields.issueDate !== undefined) {
-          parsedIssue = parseDateVal(input.confirmedFields.issueDate);
+          parsedIssue = parseDateInput(input.confirmedFields.issueDate);
           patch.issueDate = parsedIssue ?? null;
         }
 
         if (input.confirmedFields.expiryDate !== undefined) {
-          parsedExpiry = parseDateVal(input.confirmedFields.expiryDate);
+          parsedExpiry = parseDateInput(input.confirmedFields.expiryDate);
           if (parsedExpiry) {
             patch.expiryDate = parsedExpiry;
             const existingExpiryStr = cred.expiryDate

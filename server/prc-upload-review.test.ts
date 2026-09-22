@@ -345,4 +345,129 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       })
     ).rejects.toThrow("File too large (max 10 MB).");
   });
+
+  describe("Manual PRC Input for Staff & Supervisor", () => {
+    it("allows staff member to manually input PRC details (license number, issue date, expiry date)", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      const nurse = await adminCaller.nurses.create({
+        employeeId: `MAN-STAFF-${Date.now()}-${Math.random()}`,
+        firstName: "Manual",
+        lastName: "Nurse",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+      });
+
+      const { ctx: staffCtx } = makeCtx({ claimNurseId: nurse.id });
+      const staffCaller = appRouter.createCaller(staffCtx);
+
+      const prcNum = "00" + Math.floor(10000 + Math.random() * 90000); // leading zeros
+      await staffCaller.staffAccount.updateMyPrcLicense({
+        licenseNumber: prcNum,
+        issueDate: "2024-04-15",
+        expiryDate: "2027-04-15",
+      });
+
+      const creds = await db.listCredentials({ nurseId: nurse.id });
+      const prc = creds.find((c) => c.licenseNumber === prcNum);
+      expect(prc).toBeDefined();
+      expect(prc?.licenseNumber).toBe(prcNum);
+      expect(prc?.licenseNumber.startsWith("00")).toBe(true);
+      expect(prc?.issueDate ? new Date(prc.issueDate).toISOString().slice(0, 10) : "").toBe("2024-04-15");
+      expect(prc?.expiryDate ? new Date(prc.expiryDate).toISOString().slice(0, 10) : "").toBe("2027-04-15");
+      expect(prc?.verificationStatus).toBe("Pending Verification");
+    });
+
+    it("rejects staff manual PRC input when issue date is after expiry date", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      const nurse = await adminCaller.nurses.create({
+        employeeId: `MAN-DATE-${Date.now()}-${Math.random()}`,
+        firstName: "Invalid",
+        lastName: "DateOrder",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+      });
+
+      const { ctx: staffCtx } = makeCtx({ claimNurseId: nurse.id });
+      const staffCaller = appRouter.createCaller(staffCtx);
+
+      await expect(
+        staffCaller.staffAccount.updateMyPrcLicense({
+          licenseNumber: uniquePrc(),
+          issueDate: "2028-01-01",
+          expiryDate: "2026-01-01",
+        })
+      ).rejects.toThrow("Issue date cannot be after expiry date.");
+    });
+
+    it("rejects staff manual PRC input when duplicate PRC license exists", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      const sharedPrc = uniquePrc();
+      await adminCaller.nurses.create({
+        employeeId: `N1-${Date.now()}-${Math.random()}`,
+        firstName: "First",
+        lastName: "Nurse",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+        licenseNumber: sharedPrc,
+      });
+
+      const nurse2 = await adminCaller.nurses.create({
+        employeeId: `N2-${Date.now()}-${Math.random()}`,
+        firstName: "Second",
+        lastName: "Nurse",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+      });
+
+      const { ctx: staffCtx } = makeCtx({ claimNurseId: nurse2.id });
+      const staffCaller = appRouter.createCaller(staffCtx);
+
+      await expect(
+        staffCaller.staffAccount.updateMyPrcLicense({
+          licenseNumber: sharedPrc,
+        })
+      ).rejects.toThrow("Another nurse is already registered with this PRC License Number.");
+    });
+
+    it("allows supervisor to input PRC details via nurses.update and enforces date validity", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      const nurse = await adminCaller.nurses.create({
+        employeeId: `SUP-MAN-${Date.now()}-${Math.random()}`,
+        firstName: "Supervisor",
+        lastName: "Managed",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+      });
+
+      const prcNum = uniquePrc();
+      await adminCaller.nurses.update({
+        id: nurse.id,
+        licenseNumber: prcNum,
+        licenseIssueDate: "2024-02-01T00:00:00.000Z",
+        licenseExpiryDate: "2027-02-01T00:00:00.000Z",
+      });
+
+      const creds = await db.listCredentials({ nurseId: nurse.id });
+      const prc = creds.find((c) => c.licenseNumber === prcNum);
+      expect(prc).toBeDefined();
+      expect(prc?.verificationStatus).toBe("Pending Verification");
+
+      // Verify date ordering enforcement
+      await expect(
+        adminCaller.nurses.update({
+          id: nurse.id,
+          licenseIssueDate: "2028-02-01T00:00:00.000Z",
+          licenseExpiryDate: "2027-02-01T00:00:00.000Z",
+        })
+      ).rejects.toThrow("Issue date cannot be after expiry date.");
+    });
+  });
 });
