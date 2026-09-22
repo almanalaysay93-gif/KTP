@@ -74,10 +74,13 @@ export function PrcOcrReviewDialog({
   const [showRawText, setShowRawText] = useState<boolean>(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const runIdRef = useRef<number>(0);
   const isPdf = Boolean(file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")));
 
-  // Setup preview and run OCR when file changes / dialog opens
+  // Setup preview and run OCR when file changes / dialog opens (F4: reset all state)
   useEffect(() => {
+    runIdRef.current++;
+
     if (!open || !file) {
       if (imageUrl) {
         URL.revokeObjectURL(imageUrl);
@@ -87,8 +90,23 @@ export function PrcOcrReviewDialog({
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
       }
+      setLicenseNumber("");
+      setIssueDate("");
+      setExpiryDate("");
+      setRawOcrText("");
+      setShowRawText(false);
+      setErrorMessage("");
+      setOcrStatus("analyzing");
       return;
     }
+
+    // Always reset all fields to clean initial state for the new file/credential
+    setLicenseNumber(existingValues.licenseNumber ?? "");
+    setIssueDate(safeDateInput(existingValues.issueDate));
+    setExpiryDate(safeDateInput(existingValues.expiryDate));
+    setRawOcrText("");
+    setShowRawText(false);
+    setErrorMessage("");
 
     if (isPdf) {
       if (imageUrl) {
@@ -96,16 +114,13 @@ export function PrcOcrReviewDialog({
         setImageUrl(null);
       }
       setOcrStatus("review");
-      setLicenseNumber(existingValues.licenseNumber ?? "");
-      setIssueDate(safeDateInput(existingValues.issueDate));
-      setExpiryDate(safeDateInput(existingValues.expiryDate));
       return;
     }
 
     const objectUrl = URL.createObjectURL(file);
     setImageUrl(objectUrl);
 
-    runOcr(file);
+    runOcr(file, runIdRef.current);
 
     return () => {
       URL.revokeObjectURL(objectUrl);
@@ -114,9 +129,9 @@ export function PrcOcrReviewDialog({
         abortControllerRef.current = null;
       }
     };
-  }, [open, file, isPdf]);
+  }, [open, file, isPdf, existingValues.credentialId]);
 
-  const runOcr = async (targetFile: File) => {
+  const runOcr = async (targetFile: File, currentRunId: number) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -133,6 +148,7 @@ export function PrcOcrReviewDialog({
         signal: ac.signal,
         timeoutMs: 60000,
         onProgress: (p) => {
+          if (runIdRef.current !== currentRunId || ac.signal.aborted) return;
           const pct = Math.min(Math.round(p.progress * 100), 100);
           setProgressVal(Math.max(pct, 15));
           if (p.status === "loading tesseract core") {
@@ -147,7 +163,7 @@ export function PrcOcrReviewDialog({
         },
       });
 
-      if (ac.signal.aborted) return;
+      if (runIdRef.current !== currentRunId || ac.signal.aborted) return;
 
       setRawOcrText(res.text);
       setLicenseNumber(res.extracted.licenseNumber ?? existingValues.licenseNumber ?? "");
@@ -155,7 +171,7 @@ export function PrcOcrReviewDialog({
       setExpiryDate(res.extracted.expiryDate ?? safeDateInput(existingValues.expiryDate));
       setOcrStatus("review");
     } catch (err: any) {
-      if (ac.signal.aborted) return;
+      if (runIdRef.current !== currentRunId || ac.signal.aborted) return;
       console.warn("OCR process error:", err);
       setErrorMessage(err?.message || "Failed to extract text from this image.");
       setOcrStatus("error");
@@ -163,19 +179,18 @@ export function PrcOcrReviewDialog({
   };
 
   const handleEnterManually = () => {
+    runIdRef.current++;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    if (!licenseNumber && existingValues.licenseNumber) {
-      setLicenseNumber(existingValues.licenseNumber);
-    }
-    if (!issueDate && existingValues.issueDate) {
-      setIssueDate(safeDateInput(existingValues.issueDate));
-    }
-    if (!expiryDate && existingValues.expiryDate) {
-      setExpiryDate(safeDateInput(existingValues.expiryDate));
-    }
+    // Strictly initialize from current saved record (F4)
+    setLicenseNumber(existingValues.licenseNumber ?? "");
+    setIssueDate(safeDateInput(existingValues.issueDate));
+    setExpiryDate(safeDateInput(existingValues.expiryDate));
+    setRawOcrText("");
+    setShowRawText(false);
+    setErrorMessage("");
     setOcrStatus("review");
   };
 
@@ -301,7 +316,7 @@ export function PrcOcrReviewDialog({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => file && runOcr(file)}
+                onClick={() => file && runOcr(file, ++runIdRef.current)}
                 disabled={isSaving}
                 className="flex items-center gap-1.5"
               >

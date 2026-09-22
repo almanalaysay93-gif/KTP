@@ -29,9 +29,39 @@ export async function recognizePrcImage(
   const timeoutMs = options?.timeoutMs ?? 60000;
   const signal = options?.signal;
 
-  let worker: any = null;
+  let activeWorker: any = null;
   let timer: any = null;
-  let didTimeout = false;
+  let isCancelled = false;
+  let isCleanedUp = false;
+  let abortHandler: (() => void) | null = null;
+
+  const terminateSafe = async (w: any) => {
+    if (!w) return;
+    try {
+      await w.terminate();
+    } catch (err) {
+      console.warn("Failed to terminate OCR worker:", err);
+    }
+  };
+
+  const cleanup = async () => {
+    if (isCleanedUp) return;
+    isCleanedUp = true;
+    isCancelled = true;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (signal && abortHandler) {
+      signal.removeEventListener("abort", abortHandler);
+      abortHandler = null;
+    }
+    if (activeWorker) {
+      const w = activeWorker;
+      activeWorker = null;
+      await terminateSafe(w);
+    }
+  };
 
   try {
     if (signal?.aborted) {
@@ -40,39 +70,40 @@ export async function recognizePrcImage(
 
     const abortPromise = new Promise<never>((_, reject) => {
       if (signal) {
-        signal.addEventListener(
-          "abort",
-          () => {
-            reject(new Error("OCR cancelled by user"));
-          },
-          { once: true }
-        );
+        abortHandler = () => {
+          isCancelled = true;
+          reject(new Error("OCR cancelled by user"));
+        };
+        signal.addEventListener("abort", abortHandler, { once: true });
       }
     });
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        didTimeout = true;
+        isCancelled = true;
         reject(new Error("OCR operation timed out after 60 seconds"));
       }, timeoutMs);
     });
 
     const ocrTask = (async () => {
-      options?.onProgress?.({ status: "Loading OCR engine…", progress: 0.1 });
+      if (!isCancelled && !signal?.aborted) {
+        options?.onProgress?.({ status: "Loading OCR engine…", progress: 0.1 });
+      }
       const { createWorker } = await import("tesseract.js");
 
-      if (signal?.aborted || didTimeout) throw new Error("Cancelled");
+      if (isCancelled || signal?.aborted) throw new Error("Cancelled");
 
       const origin = typeof window !== "undefined" && window.location?.origin ? window.location.origin : "";
       const workerPath = `${origin}/ocr/worker.min.js`;
       const corePath = `${origin}/ocr`;
       const langPath = `${origin}/ocr`;
 
-      worker = await createWorker("eng", 1, {
+      const instance = await createWorker("eng", 1, {
         workerPath,
         corePath,
         langPath,
         logger: (m: any) => {
+          if (isCancelled || isCleanedUp || signal?.aborted) return;
           if (m?.status && typeof m?.progress === "number") {
             options?.onProgress?.({
               status: m.status,
@@ -82,10 +113,23 @@ export async function recognizePrcImage(
         },
       });
 
-      if (signal?.aborted || didTimeout) throw new Error("Cancelled");
+      if (isCancelled || isCleanedUp || signal?.aborted) {
+        await terminateSafe(instance);
+        throw new Error("Cancelled");
+      }
 
-      options?.onProgress?.({ status: "Recognizing image text…", progress: 0.5 });
-      const res = await worker.recognize(imageSource);
+      activeWorker = instance;
+
+      if (!isCancelled && !signal?.aborted) {
+        options?.onProgress?.({ status: "Recognizing image text…", progress: 0.5 });
+      }
+
+      const res = await instance.recognize(imageSource);
+
+      if (isCancelled || isCleanedUp || signal?.aborted) {
+        throw new Error("Cancelled");
+      }
+
       const text = res?.data?.text || "";
       const extracted = extractPrcFields(text);
       return { text, extracted };
@@ -94,13 +138,6 @@ export async function recognizePrcImage(
     const result = await Promise.race([ocrTask, abortPromise, timeoutPromise]);
     return result;
   } finally {
-    if (timer) clearTimeout(timer);
-    if (worker) {
-      try {
-        await worker.terminate();
-      } catch (err) {
-        console.warn("Failed to terminate OCR worker:", err);
-      }
-    }
+    await cleanup();
   }
 }

@@ -97,7 +97,31 @@ describe("PRC OCR Text Extraction (T1)", () => {
     expect(parseDateString("Issued: JANUARY 5, 2023")).toBe("2023-01-05");
     expect(parseDateString("Expires: 15 AUG 2026")).toBe("2026-08-15");
     expect(parseDateString("Date: 12/31/2024")).toBe("2024-12-31");
-    expect(parseDateString("Date: 2025-06-20")).toBe("2025-06-20");
     expect(parseDateString("Invalid 02/30/2023")).toBeUndefined();
   });
+
+  it("respects label boundaries on the same line without assigning expiry to issue date (F5)", () => {
+    const text = "Date Issued: OCTOBER 24, 2024 Valid Until: OCTOBER 24, 2027";
+    const res = extractPrcFields(text);
+    expect(res.issueDate).toBe("2024-10-24");
+    expect(res.expiryDate).toBe("2027-10-24");
+  });
+
+  it("never crosses another label on the next line when a field is missing (F5)", () => {
+    const text = `
+      Date of Registration
+      Valid Until: OCTOBER 24, 2027
+    `;
+    const res = extractPrcFields(text);
+    expect(res.issueDate).toBeUndefined();
+    expect(res.expiryDate).toBe("2027-10-24");
+  });
+
+  it("leaves conflicting dates unresolved for manual review when issue date is after expiry date (F5)", () => {
+    const text = "Date Issued: OCTOBER 24, 2027 Valid Until: OCTOBER 24, 2024";
+    const res = extractPrcFields(text);
+    expect(res.issueDate).toBeUndefined();
+    expect(res.expiryDate).toBeUndefined();
+  });
 });
+

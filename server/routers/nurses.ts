@@ -326,7 +326,11 @@ export const nursesRouter = router({
           issueDate: licenseIssueDate,
           expiryDate: licenseExpiryDate,
         });
-        if (!licRes.ok) throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+        if (!licRes.ok) {
+          if (licRes.reason === "conflict") throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+          if (licRes.reason === "missing_expiry") throw new TRPCError({ code: "BAD_REQUEST", message: "Expiry date is required when adding a PRC license." });
+          if (licRes.reason === "invalid_dates") throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+        }
       }
       if (accountEmail) {
         const result = await db.adminSetNurseAccountEmail(id, accountEmail);
@@ -389,7 +393,11 @@ export const nursesRouter = router({
           issueDate: licenseIssueDate,
           expiryDate: licenseExpiryDate,
         });
-        if (!licRes.ok) throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+        if (!licRes.ok) {
+          if (licRes.reason === "conflict") throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+          if (licRes.reason === "missing_expiry") throw new TRPCError({ code: "BAD_REQUEST", message: "Expiry date is required when adding a PRC license." });
+          if (licRes.reason === "invalid_dates") throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+        }
       }
       if (accountEmail !== undefined) {
         // "" clears accountEmail + linkedUserId (E10 supervisor reset) so the

@@ -102,31 +102,48 @@ export function parseDateString(text: string): string | undefined {
   return undefined;
 }
 
-const REG_NO_PATTERNS = [
-  /(?:registration\s*(?:no|number|num)?\.?|reg\.?\s*(?:no|num|number)?\.?|lic(?:ense)?\.?\s*(?:no|num|number)?\.?|prc\s*(?:no|num)?\.?)[:\s-]*([0-9]{6,8})\b/i,
-];
+interface LabelToken {
+  type: "license" | "issue" | "expiry";
+  start: number;
+  end: number;
+}
 
-const ISSUE_DATE_KEYWORDS = [
-  /date\s+of\s+registration/i,
-  /registration\s+date/i,
-  /reg\.?\s+date/i,
-  /date\s+issued/i,
-  /issue\s+date/i,
-  /\bissued\b/i,
-];
+const REG_NO_LABEL_REGEX = /(?:registration\s*(?:no|number|num)\.?|reg\.?\s*(?:no|num|number)\.?|lic(?:ense)?\s*(?:no|num|number)?\.?|prc\s*(?:no|num)?\.?|registration[:\s-])[:\s-]*/i;
+const ISSUE_DATE_LABEL_REGEX = /(?:date\s+of\s+registration|registration\s+date|reg\.?\s+date|date\s+issued|issue\s+date|\bissued\b)[:\s-]*/i;
+const EXPIRY_DATE_LABEL_REGEX = /(?:valid\s+until|valid\s+thru|valid\s+through|expiration\s+date|expiry\s+date|exp\.?\s+date|\bexpires\b)[:\s-]*/i;
 
-const EXPIRY_DATE_KEYWORDS = [
-  /valid\s+until/i,
-  /valid\s+thru/i,
-  /valid\s+through/i,
-  /expiration\s+date/i,
-  /expiry\s+date/i,
-  /exp\.?\s+date/i,
-  /\bexpires\b/i,
-];
+function findLabelsInLine(line: string): LabelToken[] {
+  const tokens: LabelToken[] = [];
+
+  const search = (regex: RegExp, type: "license" | "issue" | "expiry") => {
+    const r = new RegExp(regex.source, "gi");
+    let match;
+    while ((match = r.exec(line)) !== null) {
+      tokens.push({ type, start: match.index, end: match.index + match[0].length });
+    }
+  };
+
+  search(REG_NO_LABEL_REGEX, "license");
+  search(ISSUE_DATE_LABEL_REGEX, "issue");
+  search(EXPIRY_DATE_LABEL_REGEX, "expiry");
+
+  // Sort by start index
+  tokens.sort((a, b) => a.start - b.start);
+
+  // Filter overlapping tokens (keep earliest/longest)
+  const nonOverlapping: LabelToken[] = [];
+  let lastEnd = -1;
+  for (const t of tokens) {
+    if (t.start >= lastEnd) {
+      nonOverlapping.push(t);
+      lastEnd = t.end;
+    }
+  }
+  return nonOverlapping;
+}
 
 /**
- * Extract PRC fields from raw OCR text.
+ * Extract PRC fields from raw OCR text with strict label boundary parsing.
  */
 export function extractPrcFields(rawText: string): ExtractedPrcFields {
   if (!rawText || !rawText.trim()) {
@@ -142,72 +159,64 @@ export function extractPrcFields(rawText: string): ExtractedPrcFields {
   let issueDate: string | undefined;
   let expiryDate: string | undefined;
 
-  // 1. Extract PRC License Number
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    for (const pat of REG_NO_PATTERNS) {
-      const match = line.match(pat);
-      if (match && match[1]) {
-        licenseNumber = match[1];
-        break;
-      }
-    }
-    if (licenseNumber) break;
+    const labels = findLabelsInLine(line);
 
-    // Check if label is on this line, and number is on next line
-    if (/(?:registration\s*(?:no|number|num)?\.?|reg\.?\s*(?:no|num|number)?\.?|lic(?:ense)?\.?\s*(?:no|num|number)?\.?)[:\s]*$/i.test(line)) {
-      if (i + 1 < lines.length) {
-        const nextMatch = lines[i + 1].match(/\b([0-9]{6,8})\b/);
-        if (nextMatch) {
-          licenseNumber = nextMatch[1];
-          break;
+    for (let j = 0; j < labels.length; j++) {
+      const label = labels[j];
+      const nextLabel = labels[j + 1];
+      // Slice text belonging strictly between this label and the next label on the same line
+      const sameLineText = line.slice(label.end, nextLabel ? nextLabel.start : line.length).trim();
+
+      if (label.type === "license" && !licenseNumber) {
+        if (sameLineText) {
+          const match = sameLineText.match(/\b([0-9]{6,8})\b/);
+          if (match) licenseNumber = match[1];
+        } else if (i + 1 < lines.length) {
+          // Only check next line if next line has no label of its own (never cross labels)
+          const nextLineLabels = findLabelsInLine(lines[i + 1]);
+          if (nextLineLabels.length === 0) {
+            const nextMatch = lines[i + 1].match(/\b([0-9]{6,8})\b/);
+            if (nextMatch) licenseNumber = nextMatch[1];
+          }
+        }
+      }
+
+      if (label.type === "issue" && !issueDate) {
+        if (sameLineText) {
+          const parsed = parseDateString(sameLineText);
+          if (parsed) issueDate = parsed;
+        } else if (i + 1 < lines.length) {
+          // Never cross into another label on the next line
+          const nextLineLabels = findLabelsInLine(lines[i + 1]);
+          if (nextLineLabels.length === 0) {
+            const nextParsed = parseDateString(lines[i + 1]);
+            if (nextParsed) issueDate = nextParsed;
+          }
+        }
+      }
+
+      if (label.type === "expiry" && !expiryDate) {
+        if (sameLineText) {
+          const parsed = parseDateString(sameLineText);
+          if (parsed) expiryDate = parsed;
+        } else if (i + 1 < lines.length) {
+          // Never cross into another label on the next line
+          const nextLineLabels = findLabelsInLine(lines[i + 1]);
+          if (nextLineLabels.length === 0) {
+            const nextParsed = parseDateString(lines[i + 1]);
+            if (nextParsed) expiryDate = nextParsed;
+          }
         }
       }
     }
   }
 
-  // 2. Extract Issue Date
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const isIssueKeyword = ISSUE_DATE_KEYWORDS.some((kw) => kw.test(line));
-    if (isIssueKeyword) {
-      // First look on the same line
-      const parsed = parseDateString(line);
-      if (parsed) {
-        issueDate = parsed;
-        break;
-      }
-      // If not on same line, look at the next line
-      if (i + 1 < lines.length) {
-        const nextParsed = parseDateString(lines[i + 1]);
-        if (nextParsed) {
-          issueDate = nextParsed;
-          break;
-        }
-      }
-    }
-  }
-
-  // 3. Extract Expiry Date (NEVER INFER)
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const isExpiryKeyword = EXPIRY_DATE_KEYWORDS.some((kw) => kw.test(line));
-    if (isExpiryKeyword) {
-      // First look on the same line
-      const parsed = parseDateString(line);
-      if (parsed) {
-        expiryDate = parsed;
-        break;
-      }
-      // If not on same line, look at the next line
-      if (i + 1 < lines.length) {
-        const nextParsed = parseDateString(lines[i + 1]);
-        if (nextParsed) {
-          expiryDate = nextParsed;
-          break;
-        }
-      }
-    }
+  // Conflicting dates resolution: if issue date is after expiry date, leave unresolved for review
+  if (issueDate && expiryDate && issueDate > expiryDate) {
+    issueDate = undefined;
+    expiryDate = undefined;
   }
 
   return {

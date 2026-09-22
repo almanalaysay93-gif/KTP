@@ -60,6 +60,7 @@ describe("PRC License Number editing - Supervisor and Nurse", () => {
       employmentStatus: "Active",
       dateHired: new Date("2026-01-15").toISOString(),
       licenseNumber: prcNumber,
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
 
     expect(created.id).toBeDefined();
@@ -84,6 +85,7 @@ describe("PRC License Number editing - Supervisor and Nurse", () => {
       employmentStatus: "Active",
       dateHired: new Date("2026-02-01").toISOString(),
       licenseNumber: initialPrc,
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
 
     const fetched1 = await caller.nurses.get({ id: created.id });
@@ -114,6 +116,7 @@ describe("PRC License Number editing - Supervisor and Nurse", () => {
       employmentStatus: "Active",
       dateHired: new Date("2026-03-01").toISOString(),
       licenseNumber: initialPrc,
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
 
     // Nurse self-service session with claimNurseId
@@ -150,6 +153,7 @@ describe("PRC License Number editing - Supervisor and Nurse", () => {
       employmentStatus: "Active",
       dateHired: new Date("2026-01-01").toISOString(),
       licenseNumber: sharedPrc,
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
 
     // Another nurse trying to use the same PRC license on creation
@@ -162,6 +166,7 @@ describe("PRC License Number editing - Supervisor and Nurse", () => {
         employmentStatus: "Active",
         dateHired: new Date("2026-01-01").toISOString(),
         licenseNumber: sharedPrc,
+        licenseExpiryDate: "2027-05-10T00:00:00.000Z",
       }),
     ).rejects.toMatchObject({
       code: "CONFLICT",

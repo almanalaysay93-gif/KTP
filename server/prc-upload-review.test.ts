@@ -64,6 +64,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       employmentStatus: "Active",
       dateHired: new Date("2026-01-15").toISOString(),
       licenseNumber: prcNumber,
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
 
     const creds = await db.listCredentials({ nurseId: nurse.id });
@@ -109,6 +110,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       employmentStatus: "Active",
       dateHired: new Date("2026-01-15").toISOString(),
       licenseNumber: prcNumber,
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
 
     const creds = await db.listCredentials({ nurseId: nurse.id });
@@ -149,6 +151,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       staffType: "Registered Nurse",
       employmentStatus: "Active",
       licenseNumber: uniquePrc(),
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
     const nurse2 = await adminCaller.nurses.create({
       employeeId: `E2-${Date.now()}-${Math.random()}`,
@@ -157,6 +160,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       staffType: "Registered Nurse",
       employmentStatus: "Active",
       licenseNumber: uniquePrc(),
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
 
     const creds2 = await db.listCredentials({ nurseId: nurse2.id });
@@ -187,6 +191,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       staffType: "Registered Nurse",
       employmentStatus: "Active",
       licenseNumber: sharedPrc,
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
 
     const nurse2 = await adminCaller.nurses.create({
@@ -196,6 +201,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       staffType: "Registered Nurse",
       employmentStatus: "Active",
       licenseNumber: uniquePrc(),
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
     const creds2 = await db.listCredentials({ nurseId: nurse2.id });
 
@@ -226,6 +232,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       staffType: "Registered Nurse",
       employmentStatus: "Active",
       licenseNumber: uniquePrc(),
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
     const creds = await db.listCredentials({ nurseId: nurse.id });
 
@@ -256,6 +263,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       staffType: "Registered Nurse",
       employmentStatus: "Active",
       licenseNumber: uniquePrc(),
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
     const creds = await db.listCredentials({ nurseId: nurse.id });
 
@@ -288,6 +296,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       staffType: "Registered Nurse",
       employmentStatus: "Active",
       licenseNumber: originalPrc,
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
     const creds = await db.listCredentials({ nurseId: nurse.id });
     const origExpiry = creds[0].expiryDate;
@@ -326,6 +335,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
       staffType: "Registered Nurse",
       employmentStatus: "Active",
       licenseNumber: uniquePrc(),
+      licenseExpiryDate: "2027-05-10T00:00:00.000Z",
     });
     const creds = await db.listCredentials({ nurseId: nurse.id });
 
@@ -415,6 +425,7 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
         staffType: "Registered Nurse",
         employmentStatus: "Active",
         licenseNumber: sharedPrc,
+        licenseExpiryDate: "2027-05-10T00:00:00.000Z",
       });
 
       const nurse2 = await adminCaller.nurses.create({
@@ -468,6 +479,215 @@ describe("PRC Upload with Review — Server Validation & Persistence (T2, T3)", 
           licenseExpiryDate: "2027-02-01T00:00:00.000Z",
         })
       ).rejects.toThrow("Issue date cannot be after expiry date.");
+    });
+  });
+
+  describe("PRC OCR Review & Repair Plan — F1 to F9 Regressions", () => {
+    it("F1: Date-only updates preserve PRC number without setting to null", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      const prcNumber = "0012345";
+      const nurse = await adminCaller.nurses.create({
+        employeeId: `F1-${Date.now()}-${Math.random()}`,
+        firstName: "F1",
+        lastName: "Nurse",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+        licenseNumber: prcNumber,
+        licenseExpiryDate: "2027-01-01T00:00:00.000Z",
+      });
+
+      const { ctx: staffCtx } = makeCtx({ claimNurseId: nurse.id });
+      const staffCaller = appRouter.createCaller(staffCtx);
+
+      // Updating only expiry date
+      await staffCaller.staffAccount.updateMyPrcLicense({
+        expiryDate: "2028-05-10",
+      });
+
+      const creds = await db.listCredentials({ nurseId: nurse.id });
+      const prc = creds[0];
+      expect(prc.licenseNumber).toBe("0012345");
+      expect(prc.expiryDate).toContain("2028-05-10");
+
+      // Explicit null clears the number
+      await staffCaller.staffAccount.updateMyPrcLicense({
+        licenseNumber: null,
+      });
+      const credsAfterClear = await db.listCredentials({ nurseId: nurse.id });
+      expect(credsAfterClear[0].licenseNumber).toBeNull();
+    });
+
+    it("F2: Rejects invalid date combinations against retained values and rejects explicit null expiry", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      const nurse = await adminCaller.nurses.create({
+        employeeId: `F2-${Date.now()}-${Math.random()}`,
+        firstName: "F2",
+        lastName: "Nurse",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+        licenseNumber: uniquePrc(),
+        licenseExpiryDate: "2027-01-01T00:00:00.000Z",
+      });
+
+      const { ctx: staffCtx } = makeCtx({ claimNurseId: nurse.id });
+      const staffCaller = appRouter.createCaller(staffCtx);
+
+      // Rejects issue date (2030) after retained expiry (2027)
+      await expect(
+        staffCaller.staffAccount.updateMyPrcLicense({
+          issueDate: "2030-01-01",
+        })
+      ).rejects.toThrow("Issue date cannot be after expiry date.");
+
+      // Rejects explicit null expiry
+      await expect(
+        staffCaller.staffAccount.updateMyPrcLicense({
+          expiryDate: null,
+        })
+      ).rejects.toThrow("Expiry date is required.");
+
+      // Also in uploadDocument confirmedFields
+      const creds = await db.listCredentials({ nurseId: nurse.id });
+      await expect(
+        adminCaller.credentials.uploadDocument({
+          credentialId: creds[0].id,
+          fileBase64: smallBase64,
+          fileName: "test.jpg",
+          mimeType: "image/jpeg",
+          confirmedFields: {
+            issueDate: "2030-01-01",
+          },
+        })
+      ).rejects.toThrow("Issue date cannot be after expiry date.");
+
+      await expect(
+        adminCaller.credentials.uploadDocument({
+          credentialId: creds[0].id,
+          fileBase64: smallBase64,
+          fileName: "test.jpg",
+          mimeType: "image/jpeg",
+          confirmedFields: {
+            expiryDate: null,
+          },
+        })
+      ).rejects.toThrow("Expiry date is required.");
+    });
+
+    it("F3: Explicit credentialId targets only the selected renewal record", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      const nurse = await adminCaller.nurses.create({
+        employeeId: `F3-${Date.now()}-${Math.random()}`,
+        firstName: "F3",
+        lastName: "Nurse",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+        licenseNumber: "0111111",
+        licenseExpiryDate: "2024-01-01T00:00:00.000Z",
+      });
+
+      const types = await db.listCredentialTypes(true);
+      const prcType = types.find((t) => t.name.toLowerCase().includes("prc")) ?? types[0];
+
+      // Create a second renewal cycle for the same nurse
+      const cred2Id = await db.createCredential({
+        nurseId: nurse.id,
+        credentialTypeId: prcType.id,
+        licenseNumber: "0222222",
+        issuingOrganization: "PRC",
+        expiryDate: new Date("2027-01-01"),
+        renewalStatus: "Not Started",
+        verificationStatus: "Unverified",
+        renewalCycleKey: `cycle-2-${Date.now()}`,
+      });
+
+      const { ctx: staffCtx } = makeCtx({ claimNurseId: nurse.id });
+      const staffCaller = appRouter.createCaller(staffCtx);
+
+      // Edit only cred2 explicitly
+      await staffCaller.staffAccount.updateMyPrcLicense({
+        credentialId: cred2Id,
+        licenseNumber: "0222222-UPD",
+        expiryDate: "2028-01-01",
+      });
+
+      const allCreds = await db.listCredentials({ nurseId: nurse.id });
+      const cred1 = allCreds.find((c) => c.id !== cred2Id)!;
+      const cred2 = allCreds.find((c) => c.id === cred2Id)!;
+
+      // cred1 must be completely untouched
+      expect(cred1.licenseNumber).toBe("0111111");
+      expect(cred1.expiryDate).toContain("2024-01-01");
+
+      // cred2 must be updated
+      expect(cred2.licenseNumber).toBe("0222222-UPD");
+      expect(cred2.expiryDate).toContain("2028-01-01");
+    });
+
+    it("F7: Name-only and contact-only edits preserve license verification status", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      const prcNum = uniquePrc();
+      const nurse = await adminCaller.nurses.create({
+        employeeId: `F7-${Date.now()}-${Math.random()}`,
+        firstName: "Maria",
+        lastName: "Santos",
+        staffType: "Registered Nurse",
+        employmentStatus: "Active",
+        licenseNumber: prcNum,
+        licenseExpiryDate: "2027-05-01T00:00:00.000Z",
+      });
+
+      const creds = await db.listCredentials({ nurseId: nurse.id });
+      // Mark credential Verified
+      await db.updateCredential(creds[0].id, { verificationStatus: "Verified" });
+      const verifiedCred = (await db.listCredentials({ nurseId: nurse.id }))[0];
+      expect(verifiedCred.verificationStatus).toBe("Verified");
+
+      // Supervisor updates nurse's name and contact number, sending existing PRC fields
+      await adminCaller.nurses.update({
+        id: nurse.id,
+        firstName: "Maria Clara",
+        contactNumber: "09170001111",
+        licenseNumber: prcNum,
+        licenseExpiryDate: "2027-05-01T00:00:00.000Z",
+      });
+
+      const credsAfter = await db.listCredentials({ nurseId: nurse.id });
+      // Verification status must still be "Verified"
+      expect(credsAfter[0].verificationStatus).toBe("Verified");
+
+      // Modifying PRC details changes verification to "Pending Verification"
+      await adminCaller.nurses.update({
+        id: nurse.id,
+        licenseExpiryDate: "2028-05-01T00:00:00.000Z",
+      });
+      const credsAfterPrcChange = await db.listCredentials({ nurseId: nurse.id });
+      expect(credsAfterPrcChange[0].verificationStatus).toBe("Pending Verification");
+    });
+
+    it("F9: License creation without explicit expiry date is rejected (no +3 year fabrication)", async () => {
+      const { ctx: adminCtx } = makeCtx({ user: adminUser });
+      const adminCaller = appRouter.createCaller(adminCtx);
+
+      // Attempting to create a nurse with PRC license number but missing expiry date
+      await expect(
+        adminCaller.nurses.create({
+          employeeId: `F9-${Date.now()}-${Math.random()}`,
+          firstName: "F9",
+          lastName: "Nurse",
+          staffType: "Registered Nurse",
+          employmentStatus: "Active",
+          licenseNumber: uniquePrc(),
+          // licenseExpiryDate is omitted
+        })
+      ).rejects.toThrow("Expiry date is required when adding a PRC license.");
     });
   });
 });

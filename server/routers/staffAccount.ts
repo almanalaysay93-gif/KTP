@@ -7,7 +7,7 @@ import { checkRateLimit } from "../_core/rateLimit";
 import { sdk } from "../_core/sdk";
 import * as db from "../db";
 import * as memosDb from "../memosDb";
-import { dateKey, daysUntilExpiry, deriveLicenseStatus, nurseFullName, renewalCycleKey, sanitizeFilename, storageKey, validateMime } from "../../shared/nursetrack";
+import { dateKey, daysUntilExpiry, deriveLicenseStatus, nurseFullName, parseStrictCalendarDate, renewalCycleKey, sanitizeFilename, storageKey, validateEffectivePrcDates, validateMime } from "../../shared/nursetrack";
 import { storageDelete, storagePut } from "../storage";
 import { listResolvedTrainingSchedules, resolveTrainingSchedule } from "../trainingReminders";
 
@@ -244,6 +244,7 @@ export const staffAccountRouter = router({
   updateMyPrcLicense: staffProcedure
     .input(
       z.object({
+        credentialId: z.number().int().positive().optional(),
         licenseNumber: z.string().trim().max(64).nullable().optional(),
         issueDate: z.union([z.string(), z.date()]).nullable().optional(),
         expiryDate: z.union([z.string(), z.date()]).nullable().optional(),
@@ -253,27 +254,67 @@ export const staffAccountRouter = router({
       const nurse = await db.getNurseById(ctx.nurseId);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
 
-      const parsedIssue = parseDateInput(input.issueDate);
-      const parsedExpiry = parseDateInput(input.expiryDate);
-
-      if (parsedIssue && parsedExpiry && parsedIssue > parsedExpiry) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+      if (input.credentialId !== undefined) {
+        const creds = await db.listCredentials({ nurseId: nurse.id });
+        const target = creds.find((c) => c.id === input.credentialId);
+        if (!target) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Credential record not found." });
+        }
+        const credTypes = await db.listCredentialTypes(true);
+        const targetType = credTypes.find((t) => t.id === target.credentialTypeId);
+        if (!targetType || !targetType.name.toLowerCase().includes("prc")) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Target credential is not a PRC license." });
+        }
       }
 
-      const licResult = await db.upsertNursePrcLicense(nurse.id, input.licenseNumber ?? null, {
-        issueDate: parsedIssue,
-        expiryDate: parsedExpiry,
-      });
+      let parsedIssue: Date | null | undefined;
+      let parsedExpiry: Date | null | undefined;
+      try {
+        parsedIssue = parseStrictCalendarDate(input.issueDate);
+      } catch (err: any) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err?.message || "Invalid issue date." });
+      }
+      try {
+        parsedExpiry = parseStrictCalendarDate(input.expiryDate);
+      } catch (err: any) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err?.message || "Invalid expiry date." });
+      }
+
+      const licResult = await db.upsertNursePrcLicense(
+        nurse.id,
+        input.licenseNumber,
+        {
+          issueDate: parsedIssue,
+          expiryDate: parsedExpiry,
+        },
+        { credentialId: input.credentialId }
+      );
+
       if (!licResult.ok) {
-        throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+        if (licResult.reason === "conflict") {
+          throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+        }
+        if (licResult.reason === "missing_expiry") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Expiry date is required." });
+        }
+        if (licResult.reason === "invalid_dates") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+        }
+        if (licResult.reason === "not_found") {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Credential record not found." });
+        }
+        if (licResult.reason === "invalid_credential_type") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Target credential is not a PRC license." });
+        }
       }
+
       await db.logActivity({
         supervisorId: ctx.user?.id ?? null,
         nurseId: nurse.id,
         actionType: "nurse.updated",
         entityType: "nurse",
         entityId: nurse.id,
-        summary: `PRC License updated (No: ${input.licenseNumber || "none"}, Exp: ${parsedExpiry ? parsedExpiry.toISOString().slice(0, 10) : "none"}) by ${nurseFullName(nurse)} (self-service)`,
+        summary: `PRC License updated (No: ${input.licenseNumber ?? "none"}, Exp: ${parsedExpiry ? parsedExpiry.toISOString().slice(0, 10) : "none"}) by ${nurseFullName(nurse)} (self-service)`,
       });
       return { ok: true };
     }),
@@ -342,10 +383,26 @@ export const staffAccountRouter = router({
 
       const patch: Record<string, unknown> = {};
 
-      let parsedIssue: Date | null | undefined;
-      let parsedExpiry: Date | null | undefined;
-
       if (input.confirmedFields) {
+        if (input.confirmedFields.expiryDate === null || input.confirmedFields.expiryDate === "") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Expiry date is required." });
+        }
+
+        let effectiveDates;
+        try {
+          effectiveDates = validateEffectivePrcDates({
+            existingIssueDate: cred.issueDate,
+            existingExpiryDate: cred.expiryDate,
+            patchIssueDate: input.confirmedFields.issueDate,
+            patchExpiryDate: input.confirmedFields.expiryDate,
+          });
+        } catch (err: any) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: err?.message || "Invalid dates.",
+          });
+        }
+
         if (input.confirmedFields.licenseNumber !== undefined) {
           const normPrc = input.confirmedFields.licenseNumber ? input.confirmedFields.licenseNumber.trim() : null;
           if (normPrc) {
@@ -361,30 +418,20 @@ export const staffAccountRouter = router({
         }
 
         if (input.confirmedFields.issueDate !== undefined) {
-          parsedIssue = parseDateInput(input.confirmedFields.issueDate);
-          patch.issueDate = parsedIssue ?? null;
+          patch.issueDate = effectiveDates.effectiveIssueDate;
         }
 
         if (input.confirmedFields.expiryDate !== undefined) {
-          parsedExpiry = parseDateInput(input.confirmedFields.expiryDate);
-          if (parsedExpiry) {
-            patch.expiryDate = parsedExpiry;
-            const existingExpiryStr = cred.expiryDate
-              ? cred.expiryDate instanceof Date
-                ? cred.expiryDate.toISOString().slice(0, 10)
-                : String(cred.expiryDate).slice(0, 10)
-              : null;
-            const newExpiryStr = parsedExpiry.toISOString().slice(0, 10);
-            if (newExpiryStr !== existingExpiryStr) {
-              patch.renewalCycleKey = renewalCycleKey(`${cred.id}-${parsedExpiry.toISOString()}`);
-            }
+          patch.expiryDate = effectiveDates.effectiveExpiryDate;
+          const existingExpiryStr = cred.expiryDate
+            ? cred.expiryDate instanceof Date
+              ? cred.expiryDate.toISOString().slice(0, 10)
+              : String(cred.expiryDate).slice(0, 10)
+            : null;
+          const newExpiryStr = effectiveDates.effectiveExpiryDate.toISOString().slice(0, 10);
+          if (newExpiryStr !== existingExpiryStr) {
+            patch.renewalCycleKey = renewalCycleKey(`${cred.id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
           }
-        }
-
-        const effIssue = parsedIssue !== undefined ? parsedIssue : cred.issueDate ? new Date(cred.issueDate) : null;
-        const effExpiry = parsedExpiry !== undefined ? parsedExpiry : cred.expiryDate ? new Date(cred.expiryDate) : null;
-        if (effIssue && effExpiry && effIssue > effExpiry) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
         }
       }
 

@@ -277,10 +277,12 @@ function AddTrainingDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 function EditPrcDetailsDialog({
   open,
   onOpenChange,
+  credentialId,
   initialValues,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  credentialId?: number;
   initialValues: {
     licenseNumber?: string | null;
     issueDate?: string | Date | null;
@@ -322,6 +324,10 @@ function EditPrcDetailsDialog({
   });
 
   const handleSave = () => {
+    if (expiryDate === "") {
+      toast.error("Expiry date is required.");
+      return;
+    }
     if (issueDate && expiryDate) {
       const d1 = new Date(issueDate);
       const d2 = new Date(expiryDate);
@@ -331,6 +337,7 @@ function EditPrcDetailsDialog({
       }
     }
     saveMutation.mutate({
+      credentialId,
       licenseNumber: licenseNumber.trim() || null,
       issueDate: issueDate || null,
       expiryDate: expiryDate || null,
@@ -644,6 +651,7 @@ function MyProfileView({ profile }: { profile: any }) {
           setPrcDetailsDialogOpen(v);
           if (!v) setSelectedPrcCred(null);
         }}
+        credentialId={selectedPrcCred?.id ?? prcCred?.id}
         initialValues={{
           licenseNumber: selectedPrcCred?.licenseNumber ?? profile.licenseNumber,
           issueDate: selectedPrcCred?.issueDate ?? prcCred?.issueDate,

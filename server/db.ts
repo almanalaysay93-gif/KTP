@@ -1,4 +1,4 @@
-import { dateKey, daysUntilExpiry, INACTIVE_EMPLOYMENT_STATUSES, renewalCycleKey } from "../shared/nursetrack";
+import { dateKey, daysUntilExpiry, INACTIVE_EMPLOYMENT_STATUSES, renewalCycleKey, validateEffectivePrcDates } from "../shared/nursetrack";
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, like, lte, not, or, sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
@@ -1028,8 +1028,20 @@ export async function upsertNursePrcLicense(
   nurseId: number,
   licenseNumber: string | null | undefined,
   dates?: { issueDate?: Date | string | null; expiryDate?: Date | string | null },
-): Promise<{ ok: true; credentialId?: number } | { ok: false; reason: "conflict" }> {
-  const norm = licenseNumber ? licenseNumber.trim() : null;
+  options?: { credentialId?: number },
+): Promise<
+  | { ok: true; credentialId?: number }
+  | {
+      ok: false;
+      reason:
+        | "conflict"
+        | "missing_expiry"
+        | "invalid_dates"
+        | "not_found"
+        | "invalid_credential_type";
+    }
+> {
+  const norm = licenseNumber !== undefined ? (licenseNumber ? licenseNumber.trim() : null) : undefined;
   if (norm) {
     const matchingNurseIds = await findNurseIdsByLicenseNumber(norm);
     const hasConflict = matchingNurseIds.some((id) => id !== nurseId);
@@ -1042,52 +1054,107 @@ export async function upsertNursePrcLicense(
   const types = await listCredentialTypes(true);
   const prcType = types.find((t) => t.name.toLowerCase().includes("prc")) ?? types[0];
 
-  const existingPrc = creds.find((c) => prcType && c.credentialTypeId === prcType.id) ?? creds[0];
+  let existingPrc: (typeof creds)[0] | undefined;
+  if (options?.credentialId !== undefined) {
+    existingPrc = creds.find((c) => c.id === options.credentialId);
+    if (!existingPrc) return { ok: false, reason: "not_found" };
+    if (prcType && existingPrc.credentialTypeId !== prcType.id) {
+      return { ok: false, reason: "invalid_credential_type" };
+    }
+  } else {
+    existingPrc = creds.find((c) => prcType && c.credentialTypeId === prcType.id);
+  }
 
   if (existingPrc) {
-    const patch: Record<string, unknown> = {
-      licenseNumber: norm || null,
-      verificationStatus: "Pending Verification",
-    };
-    if (dates?.issueDate !== undefined) {
-      patch.issueDate = dates.issueDate ? new Date(dates.issueDate) : null;
+    let effectiveDates;
+    try {
+      effectiveDates = validateEffectivePrcDates({
+        existingIssueDate: existingPrc.issueDate,
+        existingExpiryDate: existingPrc.expiryDate,
+        patchIssueDate: dates?.issueDate,
+        patchExpiryDate: dates?.expiryDate,
+      });
+    } catch (err: any) {
+      if (err?.message === "Expiry date is required.") {
+        return { ok: false, reason: "missing_expiry" };
+      }
+      return { ok: false, reason: "invalid_dates" };
     }
-    if (dates?.expiryDate !== undefined && dates.expiryDate) {
-      const newExpiry = new Date(dates.expiryDate);
-      patch.expiryDate = newExpiry;
-      const existingExpiryStr = existingPrc.expiryDate
-        ? existingPrc.expiryDate instanceof Date
-          ? existingPrc.expiryDate.toISOString().slice(0, 10)
-          : String(existingPrc.expiryDate).slice(0, 10)
-        : null;
-      if (newExpiry.toISOString().slice(0, 10) !== existingExpiryStr) {
-        patch.renewalCycleKey = renewalCycleKey(`${existingPrc.id}-${newExpiry.toISOString()}`);
+
+    const existingNorm = existingPrc.licenseNumber ? existingPrc.licenseNumber.trim() : null;
+    const incomingNorm = licenseNumber !== undefined ? norm : existingNorm;
+    const isNumberChanged = licenseNumber !== undefined && existingNorm !== incomingNorm;
+
+    const existingIssueKey = existingPrc.issueDate ? dateKey(existingPrc.issueDate) : "";
+    const incomingIssueKey = effectiveDates.effectiveIssueDate ? dateKey(effectiveDates.effectiveIssueDate) : "";
+    const isIssueChanged = dates?.issueDate !== undefined && existingIssueKey !== incomingIssueKey;
+
+    const existingExpiryKey = existingPrc.expiryDate ? dateKey(existingPrc.expiryDate) : "";
+    const incomingExpiryKey = dateKey(effectiveDates.effectiveExpiryDate);
+    const isExpiryChanged = dates?.expiryDate !== undefined && existingExpiryKey !== incomingExpiryKey;
+
+    const isDetailsChanged = isNumberChanged || isIssueChanged || isExpiryChanged;
+
+    const patch: Record<string, unknown> = {};
+    if (licenseNumber !== undefined) {
+      patch.licenseNumber = norm;
+    }
+    if (dates?.issueDate !== undefined) {
+      patch.issueDate = effectiveDates.effectiveIssueDate;
+    }
+    if (dates?.expiryDate !== undefined) {
+      patch.expiryDate = effectiveDates.effectiveExpiryDate;
+      if (isExpiryChanged) {
+        patch.renewalCycleKey = renewalCycleKey(`${existingPrc.id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
       }
     }
-    await updateCredential(existingPrc.id, patch);
+    if (isDetailsChanged) {
+      patch.verificationStatus = "Pending Verification";
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await updateCredential(existingPrc.id, patch);
+    }
     return { ok: true, credentialId: existingPrc.id };
   }
 
-  if (norm || dates?.expiryDate) {
-    let expiryDate: Date;
-    if (dates?.expiryDate) {
-      expiryDate = new Date(dates.expiryDate);
-    } else {
-      expiryDate = new Date();
-      expiryDate.setFullYear(expiryDate.getFullYear() + 3);
+  // Creating a new PRC credential
+  if (norm !== undefined || dates?.issueDate !== undefined || dates?.expiryDate !== undefined) {
+    if (!norm && dates?.expiryDate === undefined && dates?.issueDate === undefined) {
+      return { ok: true };
     }
-    const issueDate = dates?.issueDate ? new Date(dates.issueDate) : undefined;
+    // F9: Do not fabricate validity dates (never default to +3 years)
+    if (dates?.expiryDate === undefined || dates?.expiryDate === null || dates?.expiryDate === "") {
+      return { ok: false, reason: "missing_expiry" };
+    }
+
+    let effectiveDates;
+    try {
+      effectiveDates = validateEffectivePrcDates({
+        patchIssueDate: dates?.issueDate,
+        patchExpiryDate: dates?.expiryDate,
+      });
+    } catch (err: any) {
+      if (err?.message === "Expiry date is required.") {
+        return { ok: false, reason: "missing_expiry" };
+      }
+      return { ok: false, reason: "invalid_dates" };
+    }
+
     const typeId = prcType ? prcType.id : 1;
     const credId = await createCredential({
       nurseId,
       credentialTypeId: typeId,
       licenseNumber: norm ?? undefined,
       issuingOrganization: prcType?.issuingOrganizationDefault || "Professional Regulation Commission (PRC)",
-      issueDate,
-      expiryDate,
+      issueDate: effectiveDates.effectiveIssueDate ?? undefined,
+      expiryDate: effectiveDates.effectiveExpiryDate,
       renewalStatus: "Not Started",
       verificationStatus: "Pending Verification",
       renewalCycleKey: renewalCycleKey(`prc-${nurseId}-${Date.now()}`),
+    });
+    await updateCredential(credId, {
+      renewalCycleKey: renewalCycleKey(`${credId}-${effectiveDates.effectiveExpiryDate.toISOString()}`),
     });
     return { ok: true, credentialId: credId };
   }

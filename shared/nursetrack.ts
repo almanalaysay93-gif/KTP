@@ -315,3 +315,87 @@ export const MEMO_TYPE_LABELS: Record<MemoType, string> = {
   nursing: "Nursing",
   hospital: "Hospital",
 };
+
+/**
+ * Strict calendar date validation.
+ * Accepts YYYY-MM-DD string or Date object.
+ * Validates year (1950..2100), month (1..12), and valid day for the month (accounting for leap years).
+ * Returns Date object at UTC midnight, or null if null/empty, or throws Error if invalid.
+ */
+export function parseStrictCalendarDate(val: string | Date | null | undefined): Date | null | undefined {
+  if (val === undefined) return undefined;
+  if (val === null || val === "") return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) throw new Error("Invalid date.");
+    return val;
+  }
+  const str = String(val).trim();
+  const m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|T|\s)/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const mon = parseInt(m[2], 10);
+    const day = parseInt(m[3], 10);
+    if (y < 1950 || y > 2100 || mon < 1 || mon > 12) {
+      throw new Error("Invalid date range.");
+    }
+    const daysInMonth = new Date(Date.UTC(y, mon, 0)).getUTCDate();
+    if (day < 1 || day > daysInMonth) {
+      throw new Error("Invalid calendar date.");
+    }
+    return new Date(Date.UTC(y, mon - 1, day));
+  }
+  const d = new Date(str);
+  if (isNaN(d.getTime())) throw new Error("Invalid date.");
+  return d;
+}
+
+/**
+ * Resolves complete persisted values before validation and rejects invalid combinations (F2).
+ * Enforces:
+ * 1. Expiry date cannot be explicitly set to null or empty string.
+ * 2. An effective expiry date must exist.
+ * 3. Effective issue date cannot be after effective expiry date.
+ */
+export function validateEffectivePrcDates(options: {
+  existingIssueDate?: Date | string | null;
+  existingExpiryDate?: Date | string | null;
+  patchIssueDate?: Date | string | null;
+  patchExpiryDate?: Date | string | null;
+}): {
+  effectiveIssueDate: Date | null;
+  effectiveExpiryDate: Date;
+} {
+  if (options.patchExpiryDate === null || options.patchExpiryDate === "") {
+    throw new Error("Expiry date is required.");
+  }
+
+  let effectiveExpiryDate: Date | null = null;
+  if (options.patchExpiryDate !== undefined) {
+    const parsed = parseStrictCalendarDate(options.patchExpiryDate);
+    if (!parsed) throw new Error("Expiry date is required.");
+    effectiveExpiryDate = parsed;
+  } else if (options.existingExpiryDate) {
+    effectiveExpiryDate = parseStrictCalendarDate(options.existingExpiryDate) ?? null;
+  }
+
+  if (!effectiveExpiryDate) {
+    throw new Error("Expiry date is required.");
+  }
+
+  let effectiveIssueDate: Date | null = null;
+  if (options.patchIssueDate !== undefined) {
+    effectiveIssueDate = parseStrictCalendarDate(options.patchIssueDate) ?? null;
+  } else if (options.existingIssueDate) {
+    effectiveIssueDate = parseStrictCalendarDate(options.existingIssueDate) ?? null;
+  }
+
+  if (effectiveIssueDate && effectiveExpiryDate && effectiveIssueDate > effectiveExpiryDate) {
+    throw new Error("Issue date cannot be after expiry date.");
+  }
+
+  return {
+    effectiveIssueDate,
+    effectiveExpiryDate,
+  };
+}
+
