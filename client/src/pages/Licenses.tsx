@@ -1,4 +1,4 @@
-import { FileUploadButton } from "@/components/nursetrack/FileUpload";
+import { CredentialUploadButton } from "@/components/nursetrack/CredentialUploadButton";
 import { LicenseStatusBadge } from "@/components/nursetrack/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -49,6 +49,16 @@ export default function Licenses() {
   const [formOpen, setFormOpen] = useState(false);
   const [editCredential, setEditCredential] = useState<{ id: number; nurseId: number } | null>(null);
   const [renewCredential, setRenewCredential] = useState<{ id: number; nurseName: string } | null>(null);
+
+  const uploadMutation = trpc.credentials.uploadDocument.useMutation({
+    onSuccess: () => {
+      toast.success("Document uploaded successfully.");
+      utils.credentials.initial.invalidate();
+    },
+    onError: (err) => {
+      toast.error(err.message || "Failed to upload document.");
+    },
+  });
 
   useEffect(() => {
     if (urlStatus && VALID_STATUSES.includes(urlStatus)) {
@@ -179,10 +189,26 @@ export default function Licenses() {
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <FileUploadButton
-                            kind="document"
+                          <CredentialUploadButton
+                            credential={{
+                              id: c.id,
+                              typeName: c.typeName,
+                              licenseNumber: c.licenseNumber,
+                              issueDate: c.issueDate,
+                              expiryDate: c.expiryDate,
+                              nurseName: c.nurse ? nurseFullName(c.nurse) : undefined,
+                            }}
                             label="Upload"
-                            onFile={(f) => utils.client.credentials.uploadDocument.mutate({ credentialId: c.id, ...f })}
+                            disabled={uploadMutation.isPending}
+                            onUpload={async ({ file, confirmedFields }) => {
+                              await uploadMutation.mutateAsync({
+                                credentialId: c.id,
+                                fileBase64: file.fileBase64,
+                                fileName: file.fileName,
+                                mimeType: file.mimeType,
+                                confirmedFields,
+                              });
+                            }}
                           />
                           <Button
                             variant="ghost"

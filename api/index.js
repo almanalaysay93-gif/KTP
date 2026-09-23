@@ -143,6 +143,61 @@ function storageKey(bucket, nurseId, name) {
   const ts = Date.now();
   return `nursetrack/${bucket}/nurse-${nurseId}-${ts}-${safe}`;
 }
+function parseStrictCalendarDate(val) {
+  if (val === void 0) return void 0;
+  if (val === null || val === "") return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) throw new Error("Invalid date.");
+    return val;
+  }
+  const str2 = String(val).trim();
+  const m = str2.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|T|\s)/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const mon = parseInt(m[2], 10);
+    const day = parseInt(m[3], 10);
+    if (y < 1950 || y > 2100 || mon < 1 || mon > 12) {
+      throw new Error("Invalid date range.");
+    }
+    const daysInMonth = new Date(Date.UTC(y, mon, 0)).getUTCDate();
+    if (day < 1 || day > daysInMonth) {
+      throw new Error("Invalid calendar date.");
+    }
+    return new Date(Date.UTC(y, mon - 1, day));
+  }
+  const d = new Date(str2);
+  if (isNaN(d.getTime())) throw new Error("Invalid date.");
+  return d;
+}
+function validateEffectivePrcDates(options) {
+  if (options.patchExpiryDate === null || options.patchExpiryDate === "") {
+    throw new Error("Expiry date is required.");
+  }
+  let effectiveExpiryDate = null;
+  if (options.patchExpiryDate !== void 0) {
+    const parsed = parseStrictCalendarDate(options.patchExpiryDate);
+    if (!parsed) throw new Error("Expiry date is required.");
+    effectiveExpiryDate = parsed;
+  } else if (options.existingExpiryDate) {
+    effectiveExpiryDate = parseStrictCalendarDate(options.existingExpiryDate) ?? null;
+  }
+  if (!effectiveExpiryDate) {
+    throw new Error("Expiry date is required.");
+  }
+  let effectiveIssueDate = null;
+  if (options.patchIssueDate !== void 0) {
+    effectiveIssueDate = parseStrictCalendarDate(options.patchIssueDate) ?? null;
+  } else if (options.existingIssueDate) {
+    effectiveIssueDate = parseStrictCalendarDate(options.existingIssueDate) ?? null;
+  }
+  if (effectiveIssueDate && effectiveExpiryDate && effectiveIssueDate > effectiveExpiryDate) {
+    throw new Error("Issue date cannot be after expiry date.");
+  }
+  return {
+    effectiveIssueDate,
+    effectiveExpiryDate
+  };
+}
 var ASSIGNMENT_TYPES, EMPLOYMENT_STATUSES, INACTIVE_EMPLOYMENT_STATUSES, STAFF_TYPES, TRAINING_KINDS, PARTICIPATION_ROLES, TARGET_STAFF_TYPES, RENEWAL_STATUSES, VERIFICATION_STATUSES, TRAINING_STATUSES, ALLOWED_PHOTO_MIMES, ALLOWED_DOCUMENT_MIMES, ALLOWED_SMART_IMPORT_MIMES, MAX_FILE_BYTES, MEMO_TYPES;
 var init_nursetrack = __esm({
   "shared/nursetrack.ts"() {
@@ -690,9 +745,9 @@ import { createRequire } from "module";
 function getSqliteDb() {
   if (!_sqliteDb) {
     const DatabaseConstructor = require2("better-sqlite3");
-    const dataDir = path.join(__dirname, "data");
-    fs.mkdirSync(dataDir, { recursive: true });
-    const dbPath = path.join(dataDir, "local.db");
+    const dbPath = process.env.LOCAL_DB_PATH || path.join(__dirname, "data", "local.db");
+    const dir = path.dirname(dbPath);
+    fs.mkdirSync(dir, { recursive: true });
     const instance = new DatabaseConstructor(dbPath);
     instance.pragma("journal_mode = WAL");
     initSchemaAndSeed(instance);
@@ -1776,26 +1831,28 @@ async function getNurseLicenseInfo(nurseId) {
   if (db) {
     const rows = await db.select().from(nurseCredentials).where(eq(nurseCredentials.nurseId, nurseId)).orderBy(desc(nurseCredentials.expiryDate)).limit(1);
     const cred2 = rows[0];
-    if (!cred2) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
+    if (!cred2) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null, issueDate: null };
     const expKey2 = dateKey(cred2.expiryDate);
     const days2 = expKey2 ? daysUntilExpiry(expKey2) : null;
     return {
       status: deriveLicenseStatusFromCred(cred2),
       licenseNumber: cred2.licenseNumber ?? null,
       expiryDate: expKey2 || null,
-      daysRemaining: days2
+      daysRemaining: days2,
+      issueDate: cred2.issueDate ? dateKey(cred2.issueDate) : null
     };
   }
   const sqlite = getSqliteDb();
   const cred = sqlite.prepare("SELECT * FROM nurseCredentials WHERE nurseId = ? ORDER BY date(expiryDate) DESC LIMIT 1").get(nurseId);
-  if (!cred) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null };
+  if (!cred) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null, issueDate: null };
   const expKey = dateKey(cred.expiryDate);
   const days = expKey ? daysUntilExpiry(expKey) : null;
   return {
     status: deriveLicenseStatusFromCred(cred),
     licenseNumber: cred.licenseNumber ?? null,
     expiryDate: expKey || null,
-    daysRemaining: days
+    daysRemaining: days,
+    issueDate: cred.issueDate ? dateKey(cred.issueDate) : null
   };
 }
 async function getNurseLicenseStatus(nurseId) {
@@ -2092,8 +2149,8 @@ async function updateCredential(id, data) {
     sqlite.prepare(`UPDATE nurseCredentials SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
   }
 }
-async function upsertNursePrcLicense(nurseId, licenseNumber) {
-  const norm = licenseNumber ? licenseNumber.trim() : null;
+async function upsertNursePrcLicense(nurseId, licenseNumber, dates, options) {
+  const norm = licenseNumber !== void 0 ? licenseNumber ? licenseNumber.trim() : null : void 0;
   if (norm) {
     const matchingNurseIds = await findNurseIdsByLicenseNumber(norm);
     const hasConflict = matchingNurseIds.some((id) => id !== nurseId);
@@ -2104,24 +2161,95 @@ async function upsertNursePrcLicense(nurseId, licenseNumber) {
   const creds = await listCredentials({ nurseId });
   const types = await listCredentialTypes(true);
   const prcType = types.find((t2) => t2.name.toLowerCase().includes("prc")) ?? types[0];
-  const existingPrc = creds.find((c) => prcType && c.credentialTypeId === prcType.id) ?? creds[0];
+  let existingPrc;
+  if (options?.credentialId !== void 0) {
+    existingPrc = creds.find((c) => c.id === options.credentialId);
+    if (!existingPrc) return { ok: false, reason: "not_found" };
+    if (prcType && existingPrc.credentialTypeId !== prcType.id) {
+      return { ok: false, reason: "invalid_credential_type" };
+    }
+  } else {
+    existingPrc = creds.find((c) => prcType && c.credentialTypeId === prcType.id);
+  }
   if (existingPrc) {
-    await updateCredential(existingPrc.id, { licenseNumber: norm || null });
+    let effectiveDates;
+    try {
+      effectiveDates = validateEffectivePrcDates({
+        existingIssueDate: existingPrc.issueDate,
+        existingExpiryDate: existingPrc.expiryDate,
+        patchIssueDate: dates?.issueDate,
+        patchExpiryDate: dates?.expiryDate
+      });
+    } catch (err) {
+      if (err?.message === "Expiry date is required.") {
+        return { ok: false, reason: "missing_expiry" };
+      }
+      return { ok: false, reason: "invalid_dates" };
+    }
+    const existingNorm = existingPrc.licenseNumber ? existingPrc.licenseNumber.trim() : null;
+    const incomingNorm = licenseNumber !== void 0 ? norm : existingNorm;
+    const isNumberChanged = licenseNumber !== void 0 && existingNorm !== incomingNorm;
+    const existingIssueKey = existingPrc.issueDate ? dateKey(existingPrc.issueDate) : "";
+    const incomingIssueKey = effectiveDates.effectiveIssueDate ? dateKey(effectiveDates.effectiveIssueDate) : "";
+    const isIssueChanged = dates?.issueDate !== void 0 && existingIssueKey !== incomingIssueKey;
+    const existingExpiryKey = existingPrc.expiryDate ? dateKey(existingPrc.expiryDate) : "";
+    const incomingExpiryKey = dateKey(effectiveDates.effectiveExpiryDate);
+    const isExpiryChanged = dates?.expiryDate !== void 0 && existingExpiryKey !== incomingExpiryKey;
+    const isDetailsChanged = isNumberChanged || isIssueChanged || isExpiryChanged;
+    const patch = {};
+    if (licenseNumber !== void 0) {
+      patch.licenseNumber = norm;
+    }
+    if (dates?.issueDate !== void 0) {
+      patch.issueDate = effectiveDates.effectiveIssueDate;
+    }
+    if (dates?.expiryDate !== void 0) {
+      patch.expiryDate = effectiveDates.effectiveExpiryDate;
+      if (isExpiryChanged) {
+        patch.renewalCycleKey = renewalCycleKey(`${existingPrc.id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
+      }
+    }
+    if (isDetailsChanged) {
+      patch.verificationStatus = "Pending Verification";
+    }
+    if (Object.keys(patch).length > 0) {
+      await updateCredential(existingPrc.id, patch);
+    }
     return { ok: true, credentialId: existingPrc.id };
   }
-  if (norm) {
-    const expiryDate = /* @__PURE__ */ new Date();
-    expiryDate.setFullYear(expiryDate.getFullYear() + 3);
+  if (norm !== void 0 || dates?.issueDate !== void 0 || dates?.expiryDate !== void 0) {
+    if (!norm && dates?.expiryDate === void 0 && dates?.issueDate === void 0) {
+      return { ok: true };
+    }
+    if (dates?.expiryDate === void 0 || dates?.expiryDate === null || dates?.expiryDate === "") {
+      return { ok: false, reason: "missing_expiry" };
+    }
+    let effectiveDates;
+    try {
+      effectiveDates = validateEffectivePrcDates({
+        patchIssueDate: dates?.issueDate,
+        patchExpiryDate: dates?.expiryDate
+      });
+    } catch (err) {
+      if (err?.message === "Expiry date is required.") {
+        return { ok: false, reason: "missing_expiry" };
+      }
+      return { ok: false, reason: "invalid_dates" };
+    }
     const typeId = prcType ? prcType.id : 1;
     const credId = await createCredential({
       nurseId,
       credentialTypeId: typeId,
-      licenseNumber: norm,
+      licenseNumber: norm ?? void 0,
       issuingOrganization: prcType?.issuingOrganizationDefault || "Professional Regulation Commission (PRC)",
-      expiryDate,
+      issueDate: effectiveDates.effectiveIssueDate ?? void 0,
+      expiryDate: effectiveDates.effectiveExpiryDate,
       renewalStatus: "Not Started",
-      verificationStatus: "Unverified",
+      verificationStatus: "Pending Verification",
       renewalCycleKey: renewalCycleKey(`prc-${nurseId}-${Date.now()}`)
+    });
+    await updateCredential(credId, {
+      renewalCycleKey: renewalCycleKey(`${credId}-${effectiveDates.effectiveExpiryDate.toISOString()}`)
     });
     return { ok: true, credentialId: credId };
   }
@@ -6089,6 +6217,7 @@ var nursesRouter = router({
         currentArea: n.currentAreaId ? areaById.get(n.currentAreaId) ?? null : null,
         licenseStatus: info.status,
         licenseNumber: info.licenseNumber,
+        licenseIssueDate: info.issueDate || null,
         licenseExpiryDate: info.expiryDate,
         licenseDaysRemaining: info.daysRemaining
       };
@@ -6105,6 +6234,7 @@ var nursesRouter = router({
       currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
       licenseStatus: info.status,
       licenseNumber: info.licenseNumber,
+      licenseIssueDate: info.issueDate || null,
       licenseExpiryDate: info.expiryDate,
       licenseDaysRemaining: info.daysRemaining
     };
@@ -6286,17 +6416,29 @@ var nursesRouter = router({
       employmentStatus: z2.enum([...EMPLOYMENT_STATUSES]),
       currentAreaId: z2.number().optional(),
       accountEmail: z2.string().email().max(320).optional(),
-      licenseNumber: z2.string().max(64).optional()
+      licenseNumber: z2.string().max(64).optional(),
+      licenseIssueDate: nullableDateInput,
+      licenseExpiryDate: nullableDateInput
     })
   ).mutation(async ({ ctx, input }) => {
-    const { accountEmail, licenseNumber, ...nurseData } = input;
+    const { accountEmail, licenseNumber, licenseIssueDate, licenseExpiryDate, ...nurseData } = input;
+    if (licenseIssueDate && licenseExpiryDate && licenseIssueDate > licenseExpiryDate) {
+      throw new TRPCError2({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+    }
     const byId = await getNurseByEmployeeId(input.employeeId);
     if (byId) throw new TRPCError2({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
     const id = await createNurse(nurseData);
     await updateNurse(id, { currentAreaId: input.currentAreaId ?? null });
-    if (licenseNumber !== void 0) {
-      const licRes = await upsertNursePrcLicense(id, licenseNumber);
-      if (!licRes.ok) throw new TRPCError2({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+    if (licenseNumber !== void 0 || licenseIssueDate !== void 0 || licenseExpiryDate !== void 0) {
+      const licRes = await upsertNursePrcLicense(id, licenseNumber, {
+        issueDate: licenseIssueDate,
+        expiryDate: licenseExpiryDate
+      });
+      if (!licRes.ok) {
+        if (licRes.reason === "conflict") throw new TRPCError2({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+        if (licRes.reason === "missing_expiry") throw new TRPCError2({ code: "BAD_REQUEST", message: "Expiry date is required when adding a PRC license." });
+        if (licRes.reason === "invalid_dates") throw new TRPCError2({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+      }
     }
     if (accountEmail) {
       const result = await adminSetNurseAccountEmail(id, accountEmail);
@@ -6335,10 +6477,15 @@ var nursesRouter = router({
       employmentStatus: z2.enum([...EMPLOYMENT_STATUSES]).optional(),
       currentAreaId: z2.number().optional(),
       accountEmail: z2.union([z2.string().email().max(320), z2.literal("")]).optional(),
-      licenseNumber: z2.string().max(64).optional().nullable()
+      licenseNumber: z2.string().max(64).optional().nullable(),
+      licenseIssueDate: nullableDateInput,
+      licenseExpiryDate: nullableDateInput
     })
   ).mutation(async ({ ctx, input }) => {
-    const { id, employeeId, accountEmail, licenseNumber, ...rest } = input;
+    const { id, employeeId, accountEmail, licenseNumber, licenseIssueDate, licenseExpiryDate, ...rest } = input;
+    if (licenseIssueDate && licenseExpiryDate && licenseIssueDate > licenseExpiryDate) {
+      throw new TRPCError2({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+    }
     const nurse = await getNurseById(id);
     if (!nurse) throw new TRPCError2({ code: "NOT_FOUND", message: "Nurse not found" });
     if (employeeId !== void 0 && employeeId !== nurse.employeeId) {
@@ -6346,9 +6493,16 @@ var nursesRouter = router({
       if (taken) throw new TRPCError2({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
     }
     await updateNurse(id, { ...rest, ...employeeId ? { employeeId } : {} });
-    if (licenseNumber !== void 0) {
-      const licRes = await upsertNursePrcLicense(id, licenseNumber);
-      if (!licRes.ok) throw new TRPCError2({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+    if (licenseNumber !== void 0 || licenseIssueDate !== void 0 || licenseExpiryDate !== void 0) {
+      const licRes = await upsertNursePrcLicense(id, licenseNumber, {
+        issueDate: licenseIssueDate,
+        expiryDate: licenseExpiryDate
+      });
+      if (!licRes.ok) {
+        if (licRes.reason === "conflict") throw new TRPCError2({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+        if (licRes.reason === "missing_expiry") throw new TRPCError2({ code: "BAD_REQUEST", message: "Expiry date is required when adding a PRC license." });
+        if (licRes.reason === "invalid_dates") throw new TRPCError2({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+      }
     }
     if (accountEmail !== void 0) {
       const result = await adminSetNurseAccountEmail(id, accountEmail === "" ? null : accountEmail);
@@ -6760,13 +6914,38 @@ var credentialsRouter = router({
     const { id, ...rest } = input;
     const cred = (await listCredentials()).find((c) => c.id === id);
     if (!cred) throw new TRPCError3({ code: "NOT_FOUND", message: "License not found" });
+    if (rest.licenseNumber !== void 0) {
+      const norm = rest.licenseNumber ? rest.licenseNumber.trim() : null;
+      if (norm) {
+        const matchingNurseIds = await findNurseIdsByLicenseNumber(norm);
+        if (matchingNurseIds.some((nurseId) => nurseId !== cred.nurseId)) {
+          throw new TRPCError3({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+        }
+      }
+    }
     const patch = {};
-    if (rest.licenseNumber !== void 0) patch.licenseNumber = rest.licenseNumber;
+    if (rest.licenseNumber !== void 0) patch.licenseNumber = rest.licenseNumber ? rest.licenseNumber.trim() : null;
     if (rest.issuingOrganization !== void 0) patch.issuingOrganization = rest.issuingOrganization;
-    if (rest.issueDate !== void 0) patch.issueDate = rest.issueDate;
-    if (rest.expiryDate !== void 0) {
-      patch.expiryDate = rest.expiryDate;
-      patch.renewalCycleKey = renewalCycleKey(`${id}-${rest.expiryDate.toISOString()}`);
+    if (rest.issueDate !== void 0 || rest.expiryDate !== void 0) {
+      let effectiveDates;
+      try {
+        effectiveDates = validateEffectivePrcDates({
+          existingIssueDate: cred.issueDate,
+          existingExpiryDate: cred.expiryDate,
+          patchIssueDate: rest.issueDate,
+          patchExpiryDate: rest.expiryDate
+        });
+      } catch (err) {
+        if (err?.message === "Expiry date is required.") {
+          throw new TRPCError3({ code: "BAD_REQUEST", message: "Expiry date is required." });
+        }
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+      }
+      if (rest.issueDate !== void 0) patch.issueDate = effectiveDates.effectiveIssueDate;
+      if (rest.expiryDate !== void 0) {
+        patch.expiryDate = effectiveDates.effectiveExpiryDate;
+        patch.renewalCycleKey = renewalCycleKey(`${id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
+      }
     }
     if (rest.renewalStatus !== void 0) patch.renewalStatus = rest.renewalStatus;
     if (rest.verificationStatus !== void 0) patch.verificationStatus = rest.verificationStatus;
@@ -6788,7 +6967,12 @@ var credentialsRouter = router({
       credentialId: z3.number(),
       fileBase64: z3.string(),
       fileName: z3.string().max(200),
-      mimeType: z3.string()
+      mimeType: z3.string(),
+      confirmedFields: z3.object({
+        licenseNumber: z3.string().trim().max(64).optional().nullable(),
+        issueDate: z3.union([z3.string(), z3.date()]).optional().nullable(),
+        expiryDate: z3.union([z3.string(), z3.date()]).optional().nullable()
+      }).optional()
     })
   ).mutation(async ({ ctx, input }) => {
     const all = await listCredentials();
@@ -6798,10 +6982,61 @@ var credentialsRouter = router({
     if (!mimeCheck.ok) throw new TRPCError3({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError3({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const patch = {};
+    if (input.confirmedFields) {
+      if (input.confirmedFields.expiryDate === null || input.confirmedFields.expiryDate === "") {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Expiry date is required." });
+      }
+      let effectiveDates;
+      try {
+        effectiveDates = validateEffectivePrcDates({
+          existingIssueDate: cred.issueDate,
+          existingExpiryDate: cred.expiryDate,
+          patchIssueDate: input.confirmedFields.issueDate,
+          patchExpiryDate: input.confirmedFields.expiryDate
+        });
+      } catch (err) {
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: err?.message || "Invalid dates."
+        });
+      }
+      if (input.confirmedFields.licenseNumber !== void 0) {
+        const normPrc = input.confirmedFields.licenseNumber ? input.confirmedFields.licenseNumber.trim() : null;
+        if (normPrc) {
+          const matchingNurseIds = await findNurseIdsByLicenseNumber(normPrc);
+          if (matchingNurseIds.some((id) => id !== cred.nurseId)) {
+            throw new TRPCError3({
+              code: "CONFLICT",
+              message: "Another nurse is already registered with this PRC License Number."
+            });
+          }
+        }
+        patch.licenseNumber = normPrc;
+      }
+      if (input.confirmedFields.issueDate !== void 0) {
+        patch.issueDate = effectiveDates.effectiveIssueDate;
+      }
+      if (input.confirmedFields.expiryDate !== void 0) {
+        patch.expiryDate = effectiveDates.effectiveExpiryDate;
+        const existingExpiryStr = cred.expiryDate ? cred.expiryDate instanceof Date ? cred.expiryDate.toISOString().slice(0, 10) : String(cred.expiryDate).slice(0, 10) : null;
+        const newExpiryStr = effectiveDates.effectiveExpiryDate.toISOString().slice(0, 10);
+        if (newExpiryStr !== existingExpiryStr) {
+          patch.renewalCycleKey = renewalCycleKey(`${cred.id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
+        }
+      }
+    }
+    const credTypes = await listCredentialTypes(true);
+    const credType = credTypes.find((t2) => t2.id === cred.credentialTypeId);
+    const isPrc = credType ? credType.name.toLowerCase().includes("prc") : false;
+    if (isPrc) {
+      patch.verificationStatus = "Pending Verification";
+    }
     const oldKey = cred.documentKey;
     const key = storageKey("license-documents", cred.nurseId, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
-    await updateCredential(input.credentialId, { documentKey: storedKey });
+    patch.documentKey = storedKey;
+    await updateCredential(input.credentialId, patch);
     if (oldKey && oldKey !== storedKey) {
       await storageDelete(oldKey).catch(() => {
       });
@@ -6812,7 +7047,7 @@ var credentialsRouter = router({
       actionType: "license.document.uploaded",
       entityType: "credential",
       entityId: input.credentialId,
-      summary: `License document uploaded for license #${input.credentialId}`
+      summary: `License document uploaded for license #${input.credentialId}${input.confirmedFields ? " with reviewed fields" : ""}`
     });
     return { url };
   }),
@@ -10791,12 +11026,65 @@ var staffAccountRouter = router({
     await updateNurse(nurse.id, { contactNumber: input.contactNumber ?? null });
     return { ok: true };
   }),
-  updateMyPrcLicense: staffProcedure.input(z12.object({ licenseNumber: z12.string().max(64).nullable().optional() })).mutation(async ({ ctx, input }) => {
+  updateMyPrcLicense: staffProcedure.input(
+    z12.object({
+      credentialId: z12.number().int().positive().optional(),
+      licenseNumber: z12.string().trim().max(64).nullable().optional(),
+      issueDate: z12.union([z12.string(), z12.date()]).nullable().optional(),
+      expiryDate: z12.union([z12.string(), z12.date()]).nullable().optional()
+    })
+  ).mutation(async ({ ctx, input }) => {
     const nurse = await getNurseById(ctx.nurseId);
     if (!nurse) throw new TRPCError8({ code: "NOT_FOUND", message: "Your account isn't linked to a staff profile yet." });
-    const licResult = await upsertNursePrcLicense(nurse.id, input.licenseNumber ?? null);
+    if (input.credentialId !== void 0) {
+      const creds = await listCredentials({ nurseId: nurse.id });
+      const target = creds.find((c) => c.id === input.credentialId);
+      if (!target) {
+        throw new TRPCError8({ code: "NOT_FOUND", message: "Credential record not found." });
+      }
+      const credTypes = await listCredentialTypes(true);
+      const targetType = credTypes.find((t2) => t2.id === target.credentialTypeId);
+      if (!targetType || !targetType.name.toLowerCase().includes("prc")) {
+        throw new TRPCError8({ code: "BAD_REQUEST", message: "Target credential is not a PRC license." });
+      }
+    }
+    let parsedIssue;
+    let parsedExpiry;
+    try {
+      parsedIssue = parseStrictCalendarDate(input.issueDate);
+    } catch (err) {
+      throw new TRPCError8({ code: "BAD_REQUEST", message: err?.message || "Invalid issue date." });
+    }
+    try {
+      parsedExpiry = parseStrictCalendarDate(input.expiryDate);
+    } catch (err) {
+      throw new TRPCError8({ code: "BAD_REQUEST", message: err?.message || "Invalid expiry date." });
+    }
+    const licResult = await upsertNursePrcLicense(
+      nurse.id,
+      input.licenseNumber,
+      {
+        issueDate: parsedIssue,
+        expiryDate: parsedExpiry
+      },
+      { credentialId: input.credentialId }
+    );
     if (!licResult.ok) {
-      throw new TRPCError8({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+      if (licResult.reason === "conflict") {
+        throw new TRPCError8({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+      }
+      if (licResult.reason === "missing_expiry") {
+        throw new TRPCError8({ code: "BAD_REQUEST", message: "Expiry date is required." });
+      }
+      if (licResult.reason === "invalid_dates") {
+        throw new TRPCError8({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+      }
+      if (licResult.reason === "not_found") {
+        throw new TRPCError8({ code: "NOT_FOUND", message: "Credential record not found." });
+      }
+      if (licResult.reason === "invalid_credential_type") {
+        throw new TRPCError8({ code: "BAD_REQUEST", message: "Target credential is not a PRC license." });
+      }
     }
     await logActivity({
       supervisorId: ctx.user?.id ?? null,
@@ -10804,7 +11092,7 @@ var staffAccountRouter = router({
       actionType: "nurse.updated",
       entityType: "nurse",
       entityId: nurse.id,
-      summary: `PRC License Number updated to ${input.licenseNumber || "none"} by ${nurseFullName(nurse)} (self-service)`
+      summary: `PRC License updated (No: ${input.licenseNumber ?? "none"}, Exp: ${parsedExpiry ? parsedExpiry.toISOString().slice(0, 10) : "none"}) by ${nurseFullName(nurse)} (self-service)`
     });
     return { ok: true };
   }),
@@ -10841,7 +11129,12 @@ var staffAccountRouter = router({
       credentialId: z12.number(),
       fileBase64: z12.string(),
       fileName: z12.string().max(200),
-      mimeType: z12.string()
+      mimeType: z12.string(),
+      confirmedFields: z12.object({
+        licenseNumber: z12.string().trim().max(64).optional().nullable(),
+        issueDate: z12.union([z12.string(), z12.date()]).optional().nullable(),
+        expiryDate: z12.union([z12.string(), z12.date()]).optional().nullable()
+      }).optional()
     })
   ).mutation(async ({ ctx, input }) => {
     const nurse = await getNurseById(ctx.nurseId);
@@ -10853,10 +11146,61 @@ var staffAccountRouter = router({
     if (!mimeCheck.ok) throw new TRPCError8({ code: "BAD_REQUEST", message: mimeCheck.error });
     const buffer = Buffer.from(input.fileBase64, "base64");
     if (buffer.length > 10 * 1024 * 1024) throw new TRPCError8({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+    const patch = {};
+    if (input.confirmedFields) {
+      if (input.confirmedFields.expiryDate === null || input.confirmedFields.expiryDate === "") {
+        throw new TRPCError8({ code: "BAD_REQUEST", message: "Expiry date is required." });
+      }
+      let effectiveDates;
+      try {
+        effectiveDates = validateEffectivePrcDates({
+          existingIssueDate: cred.issueDate,
+          existingExpiryDate: cred.expiryDate,
+          patchIssueDate: input.confirmedFields.issueDate,
+          patchExpiryDate: input.confirmedFields.expiryDate
+        });
+      } catch (err) {
+        throw new TRPCError8({
+          code: "BAD_REQUEST",
+          message: err?.message || "Invalid dates."
+        });
+      }
+      if (input.confirmedFields.licenseNumber !== void 0) {
+        const normPrc = input.confirmedFields.licenseNumber ? input.confirmedFields.licenseNumber.trim() : null;
+        if (normPrc) {
+          const matchingNurseIds = await findNurseIdsByLicenseNumber(normPrc);
+          if (matchingNurseIds.some((id) => id !== nurse.id)) {
+            throw new TRPCError8({
+              code: "CONFLICT",
+              message: "Another nurse is already registered with this PRC License Number."
+            });
+          }
+        }
+        patch.licenseNumber = normPrc;
+      }
+      if (input.confirmedFields.issueDate !== void 0) {
+        patch.issueDate = effectiveDates.effectiveIssueDate;
+      }
+      if (input.confirmedFields.expiryDate !== void 0) {
+        patch.expiryDate = effectiveDates.effectiveExpiryDate;
+        const existingExpiryStr = cred.expiryDate ? cred.expiryDate instanceof Date ? cred.expiryDate.toISOString().slice(0, 10) : String(cred.expiryDate).slice(0, 10) : null;
+        const newExpiryStr = effectiveDates.effectiveExpiryDate.toISOString().slice(0, 10);
+        if (newExpiryStr !== existingExpiryStr) {
+          patch.renewalCycleKey = renewalCycleKey(`${cred.id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
+        }
+      }
+    }
+    const credTypes = await listCredentialTypes(true);
+    const credType = credTypes.find((t2) => t2.id === cred.credentialTypeId);
+    const isPrc = credType ? credType.name.toLowerCase().includes("prc") : false;
+    if (isPrc) {
+      patch.verificationStatus = "Pending Verification";
+    }
     const oldKey = cred.documentKey;
     const key = storageKey("license-documents", nurse.id, sanitizeFilename(input.fileName));
     const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
-    await updateCredential(input.credentialId, { documentKey: storedKey });
+    patch.documentKey = storedKey;
+    await updateCredential(input.credentialId, patch);
     if (oldKey && oldKey !== storedKey) {
       await storageDelete(oldKey).catch(() => {
       });
@@ -10867,7 +11211,7 @@ var staffAccountRouter = router({
       actionType: "license.document.uploaded",
       entityType: "credential",
       entityId: input.credentialId,
-      summary: `License/credential document uploaded by ${nurseFullName(nurse)} (self-service)`
+      summary: `License/credential document uploaded by ${nurseFullName(nurse)} (self-service)${input.confirmedFields ? " with reviewed fields" : ""}`
     });
     return { url };
   }),

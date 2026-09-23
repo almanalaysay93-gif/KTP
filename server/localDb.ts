@@ -13,15 +13,26 @@ let _sqliteDb: Database.Database | null = null;
 export function getSqliteDb(): Database.Database {
   if (!_sqliteDb) {
     const DatabaseConstructor = require("better-sqlite3");
-    const dataDir = path.join(__dirname, "data");
-    fs.mkdirSync(dataDir, { recursive: true });
-    const dbPath = path.join(dataDir, "local.db");
+    const dbPath = process.env.LOCAL_DB_PATH || path.join(__dirname, "data", "local.db");
+    const dir = path.dirname(dbPath);
+    fs.mkdirSync(dir, { recursive: true });
     const instance: Database.Database = new DatabaseConstructor(dbPath);
     instance.pragma("journal_mode = WAL");
     initSchemaAndSeed(instance);
     _sqliteDb = instance;
   }
   return _sqliteDb!;
+}
+
+export function closeSqliteDb(): void {
+  if (_sqliteDb) {
+    try {
+      _sqliteDb.close();
+    } catch {
+      // ignore
+    }
+    _sqliteDb = null;
+  }
 }
 
 function initSchemaAndSeed(db: Database.Database) {

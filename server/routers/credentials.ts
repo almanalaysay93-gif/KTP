@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import { daysUntilExpiry, deriveLicenseStatus, LICENSE_STATUS_META, nurseFullName, renewalCycleKey, sanitizeFilename, storageKey, validateMime, dateKey } from "../../shared/nursetrack";
+import { daysUntilExpiry, deriveLicenseStatus, LICENSE_STATUS_META, nurseFullName, parseStrictCalendarDate, renewalCycleKey, sanitizeFilename, storageKey, validateEffectivePrcDates, validateMime, dateKey } from "../../shared/nursetrack";
 import { storageDelete, storagePut } from "../storage";
 
 const nullableDateInput = z.union([z.date(), z.string().datetime(), z.null()]).transform((d) => (d === null ? null : d instanceof Date ? d : new Date(d))).optional();
@@ -172,14 +172,43 @@ export const credentialsRouter = router({
       const { id, ...rest } = input;
       const cred = (await db.listCredentials()).find((c) => c.id === id);
       if (!cred) throw new TRPCError({ code: "NOT_FOUND", message: "License not found" });
-      const patch: Record<string, unknown> = {};
-      if (rest.licenseNumber !== undefined) patch.licenseNumber = rest.licenseNumber;
-      if (rest.issuingOrganization !== undefined) patch.issuingOrganization = rest.issuingOrganization;
-      if (rest.issueDate !== undefined) patch.issueDate = rest.issueDate;
-      if (rest.expiryDate !== undefined) {
-        patch.expiryDate = rest.expiryDate;
-        patch.renewalCycleKey = renewalCycleKey(`${id}-${rest.expiryDate.toISOString()}`);
+
+      if (rest.licenseNumber !== undefined) {
+        const norm = rest.licenseNumber ? rest.licenseNumber.trim() : null;
+        if (norm) {
+          const matchingNurseIds = await db.findNurseIdsByLicenseNumber(norm);
+          if (matchingNurseIds.some((nurseId) => nurseId !== cred.nurseId)) {
+            throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+          }
+        }
       }
+
+      const patch: Record<string, unknown> = {};
+      if (rest.licenseNumber !== undefined) patch.licenseNumber = rest.licenseNumber ? rest.licenseNumber.trim() : null;
+      if (rest.issuingOrganization !== undefined) patch.issuingOrganization = rest.issuingOrganization;
+
+      if (rest.issueDate !== undefined || rest.expiryDate !== undefined) {
+        let effectiveDates;
+        try {
+          effectiveDates = validateEffectivePrcDates({
+            existingIssueDate: cred.issueDate,
+            existingExpiryDate: cred.expiryDate,
+            patchIssueDate: rest.issueDate,
+            patchExpiryDate: rest.expiryDate,
+          });
+        } catch (err: any) {
+          if (err?.message === "Expiry date is required.") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Expiry date is required." });
+          }
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+        }
+        if (rest.issueDate !== undefined) patch.issueDate = effectiveDates.effectiveIssueDate;
+        if (rest.expiryDate !== undefined) {
+          patch.expiryDate = effectiveDates.effectiveExpiryDate;
+          patch.renewalCycleKey = renewalCycleKey(`${id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
+        }
+      }
+
       if (rest.renewalStatus !== undefined) patch.renewalStatus = rest.renewalStatus;
       if (rest.verificationStatus !== undefined) patch.verificationStatus = rest.verificationStatus;
       if (rest.remarks !== undefined) patch.remarks = rest.remarks;
@@ -203,6 +232,13 @@ export const credentialsRouter = router({
         fileBase64: z.string(),
         fileName: z.string().max(200),
         mimeType: z.string(),
+        confirmedFields: z
+          .object({
+            licenseNumber: z.string().trim().max(64).optional().nullable(),
+            issueDate: z.union([z.string(), z.date()]).optional().nullable(),
+            expiryDate: z.union([z.string(), z.date()]).optional().nullable(),
+          })
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -213,10 +249,75 @@ export const credentialsRouter = router({
       if (!mimeCheck.ok) throw new TRPCError({ code: "BAD_REQUEST", message: mimeCheck.error });
       const buffer = Buffer.from(input.fileBase64, "base64");
       if (buffer.length > 10 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "File too large (max 10 MB)." });
+
+      const patch: Record<string, unknown> = {};
+
+      if (input.confirmedFields) {
+        if (input.confirmedFields.expiryDate === null || input.confirmedFields.expiryDate === "") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Expiry date is required." });
+        }
+
+        let effectiveDates;
+        try {
+          effectiveDates = validateEffectivePrcDates({
+            existingIssueDate: cred.issueDate,
+            existingExpiryDate: cred.expiryDate,
+            patchIssueDate: input.confirmedFields.issueDate,
+            patchExpiryDate: input.confirmedFields.expiryDate,
+          });
+        } catch (err: any) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: err?.message || "Invalid dates.",
+          });
+        }
+
+        if (input.confirmedFields.licenseNumber !== undefined) {
+          const normPrc = input.confirmedFields.licenseNumber ? input.confirmedFields.licenseNumber.trim() : null;
+          if (normPrc) {
+            const matchingNurseIds = await db.findNurseIdsByLicenseNumber(normPrc);
+            if (matchingNurseIds.some((id) => id !== cred.nurseId)) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Another nurse is already registered with this PRC License Number.",
+              });
+            }
+          }
+          patch.licenseNumber = normPrc;
+        }
+
+        if (input.confirmedFields.issueDate !== undefined) {
+          patch.issueDate = effectiveDates.effectiveIssueDate;
+        }
+
+        if (input.confirmedFields.expiryDate !== undefined) {
+          patch.expiryDate = effectiveDates.effectiveExpiryDate;
+          const existingExpiryStr = cred.expiryDate
+            ? cred.expiryDate instanceof Date
+              ? cred.expiryDate.toISOString().slice(0, 10)
+              : String(cred.expiryDate).slice(0, 10)
+            : null;
+          const newExpiryStr = effectiveDates.effectiveExpiryDate.toISOString().slice(0, 10);
+          if (newExpiryStr !== existingExpiryStr) {
+            patch.renewalCycleKey = renewalCycleKey(`${cred.id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
+          }
+        }
+      }
+
+      const credTypes = await db.listCredentialTypes(true);
+      const credType = credTypes.find((t) => t.id === cred.credentialTypeId);
+      const isPrc = credType ? credType.name.toLowerCase().includes("prc") : false;
+      if (isPrc) {
+        patch.verificationStatus = "Pending Verification";
+      }
+
       const oldKey = cred.documentKey;
       const key = storageKey("license-documents", cred.nurseId, sanitizeFilename(input.fileName));
       const { key: storedKey, url } = await storagePut(key, buffer, input.mimeType);
-      await db.updateCredential(input.credentialId, { documentKey: storedKey });
+
+      patch.documentKey = storedKey;
+      await db.updateCredential(input.credentialId, patch);
+
       if (oldKey && oldKey !== storedKey) {
         await storageDelete(oldKey).catch(() => {});
       }
@@ -226,7 +327,7 @@ export const credentialsRouter = router({
         actionType: "license.document.uploaded",
         entityType: "credential",
         entityId: input.credentialId,
-        summary: `License document uploaded for license #${input.credentialId}`,
+        summary: `License document uploaded for license #${input.credentialId}${input.confirmedFields ? " with reviewed fields" : ""}`,
       });
       return { url };
     }),

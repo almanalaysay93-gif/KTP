@@ -32,7 +32,7 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/((?!api/|storage/|images/|manus-storage/|assets/).*)",
+      "source": "/((?!api/|storage/|images/|manus-storage/|assets/|ocr/).*)",
       "destination": "/index.html"
     }
   ]

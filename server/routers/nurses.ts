@@ -67,6 +67,7 @@ export const nursesRouter = router({
           currentArea: n.currentAreaId ? areaById.get(n.currentAreaId) ?? null : null,
           licenseStatus: info.status,
           licenseNumber: info.licenseNumber,
+          licenseIssueDate: info.issueDate || null,
           licenseExpiryDate: info.expiryDate,
           licenseDaysRemaining: info.daysRemaining,
         };
@@ -86,6 +87,7 @@ export const nursesRouter = router({
         currentArea: nurse.currentAreaId ? areaById.get(nurse.currentAreaId) ?? null : null,
         licenseStatus: info.status,
         licenseNumber: info.licenseNumber,
+        licenseIssueDate: info.issueDate || null,
         licenseExpiryDate: info.expiryDate,
         licenseDaysRemaining: info.daysRemaining,
       };
@@ -306,17 +308,29 @@ export const nursesRouter = router({
         currentAreaId: z.number().optional(),
         accountEmail: z.string().email().max(320).optional(),
         licenseNumber: z.string().max(64).optional(),
+        licenseIssueDate: nullableDateInput,
+        licenseExpiryDate: nullableDateInput,
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { accountEmail, licenseNumber, ...nurseData } = input;
+      const { accountEmail, licenseNumber, licenseIssueDate, licenseExpiryDate, ...nurseData } = input;
+      if (licenseIssueDate && licenseExpiryDate && licenseIssueDate > licenseExpiryDate) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+      }
       const byId = await db.getNurseByEmployeeId(input.employeeId);
       if (byId) throw new TRPCError({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
       const id = await db.createNurse(nurseData as Parameters<typeof db.createNurse>[0]);
       await db.updateNurse(id, { currentAreaId: input.currentAreaId ?? null });
-      if (licenseNumber !== undefined) {
-        const licRes = await db.upsertNursePrcLicense(id, licenseNumber);
-        if (!licRes.ok) throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+      if (licenseNumber !== undefined || licenseIssueDate !== undefined || licenseExpiryDate !== undefined) {
+        const licRes = await db.upsertNursePrcLicense(id, licenseNumber, {
+          issueDate: licenseIssueDate,
+          expiryDate: licenseExpiryDate,
+        });
+        if (!licRes.ok) {
+          if (licRes.reason === "conflict") throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+          if (licRes.reason === "missing_expiry") throw new TRPCError({ code: "BAD_REQUEST", message: "Expiry date is required when adding a PRC license." });
+          if (licRes.reason === "invalid_dates") throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+        }
       }
       if (accountEmail) {
         const result = await db.adminSetNurseAccountEmail(id, accountEmail);
@@ -358,10 +372,15 @@ export const nursesRouter = router({
         currentAreaId: z.number().optional(),
         accountEmail: z.union([z.string().email().max(320), z.literal("")]).optional(),
         licenseNumber: z.string().max(64).optional().nullable(),
+        licenseIssueDate: nullableDateInput,
+        licenseExpiryDate: nullableDateInput,
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, employeeId, accountEmail, licenseNumber, ...rest } = input;
+      const { id, employeeId, accountEmail, licenseNumber, licenseIssueDate, licenseExpiryDate, ...rest } = input;
+      if (licenseIssueDate && licenseExpiryDate && licenseIssueDate > licenseExpiryDate) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+      }
       const nurse = await db.getNurseById(id);
       if (!nurse) throw new TRPCError({ code: "NOT_FOUND", message: "Nurse not found" });
       if (employeeId !== undefined && employeeId !== nurse.employeeId) {
@@ -369,9 +388,16 @@ export const nursesRouter = router({
         if (taken) throw new TRPCError({ code: "CONFLICT", message: "A nurse with this Employee ID already exists." });
       }
       await db.updateNurse(id, { ...rest, ...(employeeId ? { employeeId } : {}) } as Parameters<typeof db.updateNurse>[1]);
-      if (licenseNumber !== undefined) {
-        const licRes = await db.upsertNursePrcLicense(id, licenseNumber);
-        if (!licRes.ok) throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+      if (licenseNumber !== undefined || licenseIssueDate !== undefined || licenseExpiryDate !== undefined) {
+        const licRes = await db.upsertNursePrcLicense(id, licenseNumber, {
+          issueDate: licenseIssueDate,
+          expiryDate: licenseExpiryDate,
+        });
+        if (!licRes.ok) {
+          if (licRes.reason === "conflict") throw new TRPCError({ code: "CONFLICT", message: "Another nurse is already registered with this PRC License Number." });
+          if (licRes.reason === "missing_expiry") throw new TRPCError({ code: "BAD_REQUEST", message: "Expiry date is required when adding a PRC license." });
+          if (licRes.reason === "invalid_dates") throw new TRPCError({ code: "BAD_REQUEST", message: "Issue date cannot be after expiry date." });
+        }
       }
       if (accountEmail !== undefined) {
         // "" clears accountEmail + linkedUserId (E10 supervisor reset) so the
