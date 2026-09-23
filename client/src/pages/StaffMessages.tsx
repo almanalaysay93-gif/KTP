@@ -45,8 +45,11 @@ export default function StaffMessages() {
   const [nurseSearch, setNurseSearch] = useState("");
 
   const { data: sentMessages, isLoading: isMessagesLoading } = trpc.staffFeed.listSentMessages.useQuery();
-  const { data: allNurses } = trpc.nurses.list.useQuery();
-  const { data: allAreas } = trpc.areas.list.useQuery();
+  const { data: composerData } = trpc.nurses.initial.useQuery(undefined, {
+    enabled: isComposeOpen,
+  });
+  const allNurses = composerData?.nurses;
+  const allAreas = composerData?.areas;
   const { data: messageDetail, isLoading: isDetailLoading } = trpc.staffFeed.getMessageDetail.useQuery(
     { id: selectedMessageId! },
     { enabled: selectedMessageId !== null }
