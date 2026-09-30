@@ -1,0 +1,84 @@
+/*
+ * CSS-driven motion (perpetual loops and SVG pieces run off the main thread).
+ * Owner: U4. Imported once by MotionRoot. Framer-driven motion lives in lib/motion.ts.
+ * Every rule here is gated by a data attribute that the components set only in "full"
+ * or "lively" mode, and the reduced-motion block below switches all of it off again.
+ */
+
+:root {
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+/* Breathing ring: current stepper node (admin only). Scale 1 to 1.15, opacity 0.6 to 0, every 2.4 s. */
+.motion-breathe {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--ink);
+  pointer-events: none;
+  animation: motion-breathe 2.4s var(--motion-ease-out) infinite;
+}
+
+[data-motion-stepper] li[aria-current="step"] > span:first-child { position: relative; }
+[data-motion-stepper="full"] li[aria-current="step"] > span:first-child::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--ink);
+  pointer-events: none;
+  animation: motion-breathe 2.4s var(--motion-ease-out) infinite;
+}
+
+/* Stepper connector fill: scaleX 0 to 1 over 600 ms on mount, left to right. */
+[data-motion-stepper="full"] li[data-state="complete"] > span:last-child {
+  transform-origin: left center;
+  animation: motion-fill-x 600ms var(--motion-ease-out) both;
+}
+[data-motion-stepper="full"] li:nth-child(2) > span:last-child { animation-delay: 70ms; }
+[data-motion-stepper="full"] li:nth-child(3) > span:last-child { animation-delay: 140ms; }
+[data-motion-stepper="full"] li:nth-child(4) > span:last-child { animation-delay: 210ms; }
+[data-motion-stepper="full"] li:nth-child(5) > span:last-child { animation-delay: 280ms; }
+[data-motion-stepper="full"] li:nth-child(6) > span:last-child { animation-delay: 350ms; }
+[data-motion-stepper="full"] li:nth-child(7) > span:last-child { animation-delay: 420ms; }
+[data-motion-stepper="full"] li:nth-child(8) > span:last-child { animation-delay: 490ms; }
+
+/* Chart draw-in: reference band fades first (200 ms), points appear after the line lands. */
+.motion-chart-band { animation: motion-fade-in 200ms linear both; }
+.motion-chart-point {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: motion-point-pop 420ms var(--motion-ease-out) both;
+}
+.motion-chart-point[data-calm="true"] { animation-name: motion-fade-in; animation-duration: 240ms; }
+
+/* Shared cell bar replaces the built-in bar so it can morph between cells. */
+.clay-cell:has(> [data-shared-bar]) > [data-slot="cell-bar"] { display: none; }
+
+@keyframes motion-breathe {
+  from { transform: scale(1); opacity: 0.6; }
+  to { transform: scale(1.15); opacity: 0; }
+}
+@keyframes motion-fill-x {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes motion-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes motion-point-pop {
+  0% { opacity: 0; transform: scale(0.4); }
+  60% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Reduced motion is never waived: loops and transforms off, content rendered complete. */
+@media (prefers-reduced-motion: reduce) {
+  .motion-breathe,
+  [data-motion-stepper] li[aria-current="step"] > span:first-child::after { display: none; }
+  [data-motion-stepper] li > span:last-child,
+  .motion-chart-point { animation: none !important; transform: none !important; opacity: 1 !important; }
+  .motion-chart-band { animation: motion-fade-in 150ms linear both; }
+}

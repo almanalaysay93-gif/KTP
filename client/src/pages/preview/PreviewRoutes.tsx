@@ -23,6 +23,12 @@ export const PREVIEW_PAGES: PreviewPage[] = [
     description: "Tokens, type roles, clay levels, and every clay component in every state.",
     component: lazyWithRetry(() => import("./DesignSystemPreview"), "DesignSystemPreview"),
   },
+  {
+    path: "/motion",
+    title: "Motion",
+    description: "Every motion primitive twice: admin at full intensity beside the calmer patient version.",
+    component: lazyWithRetry(() => import("./MotionPreview"), "MotionPreview"),
+  },
 ];
 
 export function SampleDataBadge() {
