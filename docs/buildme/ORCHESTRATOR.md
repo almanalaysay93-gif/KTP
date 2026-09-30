@@ -49,9 +49,9 @@ Reading this as: a private pre/post kidney transplant patient tracker (admin con
 |---|---|---|---|
 | U1 Copy | 9 content-voice | `docs/buildme/VOICE.md`, `docs/buildme/COPY.md` | spec |
 | U2 Direction | 1 impeccable-director | `docs/buildme/PRODUCT.md`, `docs/buildme/DESIGN.md` | spec |
-| U3 Design system | 2 frontend-architect + 3 taste-specialist | `client/src/styles/clay.css`, `client/src/index.css` (token block + import only), `client/index.html` (fonts, theme-color, noindex meta), `client/src/components/clay/*` | U2 |
+| U3 Design system | 2 frontend-architect + 3 taste-specialist | `client/src/styles/clay.css`, `client/src/index.css` (token block + import only), `client/index.html` (fonts, theme-color, noindex meta), `client/public/robots.txt`, `client/src/components/clay/*`, `client/src/pages/preview/PreviewRoutes.tsx` (initial), `client/src/pages/preview/DesignSystemPreview.tsx`, `client/src/App.tsx` (one gated `/preview` mount only) | U2 |
 | U4 Motion primitives | 5 motion-specialist | `client/src/lib/motion.ts`, `client/src/components/motion/*` | U2, U3 |
-| U5 Screens | builder (2 + 5 skills) | `client/src/components/ktp/*`, `client/src/pages/preview/*`, `client/src/App.tsx` (preview routes only) | U1, U3, U4 |
+| U5 Screens | builder (2 + 5 skills) | `client/src/components/ktp/*`, `client/src/pages/preview/*` (adds routes to `PreviewRoutes.tsx`) | U1, U3, U4 |
 | U6 Snapshot 001 | 12 token-snapshotter | `docs/buildme/snapshots/snap-001/*` | U5 |
 | U7 Gate: slop | 7 anti-slop-enforcer | `docs/buildme/gates/anti-slop.md` + fixes in U3 to U5 files | U5 |
 | U8 Gate: bugs | 8 bug-hunter | `docs/buildme/gates/bugs.md` + fixes | U7 |
@@ -79,3 +79,6 @@ Preview routes render without auth or tRPC. They are enabled when `import.meta.e
 ## Log
 
 - Phase 0 (2026-09-30): Grill Me confirmed. Contracts above written. Next: dispatch U1 and U2 in parallel.
+- U1 done (`5748675`): VOICE.md, COPY.md with fictional mock dataset. Open: meaning of "Meds claim" and who files claims (copy kept neutral).
+- U2 done (`ed7dc3f`): PRODUCT.md, DESIGN.md. Signature: "Nine-Cell Tray" (logo 3x3 grid as sunken tray of raised clay cells, max one per screen, center cell = people). Fonts: Gabarito (display), Atkinson Hyperlegible Next (body), Atkinson Hyperlegible Mono (numbers). Brick `#ae3c30` = actions only; overdue = raspberry `#a3143f`; page bg sage `#e2e5d5`. Success targets in PRODUCT.md marked "(inferred)".
+- Next: U3 design system (sole writer, main tree).
