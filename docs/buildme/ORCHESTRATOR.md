@@ -51,7 +51,10 @@ Reading this as: a private pre/post kidney transplant patient tracker (admin con
 | U2 Direction | 1 impeccable-director | `docs/buildme/PRODUCT.md`, `docs/buildme/DESIGN.md` | spec |
 | U3 Design system | 2 frontend-architect + 3 taste-specialist | `client/src/styles/clay.css`, `client/src/index.css` (token block + import only), `client/index.html` (fonts, theme-color, noindex meta), `client/public/robots.txt`, `client/src/components/clay/*`, `client/src/pages/preview/PreviewRoutes.tsx` (initial), `client/src/pages/preview/DesignSystemPreview.tsx`, `client/src/App.tsx` (one gated `/preview` mount only) | U2 |
 | U4 Motion primitives | 5 motion-specialist | `client/src/lib/motion.ts`, `client/src/components/motion/*` | U2, U3 |
-| U5 Screens | builder (2 + 5 skills) | `client/src/components/ktp/*`, `client/src/pages/preview/*` (adds routes to `PreviewRoutes.tsx`) | U1, U3, U4 |
+| U5.0 Mock data | builder | `client/src/pages/preview/mock/*` (typed fictional dataset from COPY.md) | U1 |
+| U5a Admin screens | builder (2 + 5 skills), worktree | `client/src/components/ktp/admin/*`, `client/src/pages/preview/AdminDashboardPreview.tsx`, `client/src/pages/preview/PatientProfilePreview.tsx` | U5.0, U3, U4 |
+| U5b Patient screens | builder (2 + 5 skills), worktree | `client/src/components/ktp/patient/*`, `client/src/components/ktp/KtpSignIn.tsx`, `client/src/pages/preview/SignInPreview.tsx`, `client/src/pages/preview/PatientHomePreview.tsx` | U5.0, U3, U4 |
+| U5 routes | orchestrator | adds the 4 routes to `PreviewRoutes.tsx` after merging U5a and U5b | U5a, U5b |
 | U6 Snapshot 001 | 12 token-snapshotter | `docs/buildme/snapshots/snap-001/*` | U5 |
 | U7 Gate: slop | 7 anti-slop-enforcer | `docs/buildme/gates/anti-slop.md` + fixes in U3 to U5 files | U5 |
 | U8 Gate: bugs | 8 bug-hunter | `docs/buildme/gates/bugs.md` + fixes | U7 |
@@ -84,3 +87,5 @@ Preview routes render without auth or tRPC. They are enabled when `import.meta.e
 - Next: U3 design system (sole writer, main tree).
 - U3 done (`53519d8`) after one rate-limit resume: clay.css tokens, 12 clay components, `/preview/system` style guide, gated `/preview` mount, noindex + robots Disallow. `pnpm check` 0 errors before and after. Orchestrator merge-audit: screenshots at 1440 and 390 reviewed, approved. Deviations: `.dark` block kept, tab track 52px, hover fade 150ms.
 - Next: U4 motion primitives (sole writer, main tree).
+- U4 done (`0668436`): `lib/motion.ts`, `components/motion/*`, `/preview/motion`. Reduced motion verified (transforms stay none). Known issue for U8: preview routes trigger a global `auth.me` query that fails without the API server. Count-ups start at 0 until in view (snapshots must scroll).
+- U5 split into U5.0 (mock data, first), then U5a admin and U5b patient in parallel worktrees.
