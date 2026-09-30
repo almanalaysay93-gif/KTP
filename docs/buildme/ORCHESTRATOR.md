@@ -89,3 +89,7 @@ Preview routes render without auth or tRPC. They are enabled when `import.meta.e
 - Next: U4 motion primitives (sole writer, main tree).
 - U4 done (`0668436`): `lib/motion.ts`, `components/motion/*`, `/preview/motion`. Reduced motion verified (transforms stay none). Known issue for U8: preview routes trigger a global `auth.me` query that fails without the API server. Count-ups start at 0 until in view (snapshots must scroll).
 - U5 split into U5.0 (mock data, first), then U5a admin and U5b patient in parallel worktrees.
+- U5.0 done (`51b1275`): typed mock dataset + derive functions, 18 tests; vitest include extended (`64a9af5`).
+- U5a done (`873910e`) and U5b done (`d2447eb`, PreviewRoutes conflict resolved by orchestrator), both after one rate-limit resume. Main: `pnpm check` 0, build OK, 18/18 tests.
+- Orchestrator merge-audit (screenshots 1440 and 390): approved. Carry into gates: (1) sign-in tray logo cells are soft/pixelated at desktop size because the source logo is low-res (grid about 158px); (2) linked-donor ClayAvatarPair clips to "A\ RV" on the profile header; (3) patient home floating tab bar may cover the last card, confirm bottom padding; (4) global `auth.me` query fires on preview routes.
+- Next: U6 snap-001, then gates U7, U8, U9 in order.
