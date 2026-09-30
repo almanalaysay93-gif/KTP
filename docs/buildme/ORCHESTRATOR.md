@@ -82,3 +82,5 @@ Preview routes render without auth or tRPC. They are enabled when `import.meta.e
 - U1 done (`5748675`): VOICE.md, COPY.md with fictional mock dataset. Open: meaning of "Meds claim" and who files claims (copy kept neutral).
 - U2 done (`ed7dc3f`): PRODUCT.md, DESIGN.md. Signature: "Nine-Cell Tray" (logo 3x3 grid as sunken tray of raised clay cells, max one per screen, center cell = people). Fonts: Gabarito (display), Atkinson Hyperlegible Next (body), Atkinson Hyperlegible Mono (numbers). Brick `#ae3c30` = actions only; overdue = raspberry `#a3143f`; page bg sage `#e2e5d5`. Success targets in PRODUCT.md marked "(inferred)".
 - Next: U3 design system (sole writer, main tree).
+- U3 done (`53519d8`) after one rate-limit resume: clay.css tokens, 12 clay components, `/preview/system` style guide, gated `/preview` mount, noindex + robots Disallow. `pnpm check` 0 errors before and after. Orchestrator merge-audit: screenshots at 1440 and 390 reviewed, approved. Deviations: `.dark` block kept, tab track 52px, hover fade 150ms.
+- Next: U4 motion primitives (sole writer, main tree).
