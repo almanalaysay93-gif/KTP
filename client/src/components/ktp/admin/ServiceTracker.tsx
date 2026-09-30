@@ -51,7 +51,8 @@ export function ServiceTracker({ patient, trackers, focus, onAction }: ServiceTr
             )}
           >
             <div className="flex items-center gap-3">
-              <span aria-hidden className="clay-sunken inline-flex size-11 shrink-0 items-center justify-center rounded-full text-ink [&_svg]:size-5">
+              {/* Flat Data Rule: a plain glyph, not a clay icon disc repeated on every row. */}
+              <span aria-hidden className="inline-flex shrink-0 text-ink-muted [&_svg]:size-5">
                 {ICON[t.serviceType]}
               </span>
               <h3 className="type-title text-ink">{label}</h3>
@@ -118,7 +119,7 @@ export function ServiceTracker({ patient, trackers, focus, onAction }: ServiceTr
 
 function Field({ term, children }: { term: string; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1 max-lg:pl-14">
+    <div className="flex min-w-0 flex-col gap-1 max-lg:pl-8">
       <span className="type-label text-ink-muted">{term}</span>
       <span className="flex flex-wrap items-center gap-2">{children}</span>
     </div>

@@ -10,8 +10,8 @@ export interface LogoTrayProps {
 /**
  * The sign-in brand moment (DESIGN.md Screen 1): the OTS mark sliced into its nine cells, set as
  * raised clay in a sunken tray, so the logo assembles itself. Row-major stagger with the center
- * cell (the two people passing a kidney, sage tint) last. On wide fine-pointer screens the parent
- * runs admin intensity (pop spring, center overshoot); on phones it runs the calmer patient set.
+ * cell (the two people passing a kidney, sage tint) last. Sign-in is shared with patients, so the
+ * parent always runs the calmer patient set (rise on `gentle`, no overshoot, no zoom).
  * Decorative: the wordmark beside it carries the name, so the tray is hidden from screen readers.
  */
 export function LogoTray({ className }: LogoTrayProps) {

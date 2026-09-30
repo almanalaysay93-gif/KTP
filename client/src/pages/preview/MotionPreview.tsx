@@ -271,7 +271,7 @@ function RingDemo({ intensity }: { intensity: MotionIntensity }) {
         <SheenSkeleton shape="circle" className="size-12" />
         <SheenSkeleton className="h-12" />
       </div>
-      <Note>{intensity === "full" ? "Ring fills in 600 ms. Skeletons sweep a peach sheen every 1.6 s." : "Ring fills in 600 ms. Skeletons stay static."}</Note>
+      <Note>{intensity === "full" ? "Ring fills in 600 ms. Skeletons sweep a peach sheen once (1.6 s), then rest." : "Ring fills in 600 ms. Skeletons stay static."}</Note>
     </div>
   );
 }
@@ -388,7 +388,7 @@ export default function MotionPreview() {
             <Section id="stepper" title="Stepper" lede="Connector fill on mount and the breathing current node.">
               {(i) => <StepperDemo intensity={i} />}
             </Section>
-            <Section id="ring" title="Progress ring and skeleton" lede="Ring fill runs on both surfaces; the sheen loop is admin only.">
+            <Section id="ring" title="Progress ring and skeleton" lede="Ring fill runs on both surfaces; the one-sweep sheen is admin only.">
               {(i) => <RingDemo intensity={i} />}
             </Section>
             <Section id="chart" title="Chart draw-in" lede="Reference band, then the line, then the points.">

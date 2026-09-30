@@ -359,7 +359,9 @@
     position: absolute;
     inset: 0;
     background: linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--peach) 70%, transparent) 50%, transparent 80%);
-    animation: clay-sheen 1.6s linear infinite;
+    /* One 1.6 s sweep per mount, then a static well: a slow load never shimmers past 3 s.
+       Fill "both" parks the band off-screen before and after the sweep. */
+    animation: clay-sheen 1.6s linear 0s 1 both;
   }
 
   /* Flat data surface: tables stay flat inside clay cards */

@@ -10,11 +10,15 @@ const SCROLL_CAP = 1600;
 
 type Cell = { col: number; row: number; color: string; strength: number; depth: number };
 
-/** Soft cells on the logo grid, each on its own depth (scroll factor 0.15 to 0.3). Strength evens out the pale and deep tokens. */
+/**
+ * Soft cells on the logo grid, each on its own depth (scroll factor 0.15 to 0.3). Strength evens out
+ * the pale and deep tokens at about the wireframe's "10% opacity" presence (a shift of roughly 10 RGB
+ * units from the ground for each hue), so viewport-clipped cells read as tone, not stray panels.
+ */
 const CELLS: Cell[] = [
-  { col: 0, row: 0, color: "var(--peach)", strength: 48, depth: 0.3 },
-  { col: 2, row: 1, color: "var(--lilac)", strength: 32, depth: 0.24 },
-  { col: 1, row: 2, color: "var(--sage)", strength: 14, depth: 0.2 },
+  { col: 0, row: 0, color: "var(--peach)", strength: 32, depth: 0.3 },
+  { col: 2, row: 1, color: "var(--lilac)", strength: 16, depth: 0.24 },
+  { col: 1, row: 2, color: "var(--sage)", strength: 6, depth: 0.2 },
 ];
 const GRID_DEPTH = 0.15;
 

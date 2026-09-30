@@ -44,8 +44,9 @@ const ERRORS: Record<KtpSignInErrorKind, string> = {
 /**
  * KTP sign-in (DESIGN.md Screen 1, COPY.md section 1). Eye path: the logo tray, the wordmark,
  * the Google button. Phones stack wordmark, tray, then copy with no card and fit 390 x 844;
- * from 1024 the tray sits left of a raised card. Wide fine-pointer screens get the admin-level
- * assembly and the organ-grid backdrop (the 1440 wireframe lists it); phones stay calm and light.
+ * from 1024 the tray sits left of a raised card. Wide fine-pointer screens add the organ-grid
+ * backdrop (the 1440 wireframe lists it); the tray assembly and card entrance run the calmer
+ * patient set at every width. Phones stay calm and light.
  */
 export function KtpSignIn(props: KtpSignInProps) {
   const wide = useMediaQuery("(min-width: 1024px) and (hover: hover) and (pointer: fine)");
@@ -61,22 +62,27 @@ function SignInLayout({ corner, after, ...props }: KtpSignInProps) {
     <div className="relative isolate min-h-dvh overflow-x-clip bg-ground text-ink">
       <OrganGridBackdrop />
       {corner ? <div className="absolute right-3 top-3 z-10 sm:right-6 sm:top-6">{corner}</div> : null}
-      <main
-        aria-label="Sign in"
-        className="mx-auto flex min-h-dvh w-full max-w-[1120px] flex-col items-center justify-center gap-5 px-4 pb-6 pt-4 sm:px-6 lg:gap-8 lg:px-8 lg:py-12"
-      >
-        <div className="flex w-full flex-col items-center gap-5 lg:flex-row lg:items-center lg:justify-center lg:gap-16">
-          <LogoTray className="order-2 max-w-[280px] min-[400px]:max-w-[300px] md:max-w-[360px] lg:order-none lg:w-[min(460px,calc(100vw-620px))] lg:max-w-none" />
-          <Entrance className="contents lg:block lg:w-[440px] lg:shrink-0">
-            <div className="contents lg:flex lg:flex-col lg:gap-6 lg:rounded-2xl lg:bg-surface-2 lg:p-10 lg:shadow-(--clay-3)">
-              <Wordmark className="order-1 lg:order-none" />
-              <CardBody {...props} />
-            </div>
-          </Entrance>
-        </div>
-        <p className="type-caption text-ink-muted">Organ Transplant Services. Established 2017.</p>
-        {after}
-      </main>
+      {/* Sign-in is shared with patients: entrances always run the patient set (one rise-and-fade
+          family, no overshoot, no zoom). The admin-only waiver of the 3 entrance types limit does not
+          cover this screen. The backdrop above still reads the outer intensity. */}
+      <MotionRoot intensity="lively">
+        <main
+          aria-label="Sign in"
+          className="mx-auto flex min-h-dvh w-full max-w-[1120px] flex-col items-center justify-center gap-5 px-4 pb-6 pt-4 sm:px-6 lg:gap-8 lg:px-8 lg:py-12"
+        >
+          <div className="flex w-full flex-col items-center gap-5 lg:flex-row lg:items-center lg:justify-center lg:gap-16">
+            <LogoTray className="order-2 max-w-[280px] min-[400px]:max-w-[300px] md:max-w-[360px] lg:order-none lg:w-[min(460px,calc(100vw-620px))] lg:max-w-none" />
+            <Entrance className="contents lg:block lg:w-[440px] lg:shrink-0">
+              <div className="contents lg:flex lg:flex-col lg:gap-6 lg:rounded-2xl lg:bg-surface-2 lg:p-10 lg:shadow-(--clay-3)">
+                <Wordmark className="order-1 lg:order-none" />
+                <CardBody {...props} />
+              </div>
+            </Entrance>
+          </div>
+          <p className="type-caption text-ink-muted">Organ Transplant Services. Established 2017.</p>
+          {after}
+        </main>
+      </MotionRoot>
     </div>
   );
 }
