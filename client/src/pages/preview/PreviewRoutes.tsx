@@ -30,10 +30,22 @@ export const PREVIEW_PAGES: PreviewPage[] = [
     component: lazyWithRetry(() => import("./MotionPreview"), "MotionPreview"),
   },
   {
+    path: "/sign-in",
+    title: "Sign-in",
+    description: "The logo tray assembling itself, Google sign-in, and the not-enrolled state.",
+    component: lazyWithRetry(() => import("./SignInPreview"), "SignInPreview"),
+  },
+  {
     path: "/admin",
     title: "Admin dashboard",
     description: "Nine-Cell triage tray, triage lists, and patients by stage, at full admin motion.",
     component: lazyWithRetry(() => import("./AdminDashboardPreview"), "AdminDashboardPreview"),
+  },
+  {
+    path: "/me",
+    title: "Patient home",
+    description: "Phone-first home: next due date, the 1x3 strip, appointments, claims, and messages.",
+    component: lazyWithRetry(() => import("./PatientHomePreview"), "PatientHomePreview"),
   },
   {
     path: "/patient",
