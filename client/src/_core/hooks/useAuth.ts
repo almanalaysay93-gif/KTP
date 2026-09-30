@@ -12,6 +12,7 @@ import {
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
   redirectPath?: string;
+  enabled?: boolean;
 };
 
 export function useAuth(options?: UseAuthOptions) {
@@ -20,6 +21,8 @@ export function useAuth(options?: UseAuthOptions) {
   // the state cookie, so calling it per render would overwrite the cookie and
   // desync it from an in-flight login's `state`.
   const { redirectOnUnauthenticated = false, redirectPath } = options ?? {};
+  const isPreview = typeof window !== "undefined" && window.location.pathname.startsWith("/preview");
+  const queryEnabled = options?.enabled ?? !isPreview;
   const utils = trpc.useUtils();
   const queryClient = useQueryClient();
   const restoredUserIdRef = useRef<number | null>(null);
@@ -27,6 +30,7 @@ export function useAuth(options?: UseAuthOptions) {
   const meQuery = trpc.auth.me.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
+    enabled: queryEnabled,
   });
 
   const logoutMutation = trpc.auth.logout.useMutation({
@@ -57,7 +61,7 @@ export function useAuth(options?: UseAuthOptions) {
   const state = useMemo(() => {
     return {
       user: meQuery.data ?? null,
-      loading: meQuery.isLoading || logoutMutation.isPending,
+      loading: queryEnabled ? (meQuery.isLoading || logoutMutation.isPending) : false,
       error: meQuery.error ?? logoutMutation.error ?? null,
       isAuthenticated: Boolean(meQuery.data),
     };
@@ -67,6 +71,7 @@ export function useAuth(options?: UseAuthOptions) {
     meQuery.isLoading,
     logoutMutation.error,
     logoutMutation.isPending,
+    queryEnabled,
   ]);
 
   useEffect(() => {

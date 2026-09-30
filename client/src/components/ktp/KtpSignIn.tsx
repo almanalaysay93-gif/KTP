@@ -71,7 +71,7 @@ function SignInLayout({ corner, after, ...props }: KtpSignInProps) {
           className="mx-auto flex min-h-dvh w-full max-w-[1120px] flex-col items-center justify-center gap-5 px-4 pb-6 pt-4 sm:px-6 lg:gap-8 lg:px-8 lg:py-12"
         >
           <div className="flex w-full flex-col items-center gap-5 lg:flex-row lg:items-center lg:justify-center lg:gap-16">
-            <LogoTray className="order-2 max-w-[280px] min-[400px]:max-w-[300px] md:max-w-[360px] lg:order-none lg:w-[min(460px,calc(100vw-620px))] lg:max-w-none" />
+            <LogoTray className="order-2 max-w-[260px] min-[400px]:max-w-[280px] md:max-w-[300px] lg:order-none lg:w-[320px] lg:max-w-[320px]" />
             <Entrance className="contents lg:block lg:w-[440px] lg:shrink-0">
               <div className="contents lg:flex lg:flex-col lg:gap-6 lg:rounded-2xl lg:bg-surface-2 lg:p-10 lg:shadow-(--clay-3)">
                 <Wordmark className="order-1 lg:order-none" />

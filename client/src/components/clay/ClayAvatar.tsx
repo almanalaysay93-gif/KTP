@@ -17,11 +17,11 @@ export interface ClayAvatarProps extends React.HTMLAttributes<HTMLSpanElement> {
   decorative?: boolean;
 }
 
-const SIZES: Record<ClayAvatarSize, string> = {
-  32: "size-8 text-[13px]",
-  40: "size-10 text-[15px]",
-  56: "size-14 text-xl",
-  72: "size-18 text-[26px]",
+export const SIZES: Record<ClayAvatarSize, string> = {
+  32: "size-8 text-[11px] tracking-tight",
+  40: "size-10 text-[13px] tracking-tight",
+  56: "size-14 text-lg",
+  72: "size-18 text-[22px]",
 };
 
 const KINDS: Record<ClayAvatarKind, string> = {
@@ -90,11 +90,26 @@ export interface ClayAvatarPairProps extends React.HTMLAttributes<HTMLSpanElemen
   size?: ClayAvatarSize;
 }
 
+export const PAIR_OVERLAPS: Record<ClayAvatarSize, string> = {
+  32: "-ml-1.5",
+  40: "-ml-2",
+  56: "-ml-2.5",
+  72: "-ml-3",
+};
+
+export const PAIR_BADGES: Record<ClayAvatarSize, { badge: string; icon: string }> = {
+  32: { badge: "size-4 -bottom-0.5", icon: "size-2.5" },
+  40: { badge: "size-5 -bottom-1", icon: "size-3.5" },
+  56: { badge: "size-6 -bottom-1", icon: "size-4" },
+  72: { badge: "size-7 -bottom-1", icon: "size-5" },
+};
+
 /** Recipient and linked donor: two overlapped avatars with a sage exchange arrow. */
 export const ClayAvatarPair = React.forwardRef<HTMLSpanElement, ClayAvatarPairProps>(function ClayAvatarPair(
   { recipient, donor, size = 40, className, ...rest },
   ref,
 ) {
+  const badgeConfig = PAIR_BADGES[size];
   return (
     <span
       ref={ref}
@@ -104,12 +119,15 @@ export const ClayAvatarPair = React.forwardRef<HTMLSpanElement, ClayAvatarPairPr
       {...rest}
     >
       <ClayAvatar decorative name={recipient.name} src={recipient.src} kind="recipient" size={size} />
-      <ClayAvatar decorative name={donor.name} src={donor.src} kind="donor" size={size} className="-ml-3" />
+      <ClayAvatar decorative name={donor.name} src={donor.src} kind="donor" size={size} className={PAIR_OVERLAPS[size]} />
       <span
         aria-hidden
-        className="clay-1 absolute -bottom-1 left-1/2 inline-flex size-5 -translate-x-1/2 items-center justify-center rounded-full bg-surface-2 text-sage"
+        className={cn(
+          "clay-1 absolute left-1/2 inline-flex -translate-x-1/2 items-center justify-center rounded-full bg-surface-2 text-sage",
+          badgeConfig.badge,
+        )}
       >
-        <ArrowLeftRight className="size-3.5" strokeWidth={2} />
+        <ArrowLeftRight className={badgeConfig.icon} strokeWidth={2} />
       </span>
     </span>
   );

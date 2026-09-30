@@ -57,7 +57,7 @@ export function PatientShell({
         <main
           id="main"
           tabIndex={-1}
-          className="mx-auto w-full max-w-[640px] px-4 pb-[calc(64px+12px+32px+env(safe-area-inset-bottom))] pt-[calc(12px+env(safe-area-inset-top))] outline-none md:px-6 lg:max-w-[1104px] lg:px-8 lg:pb-16 lg:pt-6"
+          className="mx-auto w-full max-w-[640px] px-4 pb-[calc(64px+12px+56px+env(safe-area-inset-bottom,0px))] pt-[calc(12px+env(safe-area-inset-top,0px))] outline-none md:px-6 lg:max-w-[1104px] lg:px-8 lg:pb-16 lg:pt-6"
         >
           {children}
         </main>
