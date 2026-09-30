@@ -8,11 +8,11 @@ export function SignInPanel() {
     <div className="flex items-center justify-center min-h-screen p-4">
       <div className="auth-welcome-panel flex flex-col items-center gap-8 p-8 max-w-md w-full">
         <div className="flex flex-col items-center gap-6">
-          <div className="h-24 w-24 rounded-2xl bg-white flex items-center justify-center shadow-sm">
+          <div className="h-24 px-3 rounded-2xl bg-white flex items-center justify-center shadow-sm">
             <img
-              src="/branding/spmc-nephro-cluster.jpg"
-              alt="SPMC Department of Nephrology Nursing"
-              className="h-20 w-20 object-contain rounded-full"
+              src="/branding/ots-logo.png"
+              alt="Organ Transplant Services"
+              className="h-20 w-auto object-contain"
             />
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-center">SKTI NurseTrack</h1>

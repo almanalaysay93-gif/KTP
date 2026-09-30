@@ -187,15 +187,15 @@ function DashboardLayoutContent({ children, setSidebarWidth }: DashboardLayoutCo
             <div className="flex items-center justify-center px-2 transition-all w-full">
               {!isCollapsed ? (
                 <img
-                  src="/branding/spmc-nephro-cluster.jpg"
-                  alt="SPMC Department of Nephrology Nursing"
-                  className="h-28 w-28 object-contain rounded-full bg-white shrink-0 shadow-sm mx-auto"
+                  src="/branding/ots-logo.png"
+                  alt="Organ Transplant Services"
+                  className="h-20 w-auto max-w-full object-contain rounded-md bg-white p-1 shrink-0 shadow-sm mx-auto"
                 />
               ) : (
                 <img
-                  src="/branding/spmc-nephro-cluster.jpg"
-                  alt="SPMC Department of Nephrology Nursing"
-                  className="h-10 w-10 object-contain rounded-full bg-white shrink-0 shadow-sm"
+                  src="/branding/ots-mark.png"
+                  alt="Organ Transplant Services"
+                  className="h-10 w-10 object-contain rounded-md bg-white shrink-0 shadow-sm"
                 />
               )}
             </div>

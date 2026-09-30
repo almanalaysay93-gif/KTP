@@ -175,7 +175,7 @@ export function ChatAssistantWidget() {
             <X className="h-5 w-5" />
           ) : (
             <img
-              src="/branding/spmc-nephro-cluster.jpg"
+              src="/branding/ots-mark.png"
               alt="NurseTrack Assistant"
               className="h-10 w-10 object-contain rounded-full bg-white shadow-xs p-0.5"
             />
@@ -198,7 +198,7 @@ export function ChatAssistantWidget() {
             <div className="flex items-center gap-2">
               <div className="h-8 w-8 rounded-full bg-white border flex items-center justify-center overflow-hidden p-0.5 shadow-xs shrink-0">
                 <img
-                  src="/branding/spmc-nephro-cluster.jpg"
+                  src="/branding/ots-mark.png"
                   alt="NurseTrack Assistant"
                   className="h-full w-full object-contain rounded-full"
                 />
@@ -280,7 +280,7 @@ export function ChatAssistantWidget() {
                 <div className="py-3 px-1 text-center space-y-3">
                   <div className="mx-auto w-12 h-12 rounded-full bg-white border shadow-xs flex items-center justify-center overflow-hidden p-0.5">
                     <img
-                      src="/branding/spmc-nephro-cluster.jpg"
+                      src="/branding/ots-mark.png"
                       alt="NurseTrack Assistant"
                       className="h-full w-full object-contain rounded-full"
                     />
@@ -328,7 +328,7 @@ export function ChatAssistantWidget() {
                         {m.role === "assistant" && (
                           <div className="h-6 w-6 rounded-full bg-white border flex items-center justify-center shrink-0 mt-0.5 overflow-hidden p-0.5 shadow-2xs">
                             <img
-                              src="/branding/spmc-nephro-cluster.jpg"
+                              src="/branding/ots-mark.png"
                               alt="NurseTrack Assistant"
                               className="h-full w-full object-contain rounded-full"
                             />
@@ -427,7 +427,7 @@ export function ChatAssistantWidget() {
                     <div className="flex gap-2 items-center">
                       <div className="h-6 w-6 rounded-full bg-white border flex items-center justify-center shrink-0 overflow-hidden p-0.5 shadow-2xs">
                         <img
-                          src="/branding/spmc-nephro-cluster.jpg"
+                          src="/branding/ots-mark.png"
                           alt="NurseTrack Assistant"
                           className="h-full w-full object-contain rounded-full"
                         />

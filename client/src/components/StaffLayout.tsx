@@ -56,9 +56,9 @@ export default function StaffLayout({ children }: StaffLayoutProps) {
         <div className="max-w-5xl mx-auto flex items-center justify-between px-4 sm:px-6 h-16">
           <div className="flex items-center gap-3">
             <img
-              src="/branding/spmc-nephro-cluster.jpg"
-              alt="SPMC"
-              className="h-9 w-9 object-contain rounded-full bg-white shadow-xs shrink-0"
+              src="/branding/ots-mark.png"
+              alt="Organ Transplant Services"
+              className="h-9 w-9 object-contain rounded-md bg-white shadow-xs shrink-0"
             />
             <div>
               <span className="font-bold text-base tracking-tight block">SKTI NurseTrack</span>

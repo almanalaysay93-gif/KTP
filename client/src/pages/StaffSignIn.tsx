@@ -28,7 +28,7 @@ export default function StaffSignInPage() {
     <div className="flex items-center justify-center min-h-screen p-4">
       <div className="auth-welcome-panel flex flex-col items-center gap-6 p-8 max-w-md w-full">
         <div className="flex flex-col items-center gap-6">
-          <img src="/branding/spmc-nephro-cluster.jpg" alt="" className="h-20 w-20 object-contain rounded-full bg-white" />
+          <img src="/branding/ots-logo.png" alt="" className="h-20 w-auto object-contain rounded-md bg-white p-1" />
           <h1 className="text-2xl font-bold tracking-tight text-center">SKTI NurseTrack</h1>
         </div>
 
