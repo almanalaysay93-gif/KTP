@@ -29,6 +29,18 @@ export const PREVIEW_PAGES: PreviewPage[] = [
     description: "Every motion primitive twice: admin at full intensity beside the calmer patient version.",
     component: lazyWithRetry(() => import("./MotionPreview"), "MotionPreview"),
   },
+  {
+    path: "/admin",
+    title: "Admin dashboard",
+    description: "Nine-Cell triage tray, triage lists, and patients by stage, at full admin motion.",
+    component: lazyWithRetry(() => import("./AdminDashboardPreview"), "AdminDashboardPreview"),
+  },
+  {
+    path: "/patient",
+    title: "Patient profile",
+    description: "Admin view of one patient: stage stepper, 4-item tracker, lab trend, and profile tabs.",
+    component: lazyWithRetry(() => import("./PatientProfilePreview"), "PatientProfilePreview"),
+  },
 ];
 
 export function SampleDataBadge() {
