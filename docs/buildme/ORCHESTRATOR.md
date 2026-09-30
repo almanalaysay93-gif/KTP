@@ -92,4 +92,9 @@ Preview routes render without auth or tRPC. They are enabled when `import.meta.e
 - U5.0 done (`51b1275`): typed mock dataset + derive functions, 18 tests; vitest include extended (`64a9af5`).
 - U5a done (`873910e`) and U5b done (`d2447eb`, PreviewRoutes conflict resolved by orchestrator), both after one rate-limit resume. Main: `pnpm check` 0, build OK, 18/18 tests.
 - Orchestrator merge-audit (screenshots 1440 and 390): approved. Carry into gates: (1) sign-in tray logo cells are soft/pixelated at desktop size because the source logo is low-res (grid about 158px); (2) linked-donor ClayAvatarPair clips to "A\ RV" on the profile header; (3) patient home floating tab bar may cover the last card, confirm bottom padding; (4) global `auth.me` query fires on preview routes.
-- Next: U6 snap-001, then gates U7, U8, U9 in order.
+- U6 done (`251120e`): baseline token inventory and screenshots in `snap-001`.
+- U7 done (`b08cb20`): anti-slop audit report in `docs/buildme/gates/anti-slop.md`, verdict PASS.
+- U8 done: bug hunt report in `docs/buildme/gates/bugs.md`, verdict PASS. Fixed avatar clipping via size-aware overlaps, patient-home bottom padding reservation, disabled `auth.me` on preview routes, capped desktop sign-in logo tray width, and adjusted cell media inset. Added mutation-checked unit tests in `fixes.test.ts` (24/24 passing).
+- U9 done: performance and accessibility report in `docs/buildme/gates/perf-a11y.md`, verdict PASS. All contrast ratios exceed 4.5:1 WCAG AA, 44 px touch targets verified, reduced motion compliance proven.
+- U10 done: final snapshot captured in `docs/buildme/snapshots/snap-final/` with 10 viewport screenshots, `bindings.md`, `design.md`, and `delta.md`.
+- Next: Phase A2 foundation and patient access implementation per specification.
