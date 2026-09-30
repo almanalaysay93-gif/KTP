@@ -43,6 +43,10 @@ const StaffSignInPage = lazyWithRetry(() => import("./pages/StaffSignIn"), "Staf
 const PrivacyPolicy = lazyWithRetry(() => import("./pages/PrivacyPolicy"), "PrivacyPolicy");
 const TermsOfService = lazyWithRetry(() => import("./pages/TermsOfService"), "TermsOfService");
 
+// Design previews (no auth, no tRPC, fictional data). Dev builds, or VITE_ENABLE_PREVIEW=true.
+const PREVIEW_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_PREVIEW === "true";
+const PreviewRoutes = lazyWithRetry(() => import("./pages/preview/PreviewRoutes"), "PreviewRoutes");
+
 // Admin/supervisor routes. Signed-in non-admin (staff) accounts are bounced
 // to /me — they only ever get their own profile, never the full dashboard.
 function Protected({ children }: { children: React.ReactNode }) {
@@ -72,6 +76,13 @@ function Router() {
   return (
     <Suspense fallback={<DashboardLayoutSkeleton />}>
       <Switch>
+      {PREVIEW_ENABLED && (
+        <Route path="/preview" nest>
+          <Suspense fallback={null}>
+            <PreviewRoutes />
+          </Suspense>
+        </Route>
+      )}
       <Route path="/">
         <RootRedirect />
       </Route>

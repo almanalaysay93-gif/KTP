@@ -1,0 +1,452 @@
+/*
+ * KTP clay design system. Contract: docs/buildme/DESIGN.md.
+ * Light theme only. Light comes from the top-left. Surfaces stay opaque.
+ * Raw tokens live on :root; @theme inline exposes them as Tailwind utilities
+ * (bg-surface-1, text-ink, text-overdue, font-display, rounded-lg ...).
+ * Motion is not defined here: U4 owns springs. CSS only fades layers and colors.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Neutrals and surfaces: one olive hue, so grays never drift */
+  --ground: #e2e5d5;
+  --surface-1: #f3f4ec;
+  --surface-2: #fbfbf7;
+  --sunken: #d8dcc9;
+  --row-hover: #e9ecdf;
+  --hairline: #cbd0bb;
+  --line-strong: #6b735c;
+  --ink: #2a301e;
+  --ink-muted: #545b45;
+
+  /* Brand roles. Brick is the single action color. */
+  --brick: #ae3c30;
+  --brick-hover: #9a3328;
+  --maroon: #6c120c;
+  --on-brick: #fffaf6;
+  --sage-deep: #56613f;
+  --sage: #727e60;
+  --sage-tint: #e1e7d2;
+  --peach: #fcd8cc;
+  --peach-tint: #f8e2d8;
+  --coral: #de7e78;
+  --mauve: #9c6060;
+  --lilac: #ccb4ba;
+  --emergency-ink: #fff4ef;
+  --focus: var(--ink);
+  --focus-ring: var(--focus);
+
+  /* Status roles: never brick, always icon + word */
+  --overdue: #a3143f;
+  --overdue-bg: #fbe1e8;
+  --due-soon: #7a4800;
+  --due-soon-bg: #faebc6;
+  --planned: #4a5238;
+  --done: #1d6433;
+  --done-bg: #dcefdc;
+  --filed: #0b5e57;
+  --filed-bg: #d3ede8;
+  --superseded: #5f6357;
+  --superseded-bg: #e6e7e0;
+  --lab-low: #2a4a9a;
+  --lab-low-bg: #e0e7f7;
+  --lab-high: #8a1a5e;
+  --lab-high-bg: #f7ddec;
+  --lab-normal: #3f4733;
+  --lab-normal-bg: #e2e5d8;
+  --info: #1d5470;
+  --info-bg: #dcebf2;
+
+  /* Chart series: render on surface-1 or surface-2 only */
+  --series-1: #ae3c30;
+  --series-2: #2f3a1c;
+  --series-3: #a77410;
+  --series-4: #8a6c95;
+  --series-5: #d0706a;
+
+  /* Shapes. Concentric rule: inner radius = outer radius minus padding. */
+  --r-xs: 8px;
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-2xl: 36px;
+  --r-pill: 999px;
+
+  /* Spacing: 4 px base, same steps as Tailwind */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --tray-gutter: 10px;
+  --cell-pad: 16px;
+  --cell-min-h: 112px;
+  --card-pad: 16px;
+  --section-gap: 32px;
+
+  /* Type families */
+  --ff-display: "Gabarito", ui-sans-serif, system-ui, sans-serif;
+  --ff-body: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, sans-serif;
+  --ff-data: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+
+  /* Fluid roles: 320 to 1440 */
+  --fs-numeral-xl: clamp(2.25rem, 1.893rem + 1.786vw, 3.5rem);
+  --lh-numeral-xl: clamp(2.5rem, 2.143rem + 1.786vw, 3.75rem);
+  --fs-display: clamp(1.75rem, 1.536rem + 1.071vw, 2.5rem);
+  --lh-display: clamp(2rem, 1.786rem + 1.071vw, 2.75rem);
+  --fs-headline: clamp(1.375rem, 1.268rem + 0.536vw, 1.75rem);
+  --lh-headline: clamp(1.75rem, 1.643rem + 0.536vw, 2.125rem);
+  --fs-title: clamp(1.125rem, 1.089rem + 0.179vw, 1.25rem);
+  --lh-title: clamp(1.5rem, 1.464rem + 0.179vw, 1.625rem);
+  --fs-data-lg: clamp(1.25rem, 1.179rem + 0.357vw, 1.5rem);
+  --lh-data-lg: clamp(1.5rem, 1.429rem + 0.357vw, 1.75rem);
+  --fs-body-lg: clamp(1.0625rem, 1.045rem + 0.089vw, 1.125rem);
+  --lh-body-lg: clamp(1.625rem, 1.589rem + 0.179vw, 1.75rem);
+
+  /* Stepped roles: mobile values, desktop values at 1024 */
+  --fs-button: 1rem;
+  --lh-button: 1.25rem;
+  --fs-body-sm: 0.9375rem;
+  --lh-body-sm: 1.375rem;
+  --fs-data: 1rem;
+  --lh-data: 1.5rem;
+  --fs-label: 0.875rem;
+  --lh-label: 1.125rem;
+  --fs-caption: 0.875rem;
+  --lh-caption: 1.25rem;
+
+  /* Clay elevation: forest-tinted drop + top-left highlight + bottom-right shade */
+  --tint: 42 48 30;
+  --clay-1: 0 1px 2px rgb(var(--tint) / .10), 4px 6px 14px -4px rgb(var(--tint) / .18),
+    inset 2px 2px 3px rgb(255 255 255 / .85), inset -2px -3px 5px rgb(var(--tint) / .08);
+  --clay-2: 0 2px 4px rgb(var(--tint) / .08), 8px 12px 24px -8px rgb(var(--tint) / .22),
+    inset 3px 3px 5px rgb(255 255 255 / .90), inset -4px -5px 9px rgb(var(--tint) / .09);
+  --clay-3: 0 4px 8px rgb(var(--tint) / .08), 16px 22px 44px -12px rgb(var(--tint) / .28),
+    inset 4px 4px 7px rgb(255 255 255 / .95), inset -6px -7px 12px rgb(var(--tint) / .10);
+  --clay-pressed: inset 3px 4px 8px rgb(var(--tint) / .20), inset -2px -2px 5px rgb(255 255 255 / .70);
+  --clay-sunken: inset 3px 4px 9px rgb(var(--tint) / .16), inset -3px -3px 6px rgb(255 255 255 / .75);
+  --clay-brick: 0 1px 2px rgb(108 18 12 / .20), 4px 6px 14px -4px rgb(108 18 12 / .35),
+    inset 2px 2px 3px rgb(252 216 204 / .55), inset -3px -4px 6px rgb(108 18 12 / .45);
+  --clay-brick-pressed: inset 3px 4px 8px rgb(108 18 12 / .55), inset -2px -2px 4px rgb(252 216 204 / .30);
+  --clay-disabled: inset 1px 1px 2px rgb(var(--tint) / .10);
+
+  /* Timing for CSS-only changes (layers and colors). Springs live in U4. */
+  --dur-color: 120ms;
+  --dur-layer: 150ms;
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --tray-gutter: 14px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --tray-gutter: 16px;
+    --cell-pad: 20px;
+    --cell-min-h: 148px;
+    --card-pad: 24px;
+    --section-gap: 48px;
+    --fs-button: 0.9375rem;
+    --fs-body-sm: 0.875rem;
+    --lh-body-sm: 1.25rem;
+    --fs-data: 0.875rem;
+    --lh-data: 1.25rem;
+    --fs-label: 0.8125rem;
+    --lh-label: 1rem;
+    --fs-caption: 0.75rem;
+    --lh-caption: 1rem;
+  }
+
+  /* Patient floor: nothing under 14 px on patient surfaces, at any width */
+  [data-surface="patient"] {
+    --fs-button: 1rem;
+    --fs-body-sm: 0.9375rem;
+    --lh-body-sm: 1.375rem;
+    --fs-data: 1rem;
+    --lh-data: 1.5rem;
+    --fs-label: 0.875rem;
+    --lh-label: 1.125rem;
+    --fs-caption: 0.875rem;
+    --lh-caption: 1.25rem;
+  }
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-row-hover: var(--row-hover);
+  --color-hairline: var(--hairline);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-brick: var(--brick);
+  --color-brick-hover: var(--brick-hover);
+  --color-maroon: var(--maroon);
+  --color-on-brick: var(--on-brick);
+  --color-sage-deep: var(--sage-deep);
+  --color-sage: var(--sage);
+  --color-sage-tint: var(--sage-tint);
+  --color-peach: var(--peach);
+  --color-peach-tint: var(--peach-tint);
+  --color-coral: var(--coral);
+  --color-mauve: var(--mauve);
+  --color-lilac: var(--lilac);
+  --color-emergency-ink: var(--emergency-ink);
+  --color-overdue: var(--overdue);
+  --color-overdue-bg: var(--overdue-bg);
+  --color-due-soon: var(--due-soon);
+  --color-due-soon-bg: var(--due-soon-bg);
+  --color-planned: var(--planned);
+  --color-done: var(--done);
+  --color-done-bg: var(--done-bg);
+  --color-filed: var(--filed);
+  --color-filed-bg: var(--filed-bg);
+  --color-superseded: var(--superseded);
+  --color-superseded-bg: var(--superseded-bg);
+  --color-lab-low: var(--lab-low);
+  --color-lab-low-bg: var(--lab-low-bg);
+  --color-lab-high: var(--lab-high);
+  --color-lab-high-bg: var(--lab-high-bg);
+  --color-lab-normal: var(--lab-normal);
+  --color-lab-normal-bg: var(--lab-normal-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+
+  --font-display: var(--ff-display);
+  --font-sans: var(--ff-body);
+  --font-mono: var(--ff-data);
+
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --radius-2xl: var(--r-2xl);
+}
+
+@layer base {
+  :is(a[href], button, [tabindex], summary, input, select, textarea):focus-visible {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  /* Type roles. Color is never set here, so text-* utilities stay free. */
+  .type-numeral-xl { font-family: var(--ff-data); font-weight: 600; font-size: var(--fs-numeral-xl); line-height: var(--lh-numeral-xl); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .type-display { font-family: var(--ff-display); font-weight: 800; font-size: var(--fs-display); line-height: var(--lh-display); letter-spacing: -0.02em; }
+  .type-headline { font-family: var(--ff-display); font-weight: 700; font-size: var(--fs-headline); line-height: var(--lh-headline); letter-spacing: -0.01em; }
+  .type-title { font-family: var(--ff-display); font-weight: 700; font-size: var(--fs-title); line-height: var(--lh-title); }
+  .type-data-lg { font-family: var(--ff-data); font-weight: 600; font-size: var(--fs-data-lg); line-height: var(--lh-data-lg); font-variant-numeric: tabular-nums; }
+  .type-body-lg { font-family: var(--ff-body); font-weight: 400; font-size: var(--fs-body-lg); line-height: var(--lh-body-lg); }
+  .type-body { font-family: var(--ff-body); font-weight: 400; font-size: 1rem; line-height: 1.5rem; }
+  .type-field-label { font-family: var(--ff-body); font-weight: 700; font-size: 0.9375rem; line-height: 1.25rem; }
+  .type-button { font-family: var(--ff-body); font-weight: 700; font-size: var(--fs-button); line-height: var(--lh-button); }
+  .type-body-sm { font-family: var(--ff-body); font-weight: 400; font-size: var(--fs-body-sm); line-height: var(--lh-body-sm); }
+  .type-data { font-family: var(--ff-data); font-weight: 400; font-size: var(--fs-data); line-height: var(--lh-data); font-variant-numeric: tabular-nums; }
+  .type-label { font-family: var(--ff-body); font-weight: 700; font-size: var(--fs-label); line-height: var(--lh-label); letter-spacing: 0.01em; }
+  .type-caption { font-family: var(--ff-body); font-weight: 400; font-size: var(--fs-caption); line-height: var(--lh-caption); }
+  .clay-struck { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+
+  /* Elevation levels. Each level names the next one for the hover layer. */
+  .clay-sunken { background-color: var(--sunken); box-shadow: var(--clay-sunken); }
+  .clay-1 { box-shadow: var(--clay-1); --clay-next: var(--clay-2); }
+  .clay-2 { box-shadow: var(--clay-2); --clay-next: var(--clay-3); }
+  .clay-3 { box-shadow: var(--clay-3); --clay-next: var(--clay-3); }
+  .clay-brick { box-shadow: var(--clay-brick); --clay-next: var(--clay-brick); --clay-down: var(--clay-brick-pressed); }
+  .clay-pressed { box-shadow: var(--clay-pressed); }
+  .clay-avatar { box-shadow: 0 0 0 2px var(--surface-2), var(--clay-1); }
+  .clay-on-dark { --focus-ring: var(--peach); }
+
+  /* Hover layer: the next level sits on ::after and fades in. Box-shadow never transitions. */
+  .clay-hover { position: relative; isolation: isolate; }
+  .clay-hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    box-shadow: var(--clay-next, var(--clay-2));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-layer) var(--ease-out-soft);
+  }
+
+  /* Nine-Cell Tray: sunken well, gutters are the logo's grid lines */
+  .clay-tray {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--tray-gutter);
+    padding: var(--tray-gutter);
+    border-radius: var(--r-xl);
+    background-color: var(--sunken);
+    box-shadow: var(--clay-sunken);
+  }
+  .clay-tray[data-reflow="true"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .clay-tray[data-reflow="true"] > [data-center="true"] { grid-column: 1 / -1; }
+  .clay-tray[data-layout="1x3"] { --cell-min-h: 96px; --cell-pad: 12px; }
+
+  .clay-cell {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    min-height: var(--cell-min-h);
+    padding: var(--cell-pad);
+    border-radius: var(--r-md);
+    background-color: var(--surface-1);
+    color: var(--ink);
+    box-shadow: var(--clay-2);
+    --clay-next: var(--clay-3);
+    text-align: left;
+    text-decoration: none;
+    transition: background-color var(--dur-color) linear, color var(--dur-color) linear;
+  }
+  .clay-cell[data-center="true"] { background-color: var(--sage-tint); }
+  .clay-cell[data-selected="true"] { background-color: var(--peach-tint); box-shadow: var(--clay-pressed); }
+  .clay-cell[data-state="loading"] { background-color: var(--sunken); box-shadow: var(--clay-sunken); }
+  .clay-cell[data-media="true"] { aspect-ratio: 1; min-height: 0; padding: 0; }
+  .clay-cell__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); }
+  .clay-cell__icon { display: inline-flex; flex: none; color: var(--ink-muted); }
+  .clay-cell__value { margin-top: auto; display: flex; align-items: baseline; gap: var(--space-1); min-width: 0; }
+  .clay-cell__media { position: absolute; inset: 7%; } /* no z-index: the img must blend with the cell */
+  .clay-cell__media img { width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; }
+  .clay-cell-bar {
+    position: absolute;
+    left: var(--cell-pad);
+    bottom: 8px;
+    width: 32px;
+    height: 4px;
+    border-radius: var(--r-pill);
+    background-color: var(--brick);
+  }
+
+  @media (min-width: 1024px) {
+    .clay-tray { border-radius: var(--r-2xl); }
+    .clay-tray[data-reflow="true"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .clay-tray[data-reflow="true"] > [data-center="true"] { grid-column: auto; }
+    .clay-tray[data-layout="1x3"] { --cell-pad: 16px; }
+    .clay-cell { border-radius: var(--r-lg); }
+  }
+
+  /* Tabs track pill */
+  .clay-tab[data-state="active"] { background-color: var(--surface-2); color: var(--ink); box-shadow: var(--clay-1); }
+
+  /* Skeleton well, optional peach sheen (admin only; static under reduced motion) */
+  .clay-skeleton { position: relative; overflow: hidden; }
+  .clay-skeleton[data-sheen="true"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--peach) 70%, transparent) 50%, transparent 80%);
+    animation: clay-sheen 1.6s linear infinite;
+  }
+
+  /* Flat data surface: tables stay flat inside clay cards */
+  .clay-table-wrap {
+    overflow-x: auto;
+    border-radius: var(--r-md);
+    background-color: var(--surface-1);
+    padding: var(--space-2);
+  }
+  .clay-table { width: 100%; border-collapse: separate; border-spacing: 0; color: var(--ink); }
+  .clay-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: 44px;
+    padding: 0 var(--space-3);
+    background-color: var(--surface-1);
+    border-bottom: 1.5px solid var(--line-strong);
+    text-align: left;
+    white-space: nowrap;
+    font: 700 var(--fs-label) / var(--lh-label) var(--ff-body);
+    color: var(--ink-muted);
+  }
+  .clay-table td, .clay-table tbody th {
+    height: 52px;
+    text-align: left;
+    white-space: nowrap;
+    padding: 0 var(--space-3);
+    border-bottom: 1px solid var(--hairline);
+    font: 400 var(--fs-body-sm) / var(--lh-body-sm) var(--ff-body);
+  }
+  .clay-table tbody tr:last-child > * { border-bottom: 0; }
+  .clay-table tbody tr { background-color: var(--surface-1); }
+  .clay-table tbody tr:hover, .clay-table tbody tr.is-hover { background-color: var(--row-hover); }
+  .clay-table :is(th, td)[data-sticky="true"] { position: sticky; left: 0; background-color: inherit; }
+  .clay-table thead th[data-sticky="true"] { z-index: 2; background-color: var(--surface-1); }
+  .clay-table tr[data-superseded="true"] { color: var(--superseded); }
+  .clay-table [data-num="true"] { font-family: var(--ff-data); font-variant-numeric: tabular-nums; }
+}
+
+@layer utilities {
+  /* Interaction states. Higher specificity than variant utilities on purpose. */
+  @media (hover: hover) and (pointer: fine) {
+    .clay-hover:hover::after { opacity: 1; }
+  }
+  .clay-hover.is-hover::after { opacity: 1; }
+
+  .clay-press:active, .clay-press.is-active { box-shadow: var(--clay-down, var(--clay-pressed)); }
+  .clay-press:active::after, .clay-press.is-active::after, .clay-hover[data-selected="true"]::after { opacity: 0; }
+
+  .clay-press:is(:disabled, [aria-disabled="true"]):not([aria-busy="true"]),
+  .clay-disabled {
+    background-color: var(--sunken);
+    box-shadow: var(--clay-disabled);
+    color: var(--line-strong);
+    cursor: not-allowed;
+  }
+  .clay-press.clay-ghost:is(:disabled, [aria-disabled="true"]):not([aria-busy="true"]) {
+    background-color: transparent;
+    box-shadow: none;
+  }
+  .clay-press:is(:disabled, [aria-disabled="true"])::after, .clay-disabled::after { opacity: 0; }
+  .clay-press[aria-busy="true"] { cursor: progress; }
+
+  .clay-focus:focus-visible, .clay-focus.is-focus {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 3px;
+  }
+  .clay-focus-inset:focus-visible, .clay-focus-inset.is-focus {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: -3px;
+  }
+}
+
+@keyframes clay-sheen {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+/* Reduced motion is never waived: no transforms, fades of 150 ms or less. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+  .clay-skeleton[data-sheen="true"]::after { display: none; }
+}
