@@ -1,21 +1,25 @@
 import { z } from "zod";
-import { adminProcedure, router } from "../_core/trpc";
+import { patientProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 
 export const notificationsRouter = router({
-  list: adminProcedure.query(() => db.listNotifications(100)),
+  myList: patientProcedure.query(async ({ ctx }) => {
+    return db.listNotifications(ctx.patientId);
+  }),
 
-  unreadCount: adminProcedure.query(() => db.countUnreadNotifications()),
+  myUnreadCount: patientProcedure.query(async ({ ctx }) => {
+    return db.countUnreadNotifications(ctx.patientId);
+  }),
 
-  markRead: adminProcedure
+  markMyRead: patientProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
-      await db.markNotificationRead(input.id);
+    .mutation(async ({ ctx, input }) => {
+      await db.markNotificationRead(input.id, ctx.patientId);
       return { success: true } as const;
     }),
 
-  markAllRead: adminProcedure.mutation(async () => {
-    await db.markAllNotificationsRead();
+  markAllMyRead: patientProcedure.mutation(async ({ ctx }) => {
+    await db.markAllNotificationsRead(ctx.patientId);
     return { success: true } as const;
   }),
 });

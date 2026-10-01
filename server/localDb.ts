@@ -36,7 +36,6 @@ export function closeSqliteDb(): void {
 }
 
 function initSchemaAndSeed(db: Database.Database) {
-  // Create tables
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,521 +49,354 @@ function initSchemaAndSeed(db: Database.Database) {
       lastSignedIn TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS areas (
+    CREATE TABLE IF NOT EXISTS doctors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT NOT NULL UNIQUE,
-      name TEXT NOT NULL UNIQUE,
-      description TEXT,
-      sortOrder INTEGER DEFAULT 99 NOT NULL,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL,
       active INTEGER DEFAULT 1 NOT NULL,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
       updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS nurses (
+    CREATE TABLE IF NOT EXISTS patients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      employeeId TEXT NOT NULL UNIQUE,
+      hrn TEXT NOT NULL UNIQUE,
+      patientType TEXT NOT NULL,
       firstName TEXT NOT NULL,
       middleName TEXT,
       lastName TEXT NOT NULL,
       suffix TEXT,
-      position TEXT,
-      staffType TEXT DEFAULT 'Registered Nurse' NOT NULL,
-      dateHired TEXT,
-      employmentStatus TEXT DEFAULT 'Active' NOT NULL,
-      currentAreaId INTEGER,
-      profilePhotoKey TEXT,
+      sex TEXT,
+      birthDate TEXT,
       contactNumber TEXT,
-      accountEmail TEXT,
-      linkedUserId INTEGER,
-      archivedAt TEXT,
+      accountEmail TEXT NOT NULL,
+      linkedUserId INTEGER UNIQUE,
+      nephrologistId INTEGER,
+      fellowId INTEGER,
+      stage TEXT NOT NULL,
+      riskCategory TEXT,
+      surgeryDate TEXT,
+      linkedRecipientId INTEGER,
+      followupMonths INTEGER DEFAULT 1 NOT NULL,
+      status TEXT DEFAULT 'Active' NOT NULL,
+      photoFileId INTEGER,
+      consentAcceptedAt TEXT,
+      consentVersion INTEGER,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
       updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS areaAssignments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nurseId INTEGER NOT NULL,
-      areaId INTEGER NOT NULL,
-      startDate TEXT NOT NULL,
-      endDate TEXT,
-      assignmentType TEXT,
-      remarks TEXT,
-      isCurrent INTEGER DEFAULT 0 NOT NULL,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
+    CREATE UNIQUE INDEX IF NOT EXISTS patients_email_lower_idx ON patients (lower(accountEmail));
 
-    CREATE TABLE IF NOT EXISTS credentialTypes (
+    CREATE TABLE IF NOT EXISTS storedFiles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      issuingOrganizationDefault TEXT,
-      active INTEGER DEFAULT 1 NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS nurseCredentials (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nurseId INTEGER NOT NULL,
-      credentialTypeId INTEGER NOT NULL,
-      licenseNumber TEXT,
-      issuingOrganization TEXT,
-      issueDate TEXT,
-      expiryDate TEXT NOT NULL,
-      renewalStatus TEXT DEFAULT 'Not Started' NOT NULL,
-      verificationStatus TEXT DEFAULT 'Unverified' NOT NULL,
-      documentKey TEXT,
-      renewalCycleKey TEXT NOT NULL,
-      remarks TEXT,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS licenseReminders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      credentialId INTEGER NOT NULL,
-      thresholdDays INTEGER NOT NULL,
-      renewalCycleKey TEXT NOT NULL,
-      triggerDate TEXT NOT NULL,
-      generatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      acknowledgedAt TEXT,
-      status TEXT DEFAULT 'active' NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS trainingCatalog (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      category TEXT,
-      kind TEXT DEFAULT 'Training' NOT NULL,
-      renewalRequired INTEGER DEFAULT 0 NOT NULL,
-      defaultValidityMonths INTEGER,
-      active INTEGER DEFAULT 1 NOT NULL,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS trainingEvents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      trainingId INTEGER NOT NULL,
-      provider TEXT,
-      venue TEXT,
-      startDate TEXT NOT NULL,
-      endDate TEXT NOT NULL,
-      startTime TEXT,
-      endTime TEXT,
-      targetStaffType TEXT DEFAULT 'All' NOT NULL,
-      remarks TEXT,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS areaTrainingRequirements (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      areaId INTEGER NOT NULL,
-      trainingId INTEGER NOT NULL,
-      required INTEGER DEFAULT 1 NOT NULL,
-      UNIQUE(areaId, trainingId)
-    );
-
-    CREATE TABLE IF NOT EXISTS nurseTrainings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nurseId INTEGER NOT NULL,
-      trainingId INTEGER NOT NULL,
-      eventId INTEGER,
-      participationRole TEXT DEFAULT 'Participant' NOT NULL,
-      provider TEXT,
-      status TEXT DEFAULT 'Scheduled' NOT NULL,
-      scheduledDate TEXT,
-      completionDate TEXT,
-      expiryDate TEXT,
-      trainingHours INTEGER,
-      cpdUnits INTEGER,
-      certificateNumber TEXT,
-      certificateKey TEXT,
-      remarks TEXT,
-      scheduleVersion INTEGER DEFAULT 1 NOT NULL,
-      staffResponse TEXT DEFAULT 'Pending' NOT NULL,
-      staffResponseReason TEXT,
-      staffRespondedAt TEXT,
-      staffResponseVersion INTEGER,
-      attendanceOutcome TEXT DEFAULT 'not_recorded' NOT NULL,
-      attendanceRecordedAt TEXT,
-      attendanceRecordedBy INTEGER,
-      attendanceNote TEXT,
-      evidenceStatus TEXT DEFAULT 'None' NOT NULL,
-      evidenceRequired INTEGER DEFAULT 0 NOT NULL,
-      evidenceSubmittedAt TEXT,
-      evidenceReviewedAt TEXT,
-      evidenceReviewedBy INTEGER,
-      evidenceReviewNote TEXT,
-      conflictOverrideReason TEXT,
-      conflictOverrideBy INTEGER,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS customCalendarEvents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      eventDate TEXT NOT NULL,
-      startTime TEXT,
-      endTime TEXT,
-      allDay INTEGER DEFAULT 1 NOT NULL,
-      nurseId INTEGER,
-      areaId INTEGER,
-      description TEXT,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL,
-      severity TEXT NOT NULL,
-      title TEXT NOT NULL,
-      message TEXT,
-      nurseId INTEGER,
-      relatedEntityType TEXT,
-      relatedEntityId INTEGER,
-      readAt TEXT,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      dayKey TEXT
+      fileName TEXT NOT NULL,
+      fileType TEXT NOT NULL,
+      fileSize INTEGER NOT NULL,
+      storageKey TEXT NOT NULL,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS activityLog (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      supervisorId INTEGER,
-      nurseId INTEGER,
-      actionType TEXT NOT NULL,
-      entityType TEXT,
-      entityId INTEGER,
-      summary TEXT NOT NULL,
-      metadata TEXT,
+      actorUserId INTEGER,
+      patientId INTEGER,
+      action TEXT NOT NULL,
+      details TEXT,
+      ipAddress TEXT,
+      userAgent TEXT,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS appSettings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       key TEXT NOT NULL UNIQUE,
-      value TEXT
+      value TEXT NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS emailLogs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nurseId INTEGER NOT NULL,
       recipientEmail TEXT NOT NULL,
-      emailType TEXT NOT NULL,
-      referenceId INTEGER,
-      thresholdKey TEXT,
       subject TEXT NOT NULL,
-      status TEXT DEFAULT 'sent' NOT NULL,
+      templateName TEXT NOT NULL,
+      status TEXT NOT NULL,
       errorMessage TEXT,
-      sentAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+      patientId INTEGER,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS staffMessages (
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patientId INTEGER,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      type TEXT DEFAULT 'info' NOT NULL,
+      read INTEGER DEFAULT 0 NOT NULL,
+      linkUrl TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       senderUserId INTEGER NOT NULL,
-      title TEXT NOT NULL,
+      subject TEXT NOT NULL,
       body TEXT NOT NULL,
-      revision INTEGER DEFAULT 1 NOT NULL,
-      archivedAt TEXT,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS staffMessageRecipients (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      messageId INTEGER NOT NULL,
-      nurseId INTEGER NOT NULL,
-      readAt TEXT,
-      lastReadRevision INTEGER,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      UNIQUE(messageId, nurseId)
-    );
-
-    CREATE TABLE IF NOT EXISTS staffMessageAcknowledgments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      messageId INTEGER NOT NULL,
-      nurseId INTEGER NOT NULL,
-      revision INTEGER NOT NULL,
-      acknowledgedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      UNIQUE(messageId, nurseId, revision)
-    );
-
-    CREATE TABLE IF NOT EXISTS trainingOutbox (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      assignmentId INTEGER NOT NULL,
-      scheduleVersion INTEGER NOT NULL,
-      noticeKind TEXT NOT NULL,
-      thresholdDays INTEGER,
-      dueDate TEXT,
-      recipientNurseId INTEGER NOT NULL,
-      recipientEmail TEXT,
-      status TEXT DEFAULT 'pending' NOT NULL,
-      attempts INTEGER DEFAULT 0 NOT NULL,
-      lastAttemptAt TEXT,
-      claimedAt TEXT,
-      providerMessageId TEXT,
-      errorDetail TEXT,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      UNIQUE(assignmentId, scheduleVersion, noticeKind)
-    );
-
-    CREATE TABLE IF NOT EXISTS trainingActivity (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nurseId INTEGER NOT NULL,
-      assignmentId INTEGER NOT NULL,
-      activityType TEXT NOT NULL,
-      title TEXT NOT NULL,
-      message TEXT,
-      readAt TEXT,
+      targetType TEXT NOT NULL,
+      targetStage TEXT,
+      targetPatientId INTEGER,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS storedFiles (
+    CREATE TABLE IF NOT EXISTS messageRecipients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      key TEXT NOT NULL UNIQUE,
-      data TEXT NOT NULL,
-      mimeType TEXT NOT NULL,
-      fileSize INTEGER NOT NULL,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS memos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      memoType TEXT NOT NULL,
-      areaId INTEGER,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      authorUserId INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'sent',
-      sentAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      retractedAt TEXT,
-      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS memoRecipients (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      memoId INTEGER NOT NULL,
-      nurseId INTEGER NOT NULL,
-      linkedAtSend INTEGER NOT NULL DEFAULT 0,
+      messageId INTEGER NOT NULL,
+      patientId INTEGER NOT NULL,
       readAt TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS messageAcknowledgments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      messageId INTEGER NOT NULL,
+      patientId INTEGER NOT NULL,
+      acknowledgedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reminderOutbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patientId INTEGER NOT NULL,
+      serviceRecordId INTEGER,
+      appointmentId INTEGER,
+      triggerType TEXT NOT NULL,
+      scheduledFor TEXT NOT NULL,
+      sentAt TEXT,
+      status TEXT DEFAULT 'pending' NOT NULL,
+      errorMessage TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS checklistCatalog (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      phase INTEGER,
+      appliesTo TEXT DEFAULT 'Both' NOT NULL,
+      asIndicated INTEGER DEFAULT 0 NOT NULL,
+      sortOrder INTEGER DEFAULT 99 NOT NULL,
+      active INTEGER DEFAULT 1 NOT NULL,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS patientChecklist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patientId INTEGER NOT NULL,
+      catalogId INTEGER NOT NULL,
+      status TEXT DEFAULT 'Pending' NOT NULL,
+      doneDate TEXT,
+      note TEXT,
+      fileIds TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      UNIQUE(patientId, catalogId)
+    );
+
+    CREATE TABLE IF NOT EXISTS serviceRecords (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patientId INTEGER NOT NULL,
+      serviceType TEXT NOT NULL,
+      label TEXT NOT NULL,
+      status TEXT DEFAULT 'Planned' NOT NULL,
+      dueDate TEXT NOT NULL,
+      serviceDate TEXT,
+      claimDeadline TEXT,
+      claimFiledDate TEXT,
+      repeatOfId INTEGER,
+      repeatReason TEXT,
+      repeatEveryDays INTEGER,
+      source TEXT DEFAULT 'Manual' NOT NULL,
+      note TEXT,
+      fileIds TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS labTests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      low TEXT,
+      high TEXT,
+      active INTEGER DEFAULT 1 NOT NULL,
+      sortOrder INTEGER DEFAULT 99 NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS labResults (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      serviceRecordId INTEGER NOT NULL,
+      labTestId INTEGER NOT NULL,
+      value TEXT NOT NULL,
+      lowSnapshot TEXT,
+      highSnapshot TEXT,
+      flag TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS recordRevisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entityType TEXT NOT NULL,
+      entityId INTEGER NOT NULL,
+      before TEXT NOT NULL,
+      after TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      userId INTEGER NOT NULL,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS appointments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patientId INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      startsAt TEXT NOT NULL,
+      location TEXT,
+      note TEXT,
+      response TEXT DEFAULT 'Pending' NOT NULL,
+      responseNote TEXT,
+      respondedAt TEXT,
+      cancelledAt TEXT,
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+      updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+    );
   `);
 
-  // Migrate existing SQLite schema if missing newly added columns
-  const cols = db.prepare("PRAGMA table_info(nurses)").all() as { name: string }[];
-  const colSet = new Set(cols.map((c) => c.name));
-  if (!colSet.has("contactNumber")) db.exec("ALTER TABLE nurses ADD COLUMN contactNumber TEXT");
-  if (!colSet.has("accountEmail")) db.exec("ALTER TABLE nurses ADD COLUMN accountEmail TEXT");
-  if (!colSet.has("linkedUserId")) db.exec("ALTER TABLE nurses ADD COLUMN linkedUserId INTEGER");
-  db.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS uniq_memo_nurse ON memoRecipients(memoId, nurseId);
-    CREATE INDEX IF NOT EXISTS idx_memo_rcp_nurse ON memoRecipients(nurseId);
-    CREATE INDEX IF NOT EXISTS idx_memo_rcp_memo ON memoRecipients(memoId);
-    CREATE INDEX IF NOT EXISTS idx_memos_sent ON memos(sentAt);
-  `);
-
-  const ntCols = db.prepare("PRAGMA table_info(nurseTrainings)").all() as { name: string }[];
-  const ntColSet = new Set(ntCols.map((c) => c.name));
-  if (!ntColSet.has("scheduleVersion")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN scheduleVersion INTEGER DEFAULT 1 NOT NULL");
-  if (!ntColSet.has("staffResponse")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponse TEXT DEFAULT 'Pending' NOT NULL");
-  if (!ntColSet.has("staffResponseReason")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponseReason TEXT");
-  if (!ntColSet.has("staffRespondedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffRespondedAt TEXT");
-  if (!ntColSet.has("staffResponseVersion")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN staffResponseVersion INTEGER");
-  if (!ntColSet.has("attendanceOutcome")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceOutcome TEXT DEFAULT 'Not recorded' NOT NULL");
-  if (!ntColSet.has("attendanceRecordedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceRecordedAt TEXT");
-  if (!ntColSet.has("attendanceRecordedBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceRecordedBy INTEGER");
-  if (!ntColSet.has("attendanceNote")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN attendanceNote TEXT");
-  if (!ntColSet.has("evidenceStatus")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceStatus TEXT DEFAULT 'None' NOT NULL");
-  if (!ntColSet.has("evidenceRequired")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceRequired INTEGER DEFAULT 0 NOT NULL");
-  if (!ntColSet.has("evidenceSubmittedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceSubmittedAt TEXT");
-  if (!ntColSet.has("evidenceReviewedAt")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewedAt TEXT");
-  if (!ntColSet.has("evidenceReviewedBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewedBy INTEGER");
-  if (!ntColSet.has("evidenceReviewNote")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN evidenceReviewNote TEXT");
-  if (!ntColSet.has("conflictOverrideReason")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN conflictOverrideReason TEXT");
-  if (!ntColSet.has("conflictOverrideBy")) db.exec("ALTER TABLE nurseTrainings ADD COLUMN conflictOverrideBy INTEGER");
-
-  // Check if data already seeded
-  const countRow = db.prepare("SELECT count(*) as cnt FROM nurses").get() as { cnt: number };
-  if (countRow.cnt === 0) {
-    seedFromSeedJson(db);
+  // Seed settings if empty
+  const settingCount = db.prepare("SELECT count(*) as count FROM appSettings").get() as { count: number };
+  if (settingCount.count === 0) {
+    const insertSetting = db.prepare("INSERT INTO appSettings (key, value) VALUES (?, ?)");
+    insertSetting.run("consentVersion", "1");
+    insertSetting.run(
+      "consentNoticeText",
+      "By accessing the KTP portal, you consent to the collection and processing of your health information under Republic Act No. 10173 (Data Privacy Act of 2012) for kidney transplant monitoring and care coordination."
+    );
+    insertSetting.run(
+      "emergencyHotlineText",
+      "KT Unit Hotline: 0917-000-0000 | Hospital Trunk: (082) 227-2731 loc 4100"
+    );
   }
-}
 
-export function seedFromSeedJson(db: Database.Database) {
-  const seedPath = path.join(__dirname, "data", "seedData.json");
-  if (!fs.existsSync(seedPath)) {
-    console.warn(`[LocalDB] Seed file not found at ${seedPath}`);
-    return;
-  }
-  const raw = fs.readFileSync(seedPath, "utf-8");
-  const data = JSON.parse(raw);
-
-  console.log(`[LocalDB] Auto-populating SQLite with ${data.staff.length} staff, ${data.trainingCatalog.length} catalog items, ${data.events.length} seminar events...`);
-
-  // 1. Credential types
-  const insCredType = db.prepare("INSERT OR IGNORE INTO credentialTypes (id, name, issuingOrganizationDefault, active) VALUES (?, ?, ?, 1)");
-  insCredType.run(1, "PRC Registered Nurse License", "Professional Regulation Commission (PRC)");
-  insCredType.run(2, "TESDA NC II / PRC Attendant Certification", "TESDA / SPMC");
-
-  // 2. Areas
-  const insArea = db.prepare("INSERT OR REPLACE INTO areas (code, name, description, sortOrder, active) VALUES (?, ?, ?, ?, 1)");
-  for (const a of data.areas) {
-    insArea.run(a.code, a.name, a.description, a.sortOrder);
+  // Seed doctors if empty
+  const docCount = db.prepare("SELECT count(*) as count FROM doctors").get() as { count: number };
+  if (docCount.count === 0) {
+    const insertDoc = db.prepare("INSERT INTO doctors (name, role, active) VALUES (?, ?, 1)");
+    insertDoc.run("Dr. Maria Santos", "Nephrologist");
+    insertDoc.run("Dr. Roberto Cruz", "Nephrologist");
+    insertDoc.run("Dr. Juan Reyes", "Fellow");
+    insertDoc.run("Dr. Ana Lim", "Fellow");
   }
 
-  const allAreas = db.prepare("SELECT id, code FROM areas").all() as { id: number; code: string }[];
-  const areaIdByCode = new Map(allAreas.map((a) => [a.code, a.id]));
-
-  // 3. Training catalog (case-insensitive dedup — source data has mixed-case
-  // duplicates of the same training from different Excel sheets/years).
-  const insCat = db.prepare("INSERT OR REPLACE INTO trainingCatalog (name, category, kind, renewalRequired, defaultValidityMonths, active) VALUES (?, ?, ?, ?, ?, 1)");
-  const seenCatalogNames = new Set<string>();
-  for (const c of data.trainingCatalog) {
-    const key = c.name.trim().toLowerCase();
-    if (seenCatalogNames.has(key)) continue;
-    seenCatalogNames.add(key);
-    insCat.run(c.name, c.category, c.kind, c.renewalRequired ? 1 : 0, c.defaultValidityMonths ?? null);
-  }
-
-  const allCat = db.prepare("SELECT id, name FROM trainingCatalog").all() as { id: number; name: string }[];
-  const catIdByName = new Map(allCat.map((c) => [c.name.trim().toLowerCase(), c.id]));
-
-  // 4. Staff & Credentials
-  const insNurse = db.prepare(`
-    INSERT OR REPLACE INTO nurses (employeeId, firstName, middleName, lastName, suffix, position, staffType, employmentStatus, currentAreaId)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const insAsgn = db.prepare(`
-    INSERT INTO areaAssignments (nurseId, areaId, startDate, assignmentType, remarks, isCurrent)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-  const insCred = db.prepare(`
-    INSERT OR REPLACE INTO nurseCredentials (nurseId, credentialTypeId, licenseNumber, issuingOrganization, issueDate, expiryDate, renewalStatus, verificationStatus, renewalCycleKey, remarks)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const nurseIdByNormName = new Map<string, number>();
-  const nurseIdByEmployeeId = new Map<string, number>();
-
-  const insertStaffTx = db.transaction((staffList: any[]) => {
-    for (const person of staffList) {
-      const areaId = areaIdByCode.get(person.currentAreaCode) ?? allAreas[0]?.id ?? 1;
-      const isCurrentlyAssigned = person.employmentStatus === "Active";
-      const res = insNurse.run(
-        person.employeeId,
-        person.nameInfo.firstName || person.nameInfo.lastName,
-        person.nameInfo.middleName ?? null,
-        person.nameInfo.lastName,
-        person.nameInfo.suffix ?? null,
-        person.position,
-        person.staffType,
-        person.employmentStatus,
-        isCurrentlyAssigned ? areaId : null
-      );
-      const nurseId = Number(res.lastInsertRowid);
-
-      const normKey = `${person.nameInfo.lastName.toUpperCase()}, ${person.nameInfo.firstName.toUpperCase()}`;
-      nurseIdByEmployeeId.set(person.employeeId, nurseId);
-      nurseIdByNormName.set(normKey, nurseId);
-      nurseIdByNormName.set(person.nameInfo.lastName.toUpperCase(), nurseId);
-
-      insAsgn.run(
-        nurseId,
-        areaId,
-        "2026-01-01",
-        person.employmentStatus === "Rotated" ? "Rotation" : "Permanent Transfer",
-        person.historyNotes || "Initial Assignment",
-        isCurrentlyAssigned ? 1 : 0
-      );
-
-      if (person.licenseExpiry) {
-        const credTypeId = person.staffType === "Registered Nurse" ? 1 : 2;
-        const cycleKey = `${nurseId}-${person.licenseExpiry}`;
-        insCred.run(
-          nurseId,
-          credTypeId,
-          person.licenseNumber ?? null,
-          person.staffType === "Registered Nurse" ? "PRC" : "TESDA / SPMC",
-          "2023-01-01",
-          person.licenseExpiry,
-          "Not Started",
-          "Verified",
-          cycleKey,
-          person.historyNotes ?? null
-        );
-      }
+  // Seed lab tests if empty
+  const labCount = db.prepare("SELECT count(*) as count FROM labTests").get() as { count: number };
+  if (labCount.count === 0) {
+    const insertLab = db.prepare("INSERT INTO labTests (name, unit, sortOrder, active) VALUES (?, ?, ?, 1)");
+    const tests = [
+      ["Hemoglobin", "g/L", 1],
+      ["WBC", "x10^9/L", 2],
+      ["Platelets", "x10^9/L", 3],
+      ["Creatinine", "umol/L", 4],
+      ["BUN", "mmol/L", 5],
+      ["FBS", "mmol/L", 6],
+      ["Sodium", "mmol/L", 7],
+      ["Potassium", "mmol/L", 8],
+      ["ALT (SGPT)", "U/L", 9],
+      ["Tacrolimus trough", "ng/mL", 10],
+      ["Total cholesterol", "mmol/L", 11],
+      ["Triglycerides", "mmol/L", 12],
+      ["HDL", "mmol/L", 13],
+      ["LDL", "mmol/L", 14],
+      ["CMV PCR", "IU/mL", 15],
+    ] as const;
+    for (const [name, unit, sort] of tests) {
+      insertLab.run(name, unit, sort);
     }
-  });
-
-  insertStaffTx(data.staff);
-
-  // 5. Events & Attendances
-  const insEvent = db.prepare(`
-    INSERT INTO trainingEvents (trainingId, provider, venue, startDate, endDate, targetStaffType, remarks)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  const insAttend = db.prepare(`
-    INSERT INTO nurseTrainings (nurseId, trainingId, eventId, participationRole, provider, status, scheduledDate, completionDate, remarks)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  let totalAttendances = 0;
-  // The workbook lists attendees who are not in the seed roster (staff from
-  // later imports). Skip them: a local dev seed must not fail on them.
-  const unresolvedAttendees = new Set<string>();
-  const insertEventsTx = db.transaction((eventsList: any[]) => {
-    for (const ev of eventsList) {
-      const catId = catIdByName.get(ev.title.trim().toLowerCase());
-      if (!catId) continue;
-
-      const evRes = insEvent.run(
-        catId,
-        ev.provider,
-        ev.venue,
-        ev.startDate,
-        ev.endDate,
-        "All",
-        `Conducted by ${ev.provider}`
-      );
-      const eventId = Number(evRes.lastInsertRowid);
-
-      for (const att of ev.attendees) {
-        const nurseId = nurseIdByEmployeeId.get(att.employeeId) ?? nurseIdByNormName.get(att.normName);
-        if (!nurseId) {
-          unresolvedAttendees.add(String(att.staffName));
-          continue;
-        }
-
-        insAttend.run(
-          nurseId,
-          catId,
-          eventId,
-          att.role || "Participant",
-          ev.provider,
-          "Completed",
-          ev.startDate,
-          att.completionDate,
-          `Attended ${ev.title}`
-        );
-        totalAttendances++;
-      }
-    }
-  });
-
-  insertEventsTx(data.events);
-  if (unresolvedAttendees.size > 0) {
-    console.warn(`[LocalDB] Seed skipped attendances for ${unresolvedAttendees.size} people who are not in the seed roster.`);
   }
 
-  // Initial Activity Log
-  db.prepare("INSERT INTO activityLog (actionType, summary) VALUES (?, ?)").run(
-    "system.seed.excel",
-    `Auto-populated NN LDI Database Summary: ${data.staff.length} staff, ${data.trainingCatalog.length} catalog items, ${data.events.length} events, ${totalAttendances} attendances.`
-  );
+  // Seed checklist catalog if empty
+  const checklistCount = db.prepare("SELECT count(*) as count FROM checklistCatalog").get() as { count: number };
+  if (checklistCount.count === 0) {
+    const insertChecklist = db.prepare(
+      "INSERT INTO checklistCatalog (name, category, phase, appliesTo, asIndicated, sortOrder, active) VALUES (?, ?, ?, ?, ?, ?, 1)"
+    );
+    const items: [string, string, number | null, string, number, number][] = [
+      // Milestones
+      ["Pre-transplant orientation", "Milestone", null, "Both", 0, 1],
+      ["Initial nephrology assessment", "Milestone", null, "Both", 0, 2],
+      ["HTEC evaluation and approval", "Milestone", null, "Both", 0, 3],
+      ["CDTE and risk stratification", "Milestone", null, "Recipient", 0, 4],
+      ["PhilHealth Z Package qualification and application", "Milestone", null, "Recipient", 0, 5],
 
-  console.log(`[LocalDB] Seed completed successfully! ${data.staff.length} staff, ${totalAttendances} attendance records ready.`);
+      // Phase 1 labs
+      ["CBC with differential", "Lab", 1, "Both", 0, 10],
+      ["Blood typing ABO and Rh", "Lab", 1, "Both", 0, 11],
+      ["BT, CT, PT/INR, aPTT", "Lab", 1, "Both", 0, 12],
+      ["FBS and HbA1c", "Lab", 1, "Both", 0, 13],
+      ["Creatinine, BUN, uric acid", "Lab", 1, "Both", 0, 14],
+      ["SGPT, SGOT, ALP", "Lab", 1, "Both", 0, 15],
+      ["Na, K, Ca, phosphorus, Mg", "Lab", 1, "Both", 0, 16],
+      ["Lipid profile", "Lab", 1, "Both", 0, 17],
+      ["Albumin and total protein", "Lab", 1, "Both", 0, 18],
+      ["iPTH", "Lab", 1, "Both", 0, 19],
+      ["Hepatitis B markers", "Lab", 1, "Both", 0, 20],
+      ["Anti-HCV", "Lab", 1, "Both", 0, 21],
+      ["TPPA/VDRL/RPR", "Lab", 1, "Both", 0, 22],
+      ["HIV", "Lab", 1, "Both", 0, 23],
+      ["Malaria (BSMP)", "Lab", 1, "Both", 0, 24],
+      ["CMV IgG", "Lab", 1, "Both", 0, 25],
+      ["EBV IgG", "Lab", 1, "Both", 0, 26],
+      ["Varicella IgG", "Lab", 1, "Both", 0, 27],
+      ["TB Quantiferon", "Lab", 1, "Both", 0, 28],
+      ["Throat swab GS and C/S", "Lab", 1, "Both", 0, 29],
+      ["Urinalysis with microscopy", "Lab", 1, "Both", 0, 30],
+      ["Urine C/S", "Lab", 1, "Both", 0, 31],
+      ["UACR or 24-hour urine protein and creatinine", "Lab", 1, "Both", 0, 32],
+      ["Fecalysis with occult blood or FIT", "Lab", 1, "Both", 0, 33],
+      ["Pregnancy test", "Lab", 1, "Both", 1, 34],
+
+      // Phase 1 imaging
+      ["Chest X-ray PA", "Imaging", 1, "Both", 0, 40],
+      ["12-lead ECG", "Imaging", 1, "Both", 0, 41],
+      ["Whole abdomen ultrasound", "Imaging", 1, "Both", 0, 42],
+      ["2D echo with Doppler", "Imaging", 1, "Both", 0, 43],
+
+      // Phase 2
+      ["HLA typing class I and II", "Lab", 2, "Both", 0, 50],
+      ["PRA screening class I, II, MICA", "Lab", 2, "Recipient", 0, 51],
+      ["Single antigen bead / DSA", "Lab", 2, "Recipient", 0, 52],
+      ["T and B cell crossmatch", "Lab", 2, "Recipient", 0, 53],
+      ["Renal CT angiography with 3D reconstruction", "Imaging", 2, "Donor", 0, 54],
+      ["Nuclear GFR scan (split function)", "Imaging", 2, "Donor", 0, 55],
+      ["Aorto-iliac duplex ultrasound", "Imaging", 2, "Donor", 0, 56],
+
+      // Phase 3
+      ["Repeat chest X-ray", "Imaging", 3, "Both", 0, 60],
+      ["Repeat urinalysis and CBC", "Lab", 3, "Both", 0, 61],
+      ["RT-PCR on admission day", "Lab", 3, "Both", 0, 62],
+      ["Pre-transplant HD or PD session", "Clearance", 3, "Recipient", 1, 63],
+
+      // Clearances
+      ["Cardiology", "Clearance", null, "Both", 0, 70],
+      ["Infectious disease", "Clearance", null, "Both", 0, 71],
+      ["Dental", "Clearance", null, "Both", 0, 72],
+      ["Neuropsychiatric", "Clearance", null, "Both", 0, 73],
+      ["Endocrinology", "Clearance", null, "Both", 0, 74],
+      ["Donor advocate", "Clearance", null, "Donor", 0, 75],
+      ["Gastroenterology or hepatology", "Clearance", null, "Both", 1, 76],
+      ["Pulmonology", "Clearance", null, "Both", 1, 77],
+      ["Urology", "Clearance", null, "Both", 1, 78],
+      ["OB-Gyn with Pap smear or mammogram", "Clearance", null, "Both", 1, 79],
+    ];
+
+    for (const [name, cat, phase, applies, asInd, sort] of items) {
+      insertChecklist.run(name, cat, phase, applies, asInd, sort);
+    }
+  }
 }

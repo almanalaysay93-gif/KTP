@@ -56,8 +56,13 @@ export async function storagePut(
     }
   }
 
-  // Fallback to database storage
-  await db.saveStoredFile(key, buffer.toString("base64"), contentType, buffer.length);
+  // Fallback to database metadata record
+  await db.saveStoredFile({
+    fileName: key.split("/").pop() || key,
+    fileType: contentType,
+    fileSize: buffer.length,
+    storageKey: key,
+  });
   return { key, url: `/storage/${key}` };
 }
 

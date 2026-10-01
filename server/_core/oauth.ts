@@ -2,6 +2,7 @@ import { COOKIE_NAME, ONE_YEAR_MS, OAUTH_STATE_COOKIE, OAUTH_STATE_COOKIE_PLAIN,
 import { parse as parseCookieHeader } from "cookie";
 import type { Express, Request, Response } from "express";
 import * as db from "../db";
+import { hasFullAccess } from "../adminAccess";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 
@@ -51,8 +52,17 @@ export function registerOAuthRoutes(app: Express) {
       });
 
       const user = await db.getUserByOpenId(userInfo.openId);
+      const email = userInfo.email ?? "";
+      const isAdmin = hasFullAccess(email);
+      let linkedPatient = null;
       if (user) {
-        await db.autoLinkNurseByEmail(user.id, userInfo.email);
+        linkedPatient = await db.autoLinkPatientByEmail(user.id, email);
+      }
+
+      if (!isAdmin && !linkedPatient) {
+        // Not enrolled. Do not create session cookie.
+        res.redirect(302, "/not-enrolled");
+        return;
       }
 
       const sessionToken = await sdk.createSessionToken(userInfo.openId, {
@@ -63,7 +73,7 @@ export function registerOAuthRoutes(app: Express) {
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
-      res.redirect(302, "/");
+      res.redirect(302, isAdmin ? "/dashboard" : "/me");
     } catch (error) {
       console.error("[OAuth] Callback failed", error);
       res.status(500).json({ error: "OAuth callback failed" });

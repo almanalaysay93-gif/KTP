@@ -1,354 +1,75 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq, isNull, sql } from "drizzle-orm";
-import { adminProcedure, router } from "../_core/trpc";
-import { getDb, getNurseByEmployeeId, createNurse, createAssignment, logActivity } from "../db";
-import { getSqliteDb } from "../localDb";
-import { areas, nurseCredentials, nurseTrainings, areaAssignments, appSettings, nurses } from "../../drizzle/schema";
-import { EMPLOYMENT_STATUSES, nurseFullName } from "../../shared/nursetrack";
-import { runDailyReminders } from "../reminders";
-import { todayDate } from "../../shared/nursetrack";
-import { seedExcelDatabase } from "../seedExcel";
-import { deduplicateDatabase } from "../deduplicate";
-
-/** "365, 180" -> "365,180". Null when any entry is not a whole number from 1 to 365. */
-export function normalizeReminderThresholds(value: string): string | null {
-  const parts = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
-  if (parts.length === 0) return null;
-  const nums = parts.map(Number);
-  if (!nums.every((n) => Number.isInteger(n) && n > 0 && n <= 365)) return null;
-  return nums.join(",");
-}
-
-const settingKey = z.enum([
-  "appTitle",
-  "reminderThresholdDays",
-  "orgName",
-  "contactEmail",
-]);
+import { adminProcedure, publicProcedure, router } from "../_core/trpc";
+import * as db from "../db";
 
 export const settingsRouter = router({
-  get: adminProcedure
-    .input(z.object({ key: settingKey }))
-    .query(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
-      const rows = await db.select().from(appSettings).where(eq(appSettings.key, input.key)).limit(1);
-      return { key: input.key, value: rows[0]?.value ?? null };
-    }),
-
   getAll: adminProcedure.query(async () => {
-    const db = await getDb();
-    if (!db) throw new Error("Database unavailable");
-    const rows = await db.select().from(appSettings);
-    const byKey = new Map(rows.map((r) => [r.key, r.value]));
+    const all = await db.getAllSettings();
     return {
-      appTitle: byKey.get("appTitle") ?? "SKTI NurseTrack",
-      reminderThresholdDays: byKey.get("reminderThresholdDays") ?? "365,180",
-      orgName: byKey.get("orgName") ?? "",
-      contactEmail: byKey.get("contactEmail") ?? "",
+      appTitle: all.appTitle ?? "KTP",
+      orgName: all.orgName ?? "Organ Transplant Services",
+      contactEmail: all.contactEmail ?? "",
+      emergencyHotlineText:
+        all.emergencyHotlineText ?? "KT Unit Hotline: 0917-000-0000 | Hospital Trunk: (082) 227-2731 loc 4100",
+      consentNoticeText:
+        all.consentNoticeText ??
+        "By accessing the KTP portal, you consent to the collection and processing of your health information under Republic Act No. 10173 (Data Privacy Act of 2012) for kidney transplant monitoring and care coordination.",
+      consentVersion: all.consentVersion ?? "1",
     };
   }),
 
-  // All four settings in one request: every value is validated first, then written in one transaction.
-  updateMany: adminProcedure
+  getConsentNotice: publicProcedure.query(async () => {
+    const consentNoticeText =
+      (await db.getSetting("consentNoticeText")) ??
+      "By accessing the KTP portal, you consent to the collection and processing of your health information under Republic Act No. 10173 (Data Privacy Act of 2012) for kidney transplant monitoring and care coordination.";
+    const consentVersion = (await db.getSetting("consentVersion")) ?? "1";
+    return {
+      consentNoticeText,
+      consentVersion: parseInt(consentVersion, 10) || 1,
+    };
+  }),
+
+  update: adminProcedure
     .input(
       z.object({
-        appTitle: z.string().trim().max(5000).nullable(),
-        orgName: z.string().trim().max(5000).nullable(),
-        contactEmail: z.union([z.string().trim().email().max(320), z.literal(""), z.null()]),
-        reminderThresholdDays: z.string().max(5000),
-      }),
+        emergencyHotlineText: z.string().max(1000).optional(),
+        consentNoticeText: z.string().max(5000).optional(),
+        consentVersion: z.number().int().min(1).optional(),
+        appTitle: z.string().max(128).optional(),
+        orgName: z.string().max(128).optional(),
+        contactEmail: z.string().email().or(z.literal("")).optional(),
+      })
     )
-    .mutation(async ({ input }) => {
-      const thresholds = normalizeReminderThresholds(input.reminderThresholdDays);
-      if (!thresholds) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Thresholds must be positive integers up to 365, separated by commas (e.g. 365,180)." });
+    .mutation(async ({ ctx, input }) => {
+      if (input.emergencyHotlineText !== undefined) {
+        await db.setSetting("emergencyHotlineText", input.emergencyHotlineText);
       }
-      const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
-      const values: Record<z.infer<typeof settingKey>, string | null> = {
-        appTitle: input.appTitle || null,
-        orgName: input.orgName || null,
-        contactEmail: input.contactEmail || null,
-        reminderThresholdDays: thresholds,
-      };
-      await db.transaction(async (tx) => {
-        for (const [key, value] of Object.entries(values)) {
-          await tx
-            .insert(appSettings)
-            .values({ key, value })
-            .onConflictDoUpdate({ target: appSettings.key, set: { value } });
-        }
-      });
+      if (input.consentNoticeText !== undefined) {
+        await db.setSetting("consentNoticeText", input.consentNoticeText);
+      }
+      if (input.consentVersion !== undefined) {
+        await db.setSetting("consentVersion", String(input.consentVersion));
+      }
+      if (input.appTitle !== undefined) {
+        await db.setSetting("appTitle", input.appTitle);
+      }
+      if (input.orgName !== undefined) {
+        await db.setSetting("orgName", input.orgName);
+      }
+      if (input.contactEmail !== undefined) {
+        await db.setSetting("contactEmail", input.contactEmail);
+      }
+
+      await db.logActivity(
+        ctx.user.id,
+        null,
+        "UPDATE_SETTINGS",
+        { updatedKeys: Object.keys(input) },
+        ctx.req.ip,
+        ctx.req.headers["user-agent"]
+      );
+
       return { success: true } as const;
     }),
-
-  runRemindersNow: adminProcedure.mutation(async () => {
-    const db = await getDb();
-    if (!db) throw new Error("Database unavailable");
-    const rows = await db.select().from(appSettings).where(eq(appSettings.key, "reminderThresholdDays"));
-    const raw = rows[0]?.value ?? "365,180";
-    const thresholds = raw
-      .split(",")
-      .map((s) => Number(s.trim()))
-      .filter((n) => Number.isInteger(n) && n > 0);
-    const results = await runDailyReminders(todayDate(), thresholds.length ? thresholds : [365, 180]);
-    return results;
-  }),
-
-  syncExcelDatabase: adminProcedure.mutation(async ({ ctx }) => {
-    const db = await getDb();
-    if (!db) throw new Error("Database unavailable");
-    const results = await seedExcelDatabase();
-    await logActivity({
-      supervisorId: ctx.user.id,
-      actionType: "settings.excel.sync",
-      summary: `Synced NN LDI Database: ${results.staffCount} staff, ${results.catalogCount} training catalog items, ${results.eventCount} seminar events, ${results.attendanceCount} attendances.`,
-    });
-    return results;
-  }),
-
-  deduplicateDatabase: adminProcedure.mutation(async ({ ctx }) => {
-    const results = await deduplicateDatabase();
-    await logActivity({
-      supervisorId: ctx.user.id,
-      actionType: "settings.deduplicate",
-      summary: `Cleaned database duplicates: merged ${results.mergedNursesGroups} nurse groups, removed ${results.deletedDuplicateNurses} duplicate profiles, ${results.deduplicatedTrainings} duplicate trainings, ${results.deduplicatedCredentials} duplicate credentials.`,
-    });
-    return results;
-  }),
-
-  previewCsvImport: adminProcedure
-    .input(z.object({ csv: z.string().max(500000) }))
-    .mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
-      const rows = parseCsv(input.csv);
-      if (rows.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "CSV is empty or has no valid rows." });
-      const header = rows[0];
-      const expected = ["employeeId", "firstName", "middleName", "lastName", "suffix", "position", "dateHired", "currentArea"];
-      const missing = expected.filter((col) => !header.includes(col));
-      if (missing.length > 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Missing columns: ${missing.join(", ")}. Required: ${expected.join(", ")}.`,
-        });
-      }
-      const areaRows = await db.select().from(areas).where(eq(areas.active, true));
-      const areaByName = new Map(areaRows.map((a) => [a.name.toLowerCase(), a]));
-
-      const issues: string[] = [];
-      const preview: { row: number; employeeId: string; name: string; valid: boolean; note?: string }[] = [];
-      const dataRows = rows.slice(1);
-      const seenIds = new Set<string>();
-
-      for (let i = 0; i < dataRows.length; i++) {
-        const r = dataRows[i];
-        if (!r.length) continue;
-        const byCol = header.map((h, idx) => [h, (r[idx] ?? "").trim()] as const);
-        const get = (col: string) => byCol.find(([h]) => h === col)?.[1] ?? "";
-        const employeeId = get("employeeId");
-        const firstName = get("firstName");
-        const lastName = get("lastName");
-        const suffix = get("suffix");
-        if (!employeeId || !firstName || !lastName) {
-          preview.push({ row: i + 2, employeeId, name: `${firstName} ${lastName}`, valid: false, note: "Missing required name/ID fields." });
-          issues.push(`Row ${i + 2}: missing required fields.`);
-          continue;
-        }
-        if (seenIds.has(employeeId)) {
-          preview.push({ row: i + 2, employeeId, name: nurseFullName({ firstName, middleName: get("middleName"), lastName, suffix }), valid: false, note: "Duplicate Employee ID within file." });
-          issues.push(`Row ${i + 2}: duplicate Employee ID.`);
-          continue;
-        }
-        const existing = await getNurseByEmployeeId(employeeId);
-        if (existing) {
-          preview.push({ row: i + 2, employeeId, name: nurseFullName({ firstName, middleName: get("middleName"), lastName, suffix }), valid: false, note: "Employee ID already exists." });
-          issues.push(`Row ${i + 2}: Employee ID already exists.`);
-          continue;
-        }
-        seenIds.add(employeeId);
-        const areaName = get("currentArea");
-        const area = areaByName.get(areaName.toLowerCase());
-        if (!area) {
-          preview.push({ row: i + 2, employeeId, name: nurseFullName({ firstName, middleName: get("middleName"), lastName, suffix }), valid: false, note: `Area "${areaName}" not found.` });
-          issues.push(`Row ${i + 2}: area "${areaName}" not found.`);
-          continue;
-        }
-        preview.push({ row: i + 2, employeeId, name: nurseFullName({ firstName, middleName: get("middleName"), lastName, suffix }), valid: true, note: `→ ${area.name}` });
-      }
-      return { totalRows: dataRows.length, validRows: preview.filter((p) => p.valid).length, issues: issues.slice(0, 50), preview: preview.slice(0, 200) };
-    }),
-
-  executeCsvImport: adminProcedure
-    .input(z.object({ csv: z.string().max(500000), skipInvalid: z.boolean().optional() }))
-    .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
-      const rows = parseCsv(input.csv);
-      if (rows.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "CSV is empty." });
-      const header = rows[0];
-      const get = (r: string[], col: string) => {
-        const idx = header.indexOf(col);
-        return idx >= 0 ? (r[idx] ?? "").trim() : "";
-      };
-      const areaRows = await db.select().from(areas).where(eq(areas.active, true));
-      const areaByName = new Map(areaRows.map((a) => [a.name.toLowerCase(), a]));
-
-      const results = { imported: 0, skipped: 0, errors: [] as string[] };
-      for (let i = 1; i < rows.length; i++) {
-        const r = rows[i];
-        if (!r || !r.length) continue;
-        const employeeId = get(r, "employeeId");
-        const firstName = get(r, "firstName");
-        const lastName = get(r, "lastName");
-        if (!employeeId || !firstName || !lastName) { results.skipped++; continue; }
-        if (await getNurseByEmployeeId(employeeId)) { results.skipped++; continue; }
-        const area = areaByName.get(get(r, "currentArea").toLowerCase());
-        if (!area) { results.skipped++; continue; }
-        const id = await createNurse({
-          employeeId,
-          firstName,
-          middleName: get(r, "middleName") || null,
-          lastName,
-          suffix: get(r, "suffix") || null,
-          position: get(r, "position") || null,
-          dateHired: get(r, "dateHired") ? new Date(`${get(r, "dateHired")}T00:00:00`) : null,
-          employmentStatus: "Active" as never,
-          currentAreaId: area.id,
-        });
-        await createAssignment({ nurseId: id, areaId: area.id, startDate: new Date(), assignmentType: "Imported", isCurrent: true });
-        results.imported++;
-      }
-      await logActivity({
-        supervisorId: ctx.user.id,
-        actionType: "settings.csv.import",
-        entityType: "nurse",
-        summary: `CSV import completed: ${results.imported} imported, ${results.skipped} skipped`,
-      });
-      return results;
-    }),
-
-  exportData: adminProcedure
-    .input(z.object({ entity: z.enum(["nurses", "credentials", "trainings", "assignments", "all"]) }))
-    .query(async ({ input }) => {
-      const db = await getDb();
-      const out: Record<string, unknown[]> = {};
-
-      if (db) {
-        const fetches: Promise<void>[] = [];
-        if (input.entity === "nurses" || input.entity === "all") {
-          fetches.push(db.select().from(nurses).then((r) => { out.nurses = r; }));
-        }
-        if (input.entity === "credentials" || input.entity === "all") {
-          fetches.push(db.select().from(nurseCredentials).then((r) => { out.nurseCredentials = r; }));
-        }
-        if (input.entity === "trainings" || input.entity === "all") {
-          fetches.push(db.select().from(nurseTrainings).then((r) => { out.nurseTrainings = r; }));
-        }
-        if (input.entity === "assignments" || input.entity === "all") {
-          fetches.push(db.select().from(areaAssignments).then((r) => { out.areaAssignments = r; }));
-        }
-        await Promise.all(fetches);
-        return out;
-      }
-
-      const sqlite = getSqliteDb();
-      if (input.entity === "nurses" || input.entity === "all") {
-        out.nurses = sqlite.prepare("SELECT * FROM nurses").all() as any[];
-      }
-      if (input.entity === "credentials" || input.entity === "all") {
-        out.nurseCredentials = sqlite.prepare("SELECT * FROM nurseCredentials").all() as any[];
-      }
-      if (input.entity === "trainings" || input.entity === "all") {
-        out.nurseTrainings = sqlite.prepare("SELECT * FROM nurseTrainings").all() as any[];
-      }
-      if (input.entity === "assignments" || input.entity === "all") {
-        out.areaAssignments = sqlite.prepare("SELECT * FROM areaAssignments").all() as any[];
-      }
-      return out;
-    }),
-
-  emailStatus: adminProcedure.query(async () => {
-    const hasKey = Boolean(process.env.RESEND_API_KEY);
-    const fromAddress = process.env.EMAIL_FROM || "SKTI NurseTrack <onboarding@resend.dev>";
-    return {
-      configured: hasKey,
-      mode: hasKey ? "live" : "mock",
-      fromAddress,
-    };
-  }),
-
-  sendTestEmail: adminProcedure
-    .input(z.object({ targetEmail: z.string().email() }))
-    .mutation(async ({ ctx, input }) => {
-      const { sendEmail } = await import("../email/service");
-      const { renderDirectNoticeEmail } = await import("../email/templates");
-      const html = renderDirectNoticeEmail({
-        nurseName: ctx.user.name || "Administrator",
-        subject: "SKTI NurseTrack — Test Notification",
-        message: "This is a test notification confirming your email dispatch configuration is active and working properly.",
-        actionUrl: process.env.APP_URL || "http://localhost:3000",
-      });
-
-      const res = await sendEmail({
-        to: input.targetEmail,
-        subject: "SKTI NurseTrack — Email Configuration Test",
-        html,
-        nurseId: 0,
-        emailType: "manual_notice",
-        thresholdKey: "test",
-      });
-
-      return res;
-    }),
-
-  triggerEmailPassNow: adminProcedure.mutation(async () => {
-    const { acquireReminderLock, releaseReminderLock } = await import("../db");
-    const acquired = await acquireReminderLock();
-    if (!acquired) {
-      throw new TRPCError({ code: "CONFLICT", message: "Another email or reminder pass is currently in progress." });
-    }
-
-    try {
-      const { runLicenseExpiryEmailPass, runUpcomingSeminarEmailPass } = await import("../email/dispatcher");
-      const { getManilaDateKey } = await import("../scheduled");
-      const today = getManilaDateKey();
-      const expiry = await runLicenseExpiryEmailPass(today);
-      const seminars = await runUpcomingSeminarEmailPass();
-      return { expiry, seminars };
-    } finally {
-      await releaseReminderLock();
-    }
-  }),
-
-  listEmailLogs: adminProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(100).default(50) }).optional())
-    .query(async ({ input }) => {
-      const { listRecentEmailLogs } = await import("../db");
-      return listRecentEmailLogs(input?.limit ?? 50);
-    }),
 });
-
-function parseCsv(text: string): string[][] {
-  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter((l) => l.trim().length > 0);
-  return lines.map((line) => {
-    const cells: string[] = [];
-    let cell = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (inQuotes) {
-        if (ch === '"') {
-          if (i + 1 < line.length && line[i + 1] === '"') { cell += '"'; i++; } else { inQuotes = false; }
-        } else { cell += ch; }
-      } else if (ch === '"') { inQuotes = true; }
-      else if (ch === ",") { cells.push(cell.trim()); cell = ""; }
-      else { cell += ch; }
-    }
-    cells.push(cell.trim());
-    return cells;
-  });
-}
-

@@ -6,14 +6,11 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
-import { startDailyReminderScheduler } from "../scheduled";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { deduplicateDatabase } from "../deduplicate";
-import { seedExcelDatabase } from "../seedExcel";
 
 function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const server = net.createServer();
     server.listen(port, () => {
       server.close(() => resolve(true));
@@ -22,7 +19,7 @@ function isPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
+async function findAvailablePort(startPort = 3000): Promise<number> {
   for (let port = startPort; port < startPort + 20; port++) {
     if (await isPortAvailable(port)) {
       return port;
@@ -48,68 +45,13 @@ async function startServer() {
     }
   });
 
-  // Configure body parser with larger size limit for file uploads
+  // Body parser with size limit for document uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
   registerStorageProxy(app);
   registerOAuthRoutes(app);
-  app.post("/api/admin/import-staff-emails", async (req, res) => {
-    const { importStaffEmailsHandler } = await import("../importStaffEmails");
-    return importStaffEmailsHandler(req, res);
-  });
-  app.post("/api/admin/import-staff-roster", async (req, res) => {
-    const { importStaffRosterHandler } = await import("../importStaffRoster");
-    return importStaffRosterHandler(req, res);
-  });
-  app.post("/api/admin/import-staff-areas", async (req, res) => {
-    const { importStaffAreasHandler } = await import("../importStaffAreas");
-    return importStaffAreasHandler(req, res);
-  });
-  app.post("/api/admin/import-staff-trainings", async (req, res) => {
-    const { importStaffTrainingsHandler } = await import("../importStaffTrainings");
-    return importStaffTrainingsHandler(req, res);
-  });
-  // Rule-based Inquiry API endpoints
-  app.post("/api/inquiry", async (req, res) => {
-    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (process.env.INQUIRY_SERVICE_SECRET) {
-      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
-    }
-    try {
-      const resp = await fetch(`${serviceUrl}/api/inquiry`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(req.body),
-        signal: AbortSignal.timeout(5000),
-      });
-      const data = await resp.json();
-      return res.status(resp.status).json(data);
-    } catch {
-      return res.status(503).json({
-        success: false,
-        answer: "Inquiry service is currently unavailable. Please contact SPMC SKTI directly at (082) 227-2731 (local 4128/4129).",
-        match_type: "SERVICE_UNAVAILABLE",
-      });
-    }
-  });
-  app.get("/api/inquiry/topics", async (_req, res) => {
-    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
-    const headers: Record<string, string> = {};
-    if (process.env.INQUIRY_SERVICE_SECRET) {
-      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
-    }
-    try {
-      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, {
-        headers,
-        signal: AbortSignal.timeout(3000),
-      });
-      const data = await resp.json();
-      return res.status(resp.status).json(data);
-    } catch {
-      return res.status(503).json({ success: false, error: "Inquiry service unavailable" });
-    }
-  });
+
   // tRPC API
   app.use(
     "/api/trpc",
@@ -118,14 +60,15 @@ async function startServer() {
       createContext,
     })
   );
-  // development mode uses Vite, production mode uses static files
+
+  // Development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
+  const preferredPort = parseInt(process.env.PORT || "3000", 10);
   const port = await findAvailablePort(preferredPort);
 
   if (port !== preferredPort) {
@@ -133,21 +76,8 @@ async function startServer() {
   }
 
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+    console.log(`KTP server running on http://localhost:${port}/`);
   });
-
-  if (process.env.NODE_ENV === "production") {
-    startDailyReminderScheduler();
-    if (process.env.SEED_ON_BOOT === "1") {
-      seedExcelDatabase()
-        .then(async (res) => {
-          console.log("[Auto-Sync] Seeded database from workbook:", res);
-          const dedupRes = await deduplicateDatabase();
-          console.log("[Auto-Dedup] Database deduplication complete:", dedupRes);
-        })
-        .catch((err) => console.warn("[Auto-Sync] Warning during startup sync:", err));
-    }
-  }
 }
 
 startServer().catch(console.error);

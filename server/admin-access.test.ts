@@ -10,17 +10,15 @@ import { createContext } from "./_core/context";
 import { sdk } from "./_core/sdk";
 import { COOKIE_NAME } from "../shared/const";
 import { ENV } from "./_core/env";
-import { importStaffEmailsHandler } from "./importStaffEmails";
-import { importStaffRosterHandler } from "./importStaffRoster";
-import { importStaffAreasHandler } from "./importStaffAreas";
-import { importStaffTrainingsHandler } from "./importStaffTrainings";
+
 
 beforeAll(() => {
   vi.stubEnv("DATABASE_URL", "");
   state.sqlite = new Database(":memory:");
   state.sqlite.exec(`CREATE TABLE users (
     id INTEGER PRIMARY KEY, openId TEXT UNIQUE, name TEXT, email TEXT,
-    loginMethod TEXT, role TEXT DEFAULT 'user', lastSignedIn TEXT
+    loginMethod TEXT, role TEXT DEFAULT 'user', createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP, lastSignedIn TEXT
   )`);
 });
 beforeEach(() => state.sqlite!.exec("DELETE FROM users"));
@@ -43,7 +41,7 @@ it.each(["other@example.com", null])("demotes an existing account when its email
   await upsertUser({ openId: "changed", email });
   expect(state.sqlite!.prepare("SELECT role FROM users").get()).toEqual({ role: "user" });
   expect(await touchUserSession("changed")).toMatchObject({ role: "user", email });
-  expect(await touchUserSession("deleted")).toBeUndefined();
+  expect(await touchUserSession("deleted")).toBeNull();
 });
 
 it("blocks stale admin roles at the API boundary while preserving staff access", async () => {
@@ -101,12 +99,4 @@ it("ignores owner and admin environment overrides", async () => {
   } finally { Object.assign(ENV, previous); }
 });
 
-it.each([importStaffEmailsHandler, importStaffRosterHandler, importStaffAreasHandler, importStaffTrainingsHandler])("blocks stale admin on REST import %s", async handler => {
-  const spy = vi.spyOn(sdk, "authenticateRequest").mockResolvedValueOnce({ email: "other@example.com", role: "admin" } as any);
-  const res = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
-  try {
-    await handler({ body: {} } as any, res as any);
-    expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith({ error: "admin-only" });
-  } finally { spy.mockRestore(); }
-});
+

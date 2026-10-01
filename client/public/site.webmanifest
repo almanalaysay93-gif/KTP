@@ -1,11 +1,11 @@
 {
-  "name": "SKTI NurseTrack — SPMC Nephrology Cluster",
-  "short_name": "NurseTrack",
-  "description": "Southern Philippines Medical Center Kidney Transplant Institute Nurse & Attendant Monitoring Platform",
+  "name": "KTP - Kidney Transplant Patient Tracker",
+  "short_name": "KTP",
+  "description": "Kidney Transplant Institute Patient Registry and Tracker",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#122A5E",
+  "theme_color": "#e2e5d5",
   "icons": [
     {
       "src": "/branding/ots-mark.png",

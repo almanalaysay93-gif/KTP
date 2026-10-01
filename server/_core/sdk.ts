@@ -1,4 +1,4 @@
-import { AXIOS_TIMEOUT_MS, CLAIM_TTL_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
+import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
 import { randomBytes } from "crypto";
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
@@ -232,36 +232,6 @@ class SDKServer {
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
-      return null;
-    }
-  }
-
-  /**
-   * Sign a short-lived staff claim token binding one nurseId to the browser
-   * that identified via PRC/employee ID, before any Google login exists.
-   * Distinct `typ` claim keeps it from ever being accepted as a session token
-   * (and vice versa), even though both share the app's JWT secret.
-   */
-  async createClaimToken(nurseId: number): Promise<string> {
-    const secretKey = this.getSessionSecret();
-    const nonce = randomBytes(16).toString("hex");
-    const expirationSeconds = Math.floor((Date.now() + CLAIM_TTL_MS) / 1000);
-    return new SignJWT({ typ: "staff-claim", nurseId, nonce })
-      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setExpirationTime(expirationSeconds)
-      .sign(secretKey);
-  }
-
-  async verifyClaimToken(cookieValue: string | undefined | null): Promise<number | null> {
-    if (!cookieValue) return null;
-    try {
-      const secretKey = this.getSessionSecret();
-      const { payload } = await jwtVerify(cookieValue, secretKey, { algorithms: ["HS256"] });
-      if (payload.typ !== "staff-claim") return null;
-      const { nurseId } = payload as Record<string, unknown>;
-      return typeof nurseId === "number" && Number.isFinite(nurseId) ? nurseId : null;
-    } catch (error) {
-      console.warn("[Auth] Claim token verification failed", String(error));
       return null;
     }
   }

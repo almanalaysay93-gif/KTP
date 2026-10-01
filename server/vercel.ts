@@ -61,64 +61,6 @@ async function getApp(): Promise<express.Express> {
     }
   });
 
-  app.post("/api/admin/import-staff-emails", async (req, res) => {
-    const { importStaffEmailsHandler } = await import("./importStaffEmails");
-    return importStaffEmailsHandler(req, res);
-  });
-  app.post("/api/admin/import-staff-roster", async (req, res) => {
-    const { importStaffRosterHandler } = await import("./importStaffRoster");
-    return importStaffRosterHandler(req, res);
-  });
-  app.post("/api/admin/import-staff-areas", async (req, res) => {
-    const { importStaffAreasHandler } = await import("./importStaffAreas");
-    return importStaffAreasHandler(req, res);
-  });
-  app.post("/api/admin/import-staff-trainings", async (req, res) => {
-    const { importStaffTrainingsHandler } = await import("./importStaffTrainings");
-    return importStaffTrainingsHandler(req, res);
-  });
-  // Rule-based Inquiry API endpoints
-  app.post("/api/inquiry", async (req, res) => {
-    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (process.env.INQUIRY_SERVICE_SECRET) {
-      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
-    }
-    try {
-      const resp = await fetch(`${serviceUrl}/api/inquiry`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(req.body),
-        signal: AbortSignal.timeout(5000),
-      });
-      const data = await resp.json();
-      return res.status(resp.status).json(data);
-    } catch {
-      return res.status(503).json({
-        success: false,
-        answer: "Inquiry service is currently unavailable. Please contact SPMC SKTI directly at (082) 227-2731 (local 4128/4129).",
-        match_type: "SERVICE_UNAVAILABLE",
-      });
-    }
-  });
-  app.get("/api/inquiry/topics", async (_req, res) => {
-    const serviceUrl = process.env.INQUIRY_SERVICE_URL || "http://127.0.0.1:5005";
-    const headers: Record<string, string> = {};
-    if (process.env.INQUIRY_SERVICE_SECRET) {
-      headers["Authorization"] = `Bearer ${process.env.INQUIRY_SERVICE_SECRET}`;
-    }
-    try {
-      const resp = await fetch(`${serviceUrl}/api/inquiry/topics`, {
-        headers,
-        signal: AbortSignal.timeout(3000),
-      });
-      const data = await resp.json();
-      return res.status(resp.status).json(data);
-    } catch {
-      return res.status(503).json({ success: false, error: "Inquiry service unavailable" });
-    }
-  });
-
   app.use(
     "/api/trpc",
     createExpressMiddleware({

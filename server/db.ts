@@ -1,69 +1,47 @@
-import { dateKey, daysUntilExpiry, INACTIVE_EMPLOYMENT_STATUSES, renewalCycleKey, validateEffectivePrcDates } from "../shared/nursetrack";
-import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, like, lte, not, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import postgres from "postgres";
 import {
   activityLog,
   appSettings,
-  areaAssignments,
-  areaTrainingRequirements,
-  areas,
-  credentialTypes,
-  customCalendarEvents,
   emailLogs,
-  EmailLog,
-  InsertArea,
-  InsertEmailLog,
-  InsertNurse,
-  InsertUser,
-  licenseReminders,
   notifications,
-  nurseCredentials,
-  nurseTrainings,
-  nurses,
   storedFiles,
-  trainingCatalog,
-  trainingEvents,
   users,
+  type ActivityLog,
+  type AppSetting,
+  type Doctor,
+  type EmailLog,
+  type InsertActivityLog,
+  type InsertDoctor,
+  type InsertEmailLog,
+  type InsertNotification,
+  type InsertPatient,
+  type InsertStoredFile,
+  type InsertUser,
+  type Notification,
+  type Patient,
+  type StoredFile,
+  type User,
 } from "../drizzle/schema";
 import { FULL_ACCESS_EMAILS, roleForEmail } from "./adminAccess";
 import { getSqliteDb } from "./localDb";
 
 let _db: ReturnType<typeof drizzle> | null = null;
-
-/** Any drizzle Postgres database: the app's postgres-js client, or PGlite in tests. */
 export type PgDb = PgDatabase<PgQueryResultHKT, any>;
 let _batchPg: ReturnType<typeof postgres> | null = null;
-
-/** Drizzle condition: nurse counts as part of the active roster (not archived, not resigned/retired). */
-export function activeNurseCondition() {
-  return and(isNull(nurses.archivedAt), not(inArray(nurses.employmentStatus, INACTIVE_EMPLOYMENT_STATUSES as any)));
-}
-
-/** Same check for raw SQL (sqlite) `IN (...)` clauses. */
-export const INACTIVE_STATUS_SQL_LIST = INACTIVE_EMPLOYMENT_STATUSES.map((s) => `'${s}'`).join(", ");
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      // DATABASE_URL points at Supabase's transaction-mode pooler (pgbouncer on
-      // 6543), which shapes both settings below:
-      //   max — asking for a large connection burst from one serverless
-      //   invocation stalls behind the pooler instead of running in parallel, so
-      //   a small pool is deliberate. Round trips are saved by sending fewer
-      //   statements (see the dashboard's single multi-statement load), not by
-      //   opening more sockets.
-      //   prepare — a transaction-mode pooler hands each statement to whichever
-      //   backend is free, so a named prepared statement parsed on one backend
-      //   may not exist on the next.
       const client = postgres(process.env.DATABASE_URL, {
         max: 3,
         prepare: false,
         idle_timeout: 20,
         connect_timeout: 15,
         connection: {
-          search_path: "nursetrack, public",
+          search_path: "ktp, public",
         },
       });
       _db = drizzle(client);
@@ -75,16 +53,6 @@ export async function getDb() {
   return _db;
 }
 
-/**
- * Client for the rare read that is better expressed as one multi-statement
- * round trip than as several drizzle queries.
- *
- * This is deliberately a separate connection rather than the one drizzle wraps:
- * drizzle replaces postgres.js's type parsers with pass-throughs so it can map
- * columns itself, which leaves raw queries on its client returning every value
- * as a string. A client of our own keeps native parsing, so timestamps come back
- * as Date exactly as the equivalent drizzle queries returned them.
- */
 export function getBatchClient() {
   if (!_batchPg && process.env.DATABASE_URL) {
     _batchPg = postgres(process.env.DATABASE_URL, {
@@ -93,2301 +61,360 @@ export function getBatchClient() {
       idle_timeout: 20,
       connect_timeout: 15,
       connection: {
-        search_path: "nursetrack, public",
+        search_path: "ktp, public",
       },
     });
   }
   return _batchPg;
 }
 
+/* -------------------------------------------------------------------------- */
+/*                               USERS & AUTH                                 */
+/* -------------------------------------------------------------------------- */
+
 export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
-  if (db) {
-    const values: InsertUser = { openId: user.openId };
-    const updateSet: Record<string, unknown> = {};
-    const textFields = ["name", "email", "loginMethod"] as const;
-    for (const field of textFields) {
-      if (user[field] !== undefined) {
-        values[field] = user[field] ?? null;
-        updateSet[field] = user[field] ?? null;
-      }
-    }
-    values.role = roleForEmail(user.email);
-    updateSet.role = values.role;
-    if (!values.lastSignedIn) values.lastSignedIn = new Date();
-    if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-    await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
+  const effectiveRole = roleForEmail(user.email);
+  if (!db) {
+    const sqlite = getSqliteDb();
+    sqlite
+      .prepare(
+        `INSERT INTO users (openId, name, email, loginMethod, role, lastSignedIn)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(openId) DO UPDATE SET
+           name = excluded.name,
+           email = excluded.email,
+           loginMethod = excluded.loginMethod,
+           role = ?,
+           lastSignedIn = CURRENT_TIMESTAMP,
+           updatedAt = CURRENT_TIMESTAMP`
+      )
+      .run(user.openId, user.name, user.email, user.loginMethod, effectiveRole, effectiveRole);
     return;
   }
-  const sqlite = getSqliteDb();
-  const assignedRole = roleForEmail(user.email);
-  sqlite.prepare(`
-    INSERT INTO users (openId, name, email, loginMethod, role, lastSignedIn)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(openId) DO UPDATE SET
-      name = COALESCE(excluded.name, users.name),
-      email = excluded.email,
-      role = excluded.role,
-      lastSignedIn = CURRENT_TIMESTAMP
-  `).run(user.openId, user.name ?? null, user.email ?? null, user.loginMethod ?? "local", assignedRole);
-}
 
-/**
- * Session refresh for an already-authenticated request: stamp lastSignedIn and
- * enforce the email allowlist, returning the post-update row.
- *
- * This is the hot path — it runs on every authenticated request — so it is a
- * single UPDATE ... RETURNING rather than the read/existence-check/write/re-read
- * sequence it replaces. UPDATE (not upsert) is deliberate: a session whose
- * openId has no user row must still resolve to "not found" for the caller to
- * reject, never silently create an account.
- */
-export async function touchUserSession(openId: string) {
-  const db = await getDb();
-  if (db) {
-    const set = {
-      lastSignedIn: new Date(),
-      role: sql<"admin" | "user">`CASE WHEN lower(trim(${users.email})) IN (${FULL_ACCESS_EMAILS[0]}, ${FULL_ACCESS_EMAILS[1]}) THEN 'admin' ELSE 'user' END`,
-    };
-    const rows = await db.update(users).set(set).where(eq(users.openId, openId)).returning();
-    return rows.length > 0 ? rows[0] : undefined;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare(
-    "UPDATE users SET lastSignedIn = CURRENT_TIMESTAMP, role = CASE WHEN lower(trim(email)) IN (?, ?) THEN 'admin' ELSE 'user' END WHERE openId = ?",
-  ).run(...FULL_ACCESS_EMAILS, openId);
-  return sqlite.prepare("SELECT * FROM users WHERE openId = ?").get(openId) as any;
-}
-
-export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (db) {
-    const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-    return result.length > 0 ? result[0] : undefined;
-  }
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM users WHERE openId = ?").get(openId) as any;
-}
-
-/* ---------------- Areas ---------------- */
-export async function listAreas(includeInactive = true) {
-  const db = await getDb();
-  if (db) {
-    const q = includeInactive ? db.select().from(areas) : db.select().from(areas).where(eq(areas.active, true));
-    return await q.orderBy(asc(areas.sortOrder), asc(areas.name));
-  }
-  const sqlite = getSqliteDb();
-  const query = includeInactive
-    ? "SELECT * FROM areas ORDER BY sortOrder ASC, name ASC"
-    : "SELECT * FROM areas WHERE active = 1 ORDER BY sortOrder ASC, name ASC";
-  const rows = sqlite.prepare(query).all() as any[];
-  return rows.map((r) => ({ ...r, active: Boolean(r.active) }));
-}
-
-export async function createArea(data: InsertArea) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db.insert(areas).values(data).returning({ id: areas.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const res = sqlite.prepare("INSERT INTO areas (code, name, description, sortOrder, active) VALUES (?, ?, ?, ?, ?)").run(
-    data.code, data.name, data.description ?? null, data.sortOrder ?? 99, data.active !== false ? 1 : 0
-  );
-  return Number(res.lastInsertRowid);
-}
-
-export async function updateArea(id: number, data: Partial<InsertArea>) {
-  const db = await getDb();
-  if (db) {
-    await db.update(areas).set(data).where(eq(areas.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const sets: string[] = [];
-  const vals: any[] = [];
-  if (data.code !== undefined) { sets.push("code = ?"); vals.push(data.code); }
-  if (data.name !== undefined) { sets.push("name = ?"); vals.push(data.name); }
-  if (data.description !== undefined) { sets.push("description = ?"); vals.push(data.description); }
-  if (data.sortOrder !== undefined) { sets.push("sortOrder = ?"); vals.push(data.sortOrder); }
-  if (data.active !== undefined) { sets.push("active = ?"); vals.push(data.active ? 1 : 0); }
-  if (sets.length) {
-    vals.push(id);
-    sqlite.prepare(`UPDATE areas SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-  }
-}
-
-export async function getAreaById(id: number) {
-  const db = await getDb();
-  if (db) {
-    const rows = await db.select().from(areas).where(eq(areas.id, id)).limit(1);
-    return rows[0];
-  }
-  const sqlite = getSqliteDb();
-  const r = sqlite.prepare("SELECT * FROM areas WHERE id = ?").get(id) as any;
-  return r ? { ...r, active: Boolean(r.active) } : undefined;
-}
-
-/* ---------------- Nurses ---------------- */
-export async function createNurse(data: InsertNurse) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db.insert(nurses).values(data).returning({ id: nurses.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const res = sqlite.prepare(`
-    INSERT INTO nurses (employeeId, firstName, middleName, lastName, suffix, position, staffType, dateHired, employmentStatus, currentAreaId, profilePhotoKey, contactNumber, accountEmail, linkedUserId)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    data.employeeId, data.firstName, data.middleName ?? null, data.lastName, data.suffix ?? null,
-    data.position ?? null, data.staffType ?? "Registered Nurse", data.dateHired ? dateKey(data.dateHired as any) : null,
-    data.employmentStatus ?? "Active", data.currentAreaId ?? null, data.profilePhotoKey ?? null,
-    data.contactNumber ?? null, data.accountEmail ?? null, data.linkedUserId ?? null
-  );
-  return Number(res.lastInsertRowid);
-}
-
-export async function updateNurse(id: number, data: Partial<InsertNurse>) {
-  const db = await getDb();
-  if (db) {
-    await db.update(nurses).set(data).where(eq(nurses.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const sets: string[] = [];
-  const vals: any[] = [];
-  const fields = ["employeeId", "firstName", "middleName", "lastName", "suffix", "position", "staffType", "employmentStatus", "currentAreaId", "profilePhotoKey", "contactNumber", "accountEmail", "linkedUserId", "archivedAt"] as const;
-  for (const f of fields) {
-    if (data[f] !== undefined) {
-      sets.push(`${f} = ?`);
-      vals.push(data[f] instanceof Date ? data[f].toISOString().slice(0, 19).replace("T", " ") : data[f] ?? null);
-    }
-  }
-  if (data.dateHired !== undefined) {
-    sets.push("dateHired = ?");
-    vals.push(data.dateHired ? dateKey(data.dateHired as any) : null);
-  }
-  if (sets.length) {
-    vals.push(id);
-    sqlite.prepare(`UPDATE nurses SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-  }
-}
-
-export async function deleteNurse(id: number) {
-  const db = await getDb();
-  if (db) {
-    // Delete in dependency order, atomically: a partial delete would strand rows
-    // pointing at a nurse that no longer exists (there are no FK constraints).
-    await db.transaction(async (tx) => {
-      const credentialIds = (
-        await tx.select({ id: nurseCredentials.id }).from(nurseCredentials).where(eq(nurseCredentials.nurseId, id))
-      ).map((c) => c.id);
-      if (credentialIds.length) {
-        await tx.delete(licenseReminders).where(inArray(licenseReminders.credentialId, credentialIds));
-      }
-      await tx.delete(emailLogs).where(eq(emailLogs.nurseId, id));
-      await tx.delete(notifications).where(eq(notifications.nurseId, id));
-      await tx.delete(customCalendarEvents).where(eq(customCalendarEvents.nurseId, id));
-      await tx.delete(nurseTrainings).where(eq(nurseTrainings.nurseId, id));
-      await tx.delete(nurseCredentials).where(eq(nurseCredentials.nurseId, id));
-      await tx.delete(areaAssignments).where(eq(areaAssignments.nurseId, id));
-      await tx.delete(activityLog).where(eq(activityLog.nurseId, id));
-      await tx.delete(nurses).where(eq(nurses.id, id));
+  await db
+    .insert(users)
+    .values({ ...user, role: effectiveRole, lastSignedIn: new Date() })
+    .onConflictDoUpdate({
+      target: users.openId,
+      set: {
+        name: user.name,
+        email: user.email,
+        loginMethod: user.loginMethod,
+        role: effectiveRole,
+        lastSignedIn: new Date(),
+        updatedAt: new Date(),
+      },
     });
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.transaction(() => {
-    sqlite.prepare("DELETE FROM licenseReminders WHERE credentialId IN (SELECT id FROM nurseCredentials WHERE nurseId = ?)").run(id);
-    sqlite.prepare("DELETE FROM emailLogs WHERE nurseId = ?").run(id);
-    sqlite.prepare("DELETE FROM notifications WHERE nurseId = ?").run(id);
-    sqlite.prepare("DELETE FROM customCalendarEvents WHERE nurseId = ?").run(id);
-    sqlite.prepare("DELETE FROM nurseTrainings WHERE nurseId = ?").run(id);
-    sqlite.prepare("DELETE FROM nurseCredentials WHERE nurseId = ?").run(id);
-    sqlite.prepare("DELETE FROM areaAssignments WHERE nurseId = ?").run(id);
-    sqlite.prepare("DELETE FROM activityLog WHERE nurseId = ?").run(id);
-    sqlite.prepare("DELETE FROM nurses WHERE id = ?").run(id);
-  })();
 }
 
-export async function listNurses(opts: { archived?: boolean; areaId?: number; employmentStatus?: string } = {}) {
-  const db = await getDb();
-  if (db) {
-    const conds = [];
-    if (opts.archived === false) conds.push(isNull(nurses.archivedAt));
-    if (opts.archived === true) conds.push(isNotNull(nurses.archivedAt));
-    if (opts.areaId !== undefined) conds.push(eq(nurses.currentAreaId, opts.areaId));
-    if (opts.employmentStatus) conds.push(eq(nurses.employmentStatus, opts.employmentStatus as never));
-    const q = conds.length ? db.select().from(nurses).where(and(...conds)) : db.select().from(nurses);
-    return await q.orderBy(asc(nurses.lastName), asc(nurses.firstName));
-  }
-  const sqlite = getSqliteDb();
-  const conds: string[] = [];
-  const params: any[] = [];
-  if (opts.archived === false) conds.push("archivedAt IS NULL");
-  if (opts.archived === true) conds.push("archivedAt IS NOT NULL");
-  if (opts.areaId !== undefined) { conds.push("currentAreaId = ?"); params.push(opts.areaId); }
-  if (opts.employmentStatus) { conds.push("employmentStatus = ?"); params.push(opts.employmentStatus); }
-  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  return sqlite.prepare(`SELECT * FROM nurses ${where} ORDER BY lastName ASC, firstName ASC`).all(...params) as any[];
-}
-
-export async function getNurseByEmployeeId(employeeId: string) {
-  const db = await getDb();
-  if (db) {
-    const rows = await db.select().from(nurses).where(eq(nurses.employeeId, employeeId)).limit(1);
-    return rows[0];
-  }
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM nurses WHERE employeeId = ?").get(employeeId) as any;
-}
-
-/** The nurse record a given Google account (users.id) is linked to, if any. */
-export async function getNurseByLinkedUserId(userId: number) {
-  const db = await getDb();
-  if (db) {
-    const rows = await db.select().from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
-    return rows[0];
-  }
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM nurses WHERE linkedUserId = ?").get(userId) as any;
-}
-
-const normalizeForMatch = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-/** All nurseIds carrying a credential whose licenseNumber matches (normalized). */
-export async function findNurseIdsByLicenseNumber(licenseNumber: string): Promise<number[]> {
-  const normPrc = normalizeForMatch(licenseNumber);
-  const db = await getDb();
-  if (db) {
-    const credRows = await db
-      .select({ nurseId: nurseCredentials.nurseId, licenseNumber: nurseCredentials.licenseNumber })
-      .from(nurseCredentials)
-      .where(isNotNull(nurseCredentials.licenseNumber));
-    return credRows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
-  }
-  const sqlite = getSqliteDb();
-  const rows = sqlite.prepare("SELECT nurseId, licenseNumber FROM nurseCredentials WHERE licenseNumber IS NOT NULL").all() as any[];
-  return rows.filter((r) => r.licenseNumber && normalizeForMatch(r.licenseNumber) === normPrc).map((r) => r.nurseId);
-}
-
-/**
- * Bulk-populate nurses.accountEmail from an HR spreadsheet, matched by
- * license/PRC number. Skips license numbers matching zero or multiple
- * nurses (ambiguous). Does not set linkedUserId — that only happens when the
- * person actually signs in with that Google account (see autoLinkNurseByEmail).
- */
-export async function bulkSetAccountEmailsByLicense(
-  rows: Array<{ licenseNumber: string; email: string }>
-): Promise<{ matched: number; ambiguous: number; notFound: number }> {
-  const db = await getDb();
-  if (!db) return { matched: 0, ambiguous: 0, notFound: 0 };
-  let matched = 0, ambiguous = 0, notFound = 0;
-  for (const row of rows) {
-    if (!row.licenseNumber || !row.email) continue;
-    const nurseIds = await findNurseIdsByLicenseNumber(row.licenseNumber);
-    if (nurseIds.length === 0) { notFound++; continue; }
-    if (nurseIds.length > 1) { ambiguous++; continue; }
-    await db.update(nurses).set({ accountEmail: row.email }).where(eq(nurses.id, nurseIds[0]));
-    matched++;
-  }
-  return { matched, ambiguous, notFound };
-}
-
-/**
- * Called right after a Google login resolves. If this account's email
- * matches a nurse's claimed accountEmail (case-insensitive, A5) and that
- * nurse isn't linked to anyone yet, link them automatically — this is the
- * return-visit path in docs/plans/2026-09-15-staff-signin-claim-then-google-design.md
- * section 4.2.
- */
-export async function autoLinkNurseByEmail(userId: number, email: string | null | undefined): Promise<void> {
-  if (!email) return;
-  const norm = email.trim().toLowerCase();
-  if (!norm || isBlockedStaffEmail(norm)) return;
-
+export async function touchUserSession(openId: string): Promise<User | null> {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    // One Google account can only link to one nurse record
-    const existing = sqlite.prepare("SELECT id FROM nurses WHERE linkedUserId = ?").get(userId) as any;
-    if (existing) return;
-    const candidate = sqlite.prepare("SELECT id, linkedUserId, employmentStatus, archivedAt FROM nurses WHERE lower(accountEmail) = ?").get(norm) as any;
-    if (!candidate || candidate.archivedAt) return;
-    if ((INACTIVE_EMPLOYMENT_STATUSES as readonly string[]).includes(candidate.employmentStatus)) return;
-    sqlite.prepare("UPDATE nurses SET linkedUserId = ? WHERE id = ? AND lower(accountEmail) = ?").run(userId, candidate.id, norm);
-    return;
+    const existing = sqlite.prepare("SELECT * FROM users WHERE openId = ?").get(openId) as User | undefined;
+    if (!existing) return null;
+    const effectiveRole = roleForEmail(existing.email);
+    sqlite
+      .prepare("UPDATE users SET lastSignedIn = CURRENT_TIMESTAMP, role = ?, updatedAt = CURRENT_TIMESTAMP WHERE openId = ?")
+      .run(effectiveRole, openId);
+    return sqlite.prepare("SELECT * FROM users WHERE openId = ?").get(openId) as User;
   }
 
-  // Prevent one Google account from acquiring multiple nurse records
-  const existing = await db.select({ id: nurses.id }).from(nurses).where(eq(nurses.linkedUserId, userId)).limit(1);
-  if (existing.length > 0) return;
-
-  // Find candidate by normalized accountEmail
-  const rows = await db
-    .select({
-      id: nurses.id,
-      linkedUserId: nurses.linkedUserId,
-      employmentStatus: nurses.employmentStatus,
-      archivedAt: nurses.archivedAt,
-    })
-    .from(nurses)
-    .where(sql`lower(${nurses.accountEmail}) = ${norm}`)
-    .limit(1);
-
-  const candidate = rows[0];
-  if (!candidate || candidate.archivedAt) return;
-  if ((INACTIVE_EMPLOYMENT_STATUSES as readonly string[]).includes(candidate.employmentStatus)) return;
-
-  // Conditional update: ensures accountEmail is still norm and binds this user
-  await db
-    .update(nurses)
-    .set({ linkedUserId: userId })
-    .where(
-      and(
-        eq(nurses.id, candidate.id),
-        sql`lower(${nurses.accountEmail}) = ${norm}`,
-      ),
-    );
+  const existing = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  if (existing.length === 0) return null;
+  const effectiveRole = roleForEmail(existing[0].email);
+  const [updated] = await db
+    .update(users)
+    .set({ lastSignedIn: new Date(), role: effectiveRole, updatedAt: new Date() })
+    .where(eq(users.openId, openId))
+    .returning();
+  return updated ?? null;
 }
 
-/** True if this nurse can still run the first-visit claim (design doc section 6, E1). */
-export function isNurseClaimable(
-  nurse: { archivedAt: Date | null; employmentStatus: string; accountEmail: string | null } | undefined | null,
-): boolean {
-  if (!nurse) return false;
-  if (nurse.archivedAt) return false;
-  if ((INACTIVE_EMPLOYMENT_STATUSES as readonly string[]).includes(nurse.employmentStatus)) return false;
-  if (nurse.accountEmail) return false;
-  return true;
-}
-
-/** Any PRC/license number on file for this nurse (E3: an attendant with one must use PRC, not employee ID). */
-async function nurseHasLicenseNumber(nurseId: number): Promise<boolean> {
+export async function getUserByOpenId(openId: string): Promise<User | null> {
   const db = await getDb();
-  if (!db) return false;
-  const rows = await db
-    .select({ licenseNumber: nurseCredentials.licenseNumber })
-    .from(nurseCredentials)
-    .where(and(eq(nurseCredentials.nurseId, nurseId), isNotNull(nurseCredentials.licenseNumber)));
-  return rows.some((r) => (r.licenseNumber ?? "").trim().length > 0);
-}
-
-/**
- * First-visit identification: PRC/license number for a registered nurse, or
- * employee ID for an attendant with no PRC on file (D2, D5, D10). Every
- * failure shape — wrong number, archived, already-claimed, ambiguous PRC
- * (E2), a registered nurse trying employee ID (D2), or an attendant with a
- * PRC on file trying employee ID (E3) — comes back as the same `{ ok: false
- * }`, so the caller can show one generic message without leaking which case
- * happened (E1).
- */
-export async function claimNurseByIdentifier(
-  identifier: string,
-): Promise<{ ok: true; nurseId: number } | { ok: false }> {
-  const norm = identifier.trim();
-  if (!norm) return { ok: false };
-
-  const dbConn = await getDb();
-  if (!dbConn) return { ok: false };
-
-  const nurseIds = await findNurseIdsByLicenseNumber(norm);
-  if (nurseIds.length > 1) return { ok: false }; // E2: duplicate PRC on file
-  if (nurseIds.length === 1) {
-    const nurse = await getNurseById(nurseIds[0]);
-    return nurse && isNurseClaimable(nurse) ? { ok: true, nurseId: nurse.id } : { ok: false };
-  }
-
-  const byEmployeeId = await getNurseByEmployeeId(norm);
-  if (!byEmployeeId) return { ok: false };
-  if (byEmployeeId.staffType !== "Nursing Attendant") return { ok: false }; // D2: RNs use PRC only
-  if (await nurseHasLicenseNumber(byEmployeeId.id)) return { ok: false }; // E3
-  return isNurseClaimable(byEmployeeId) ? { ok: true, nurseId: byEmployeeId.id } : { ok: false };
-}
-
-function isBlockedStaffEmail(email: string): boolean {
-  const norm = email.trim().toLowerCase();
-  return (FULL_ACCESS_EMAILS as readonly string[]).some((e) => e.toLowerCase() === norm);
-}
-
-/**
- * End of first-visit claim (D3, section 4.3): writes accountEmail once,
- * guarded by `accountEmail IS NULL` so two concurrent saves for the same
- * nurse can't both win (E12 — first save wins, second fails), and by the
- * case-insensitive unique index so two different nurses can't land on the
- * same address (D9, E9).
- */
-export async function saveClaimEmail(
-  nurseId: number,
-  email: string,
-): Promise<{ ok: true } | { ok: false; reason: "in_use" | "already_claimed" }> {
-  const norm = email.trim().toLowerCase();
-  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
-
-  const dbConn = await getDb();
-  if (!dbConn) return { ok: false, reason: "already_claimed" };
-
-  try {
-    const rows = await dbConn
-      .update(nurses)
-      .set({ accountEmail: norm })
-      .where(and(eq(nurses.id, nurseId), isNull(nurses.accountEmail)))
-      .returning({ id: nurses.id });
-    if (rows.length === 0) return { ok: false, reason: "already_claimed" };
-    return { ok: true };
-  } catch (error: any) {
-    if (error?.code === "23505") return { ok: false, reason: "in_use" };
-    throw error;
-  }
-}
-
-/**
- * Supervisor-side set/clear of a nurse's sign-in email, from the Add/Edit
- * Nurse form. `email: null` clears both `accountEmail` and `linkedUserId`
- * (E10 — resets the row so first-visit claim can run again for a new
- * account); a value is validated the same as the staff-facing paths.
- */
-export async function adminSetNurseAccountEmail(
-  nurseId: number,
-  email: string | null,
-): Promise<{ ok: true } | { ok: false; reason: "in_use" }> {
-  const dbConn = await getDb();
-  if (!dbConn) {
+  if (!db) {
     const sqlite = getSqliteDb();
-    if (email === null) {
-      sqlite.prepare("UPDATE nurses SET accountEmail = NULL, linkedUserId = NULL WHERE id = ?").run(nurseId);
-      return { ok: true };
-    }
-    const norm = email.trim().toLowerCase();
-    if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
-    const existing = sqlite.prepare("SELECT id FROM nurses WHERE lower(accountEmail) = ? AND id != ?").get(norm, nurseId);
-    if (existing) return { ok: false, reason: "in_use" };
-    sqlite.prepare("UPDATE nurses SET accountEmail = ? WHERE id = ?").run(norm, nurseId);
-    return { ok: true };
-  }
-
-  if (email === null) {
-    await dbConn.update(nurses).set({ accountEmail: null, linkedUserId: null }).where(eq(nurses.id, nurseId));
-    return { ok: true };
-  }
-
-  const norm = email.trim().toLowerCase();
-  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
-
-  try {
-    const conflict = await dbConn
-      .select({ id: nurses.id })
-      .from(nurses)
-      .where(and(sql`lower(${nurses.accountEmail}) = ${norm}`, sql`${nurses.id} != ${nurseId}`))
-      .limit(1);
-    if (conflict.length > 0) return { ok: false, reason: "in_use" };
-
-    await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
-    return { ok: true };
-  } catch (error: any) {
-    if (error?.code === "23505") return { ok: false, reason: "in_use" };
-    throw error;
-  }
-}
-
-/**
- * Change accountEmail from an already-linked Google session (D6, section
- * 5.5). Not guarded by `accountEmail IS NULL` since this session already
- * owns the row — still subject to the same uniqueness rule.
- */
-export async function changeNurseAccountEmail(
-  nurseId: number,
-  email: string,
-): Promise<{ ok: true } | { ok: false; reason: "in_use" }> {
-  const norm = email.trim().toLowerCase();
-  if (isBlockedStaffEmail(norm)) return { ok: false, reason: "in_use" };
-
-  const dbConn = await getDb();
-  if (!dbConn) {
-    const sqlite = getSqliteDb();
-    const existing = sqlite.prepare("SELECT id FROM nurses WHERE lower(accountEmail) = ? AND id != ?").get(norm, nurseId);
-    if (existing) return { ok: false, reason: "in_use" };
-    sqlite.prepare("UPDATE nurses SET accountEmail = ? WHERE id = ?").run(norm, nurseId);
-    return { ok: true };
-  }
-
-  try {
-    const conflict = await dbConn
-      .select({ id: nurses.id })
-      .from(nurses)
-      .where(and(sql`lower(${nurses.accountEmail}) = ${norm}`, sql`${nurses.id} != ${nurseId}`))
-      .limit(1);
-    if (conflict.length > 0) return { ok: false, reason: "in_use" };
-
-    await dbConn.update(nurses).set({ accountEmail: norm }).where(eq(nurses.id, nurseId));
-    return { ok: true };
-  } catch (error: any) {
-    if (error?.code === "23505") return { ok: false, reason: "in_use" };
-    throw error;
-  }
-}
-
-function deriveLicenseStatusFromCred(cred: { renewalStatus: string; expiryDate: string | Date }): string {
-  if (cred.renewalStatus === "Renewed") return "Valid";
-  const days = Math.floor((parseLocalDate(cred.expiryDate).getTime() - parseLocalDate(todayDate()).getTime()) / 86400000);
-  if (days < 0) return "Expired";
-  if (days <= 180) return "Within 6 Months";
-  if (days <= 365) return "Within 1 Year";
-  return "Valid";
-}
-
-export interface NurseLicenseInfo {
-  status: string | null;
-  licenseNumber: string | null;
-  expiryDate: string | null;
-  daysRemaining: number | null;
-  issueDate?: string | null;
-}
-
-/** Status + license number + expiry details of a nurse's most current credential (latest expiryDate on file). */
-export async function getNurseLicenseInfo(nurseId: number): Promise<NurseLicenseInfo> {
-  const db = await getDb();
-  if (db) {
-    const rows = await db
-      .select()
-      .from(nurseCredentials)
-      .where(eq(nurseCredentials.nurseId, nurseId))
-      .orderBy(desc(nurseCredentials.expiryDate))
-      .limit(1);
-    const cred = rows[0];
-    if (!cred) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null, issueDate: null };
-    const expKey = dateKey(cred.expiryDate);
-    const days = expKey ? daysUntilExpiry(expKey) : null;
-    return {
-      status: deriveLicenseStatusFromCred(cred),
-      licenseNumber: cred.licenseNumber ?? null,
-      expiryDate: expKey || null,
-      daysRemaining: days,
-      issueDate: cred.issueDate ? dateKey(cred.issueDate) : null,
-    };
-  }
-  const sqlite = getSqliteDb();
-  const cred = sqlite.prepare("SELECT * FROM nurseCredentials WHERE nurseId = ? ORDER BY date(expiryDate) DESC LIMIT 1").get(nurseId) as any;
-  if (!cred) return { status: null, licenseNumber: null, expiryDate: null, daysRemaining: null, issueDate: null };
-  const expKey = dateKey(cred.expiryDate);
-  const days = expKey ? daysUntilExpiry(expKey) : null;
-  return {
-    status: deriveLicenseStatusFromCred(cred),
-    licenseNumber: cred.licenseNumber ?? null,
-    expiryDate: expKey || null,
-    daysRemaining: days,
-    issueDate: cred.issueDate ? dateKey(cred.issueDate) : null,
-  };
-}
-
-export async function getNurseLicenseStatus(nurseId: number): Promise<string | null> {
-  return (await getNurseLicenseInfo(nurseId)).status;
-}
-
-/**
- * Latest-expiring credential per nurse, one row each. DISTINCT ON keeps the
- * work in Postgres instead of shipping every credential row to the function.
- */
-export async function getLatestLicenseInfoPerNurse(db: PgDb): Promise<Map<number, NurseLicenseInfo>> {
-  const creds = await db
-    .selectDistinctOn([nurseCredentials.nurseId], {
-      nurseId: nurseCredentials.nurseId,
-      licenseNumber: nurseCredentials.licenseNumber,
-      expiryDate: nurseCredentials.expiryDate,
-      renewalStatus: nurseCredentials.renewalStatus,
-    })
-    .from(nurseCredentials)
-    .orderBy(nurseCredentials.nurseId, desc(nurseCredentials.expiryDate), desc(nurseCredentials.id));
-  const map = new Map<number, NurseLicenseInfo>();
-  for (const cred of creds) {
-    const expKey = dateKey(cred.expiryDate);
-    map.set(cred.nurseId, {
-      status: deriveLicenseStatusFromCred(cred),
-      licenseNumber: cred.licenseNumber ?? null,
-      expiryDate: expKey || null,
-      daysRemaining: expKey ? daysUntilExpiry(expKey) : null,
-    });
-  }
-  return map;
-}
-
-export async function getAllNurseLicenseInfos(): Promise<Map<number, NurseLicenseInfo>> {
-  const map = new Map<number, NurseLicenseInfo>();
-  const db = await getDb();
-  if (db) return getLatestLicenseInfoPerNurse(db);
-  const sqlite = getSqliteDb();
-  const creds = sqlite.prepare("SELECT * FROM nurseCredentials ORDER BY date(expiryDate) DESC").all() as any[];
-  for (const cred of creds) {
-    if (!map.has(cred.nurseId)) {
-      const expKey = dateKey(cred.expiryDate);
-      const days = expKey ? daysUntilExpiry(expKey) : null;
-      map.set(cred.nurseId, {
-        status: deriveLicenseStatusFromCred(cred),
-        licenseNumber: cred.licenseNumber ?? null,
-        expiryDate: expKey || null,
-        daysRemaining: days,
-      });
-    }
-  }
-  return map;
-}
-
-function parseLocalDate(value: string | Date): Date {
-  if (value instanceof Date) return value;
-  const [y, m, d] = String(value).split("-").map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
-}
-
-function todayDate(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-export async function getNurseById(id: number) {
-  const db = await getDb();
-  if (db) {
-    const rows = await db.select().from(nurses).where(eq(nurses.id, id)).limit(1);
-    return rows[0];
-  }
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM nurses WHERE id = ?").get(id) as any;
-}
-
-export async function searchNurses(query: string) {
-  const q = query.trim();
-  if (!q) return [];
-  const tokens = q.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return [];
-
-  const db = await getDb();
-  if (db) {
-    const tokenConditions = tokens.map((token) => {
-      const term = `%${token}%`;
-      return or(
-        ilike(nurses.firstName, term),
-        ilike(nurses.middleName, term),
-        ilike(nurses.lastName, term),
-        ilike(nurses.employeeId, term),
-      );
-    });
-    return await db
-      .select()
-      .from(nurses)
-      .where(and(isNull(nurses.archivedAt), ...tokenConditions))
-      .orderBy(asc(nurses.lastName), asc(nurses.firstName))
-      .limit(10);
-  }
-
-  const sqlite = getSqliteDb();
-  const tokenClauses = tokens.map(() => "(firstName LIKE ? OR middleName LIKE ? OR lastName LIKE ? OR employeeId LIKE ?)");
-  const params = tokens.flatMap((t) => [`%${t}%`, `%${t}%`, `%${t}%`, `%${t}%`]);
-  return sqlite.prepare(`
-    SELECT * FROM nurses 
-    WHERE archivedAt IS NULL AND ${tokenClauses.join(" AND ")}
-    ORDER BY lastName ASC, firstName ASC
-    LIMIT 10
-  `).all(...params) as any[];
-}
-
-/* ---------------- Area assignments ---------------- */
-export async function listAssignmentsForNurse(nurseId: number) {
-  const db = await getDb();
-  if (db) {
-    return await db
-      .select()
-      .from(areaAssignments)
-      .where(eq(areaAssignments.nurseId, nurseId))
-      .orderBy(desc(areaAssignments.startDate));
-  }
-  const sqlite = getSqliteDb();
-  const rows = sqlite.prepare("SELECT * FROM areaAssignments WHERE nurseId = ? ORDER BY date(startDate) DESC").all(nurseId) as any[];
-  return rows.map((r) => ({ ...r, isCurrent: Boolean(r.isCurrent) }));
-}
-
-export async function listAllActiveAssignments() {
-  const db = await getDb();
-  if (db) {
-    return await db
-      .select({
-        id: areaAssignments.id,
-        nurseId: areaAssignments.nurseId,
-        areaId: areaAssignments.areaId,
-        startDate: areaAssignments.startDate,
-        endDate: areaAssignments.endDate,
-        assignmentType: areaAssignments.assignmentType,
-        remarks: areaAssignments.remarks,
-        isCurrent: areaAssignments.isCurrent,
-      })
-      .from(areaAssignments)
-      .where(isNull(areaAssignments.endDate));
-  }
-  const sqlite = getSqliteDb();
-  const rows = sqlite.prepare("SELECT * FROM areaAssignments WHERE endDate IS NULL").all() as any[];
-  return rows.map((r) => ({ ...r, isCurrent: Boolean(r.isCurrent) }));
-}
-
-export async function createAssignment(data: { nurseId: number; areaId: number; startDate: Date | string; endDate?: Date | string | null; assignmentType?: string; remarks?: string; isCurrent?: boolean }) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db.insert(areaAssignments).values(data as any).returning({ id: areaAssignments.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const start = data.startDate instanceof Date ? data.startDate.toISOString().slice(0, 10) : String(data.startDate);
-  const end = data.endDate ? (data.endDate instanceof Date ? data.endDate.toISOString().slice(0, 10) : String(data.endDate)) : null;
-  const res = sqlite.prepare(`
-    INSERT INTO areaAssignments (nurseId, areaId, startDate, endDate, assignmentType, remarks, isCurrent)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(data.nurseId, data.areaId, start, end, data.assignmentType ?? null, data.remarks ?? null, data.isCurrent ? 1 : 0);
-  return Number(res.lastInsertRowid);
-}
-
-export async function closeAssignment(id: number, endDate: Date | string) {
-  const db = await getDb();
-  if (db) {
-    await db.update(areaAssignments).set({ endDate: endDate as any, isCurrent: false }).where(eq(areaAssignments.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const end = endDate instanceof Date ? endDate.toISOString().slice(0, 10) : String(endDate);
-  sqlite.prepare("UPDATE areaAssignments SET endDate = ?, isCurrent = 0 WHERE id = ?").run(end, id);
-}
-
-export async function clearCurrentAssignmentsForNurse(nurseId: number) {
-  const db = await getDb();
-  if (db) {
-    await db.update(areaAssignments).set({ isCurrent: false }).where(eq(areaAssignments.nurseId, nurseId));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("UPDATE areaAssignments SET isCurrent = 0 WHERE nurseId = ?").run(nurseId);
-}
-
-export async function getAssignmentsForArea(areaId: number) {
-  const db = await getDb();
-  if (db) {
-    const activeNurses = await db
-      .select()
-      .from(nurses)
-      .where(and(eq(nurses.currentAreaId, areaId), activeNurseCondition()))
-      .orderBy(asc(nurses.lastName), asc(nurses.firstName));
-    if (activeNurses.length === 0) return [];
-    const nurseIds = activeNurses.map((n) => n.id);
-    const asgns = await db
-      .select()
-      .from(areaAssignments)
-      .where(and(eq(areaAssignments.areaId, areaId), eq(areaAssignments.isCurrent, true), inArray(areaAssignments.nurseId, nurseIds)));
-    const asgnMap = new Map(asgns.map((a) => [a.nurseId, a]));
-    return activeNurses.map((nurse) => {
-      const a = asgnMap.get(nurse.id);
-      return {
-        assignment: a ?? {
-          id: 0,
-          nurseId: nurse.id,
-          areaId,
-          startDate: nurse.dateHired ?? new Date(),
-          endDate: null,
-          assignmentType: "Permanent Transfer",
-          remarks: null,
-          isCurrent: true,
-          createdAt: nurse.createdAt,
-          updatedAt: nurse.updatedAt,
-        },
-        nurse,
-      };
-    });
-  }
-  const sqlite = getSqliteDb();
-  const activeNurses = sqlite.prepare(`
-    SELECT * FROM nurses
-    WHERE currentAreaId = ? AND archivedAt IS NULL AND employmentStatus NOT IN (${INACTIVE_STATUS_SQL_LIST})
-    ORDER BY lastName ASC, firstName ASC
-  `).all(areaId) as any[];
-
-  if (activeNurses.length === 0) return [];
-  const nurseIds = activeNurses.map((n) => n.id);
-  const asgns = sqlite.prepare(`
-    SELECT * FROM areaAssignments
-    WHERE areaId = ? AND isCurrent = 1 AND nurseId IN (${nurseIds.join(", ")})
-  `).all(areaId) as any[];
-  const asgnMap = new Map(asgns.map((a: any) => [a.nurseId, a]));
-
-  return activeNurses.map((nurse: any) => {
-    const a = asgnMap.get(nurse.id);
-    return {
-      assignment: a ? {
-        id: a.id,
-        nurseId: a.nurseId,
-        areaId: a.areaId,
-        startDate: a.startDate,
-        endDate: a.endDate,
-        assignmentType: a.assignmentType,
-        remarks: a.remarks,
-        isCurrent: Boolean(a.isCurrent),
-      } : {
-        id: 0,
-        nurseId: nurse.id,
-        areaId,
-        startDate: nurse.dateHired ?? new Date().toISOString().slice(0, 10),
-        endDate: null,
-        assignmentType: "Permanent Transfer",
-        remarks: null,
-        isCurrent: true,
-      },
-      nurse: {
-        id: nurse.id,
-        employeeId: nurse.employeeId,
-        firstName: nurse.firstName,
-        middleName: nurse.middleName,
-        lastName: nurse.lastName,
-        suffix: nurse.suffix,
-        position: nurse.position,
-        staffType: nurse.staffType,
-        currentAreaId: nurse.currentAreaId,
-        archivedAt: nurse.archivedAt,
-      },
-    };
-  });
-}
-
-/* ---------------- Credentials (licenses) ---------------- */
-export async function listCredentials(opts: { nurseId?: number } = {}) {
-  const db = await getDb();
-  if (db) {
-    const q = opts.nurseId !== undefined
-      ? db.select().from(nurseCredentials).where(eq(nurseCredentials.nurseId, opts.nurseId))
-      : db.select().from(nurseCredentials);
-    return await q.orderBy(asc(nurseCredentials.expiryDate));
-  }
-  const sqlite = getSqliteDb();
-  if (opts.nurseId !== undefined) {
-    return sqlite.prepare("SELECT * FROM nurseCredentials WHERE nurseId = ? ORDER BY date(expiryDate) ASC").all(opts.nurseId) as any[];
-  }
-  return sqlite.prepare("SELECT * FROM nurseCredentials ORDER BY date(expiryDate) ASC").all() as any[];
-}
-
-export async function createCredential(data: {
-  nurseId: number; credentialTypeId: number; licenseNumber?: string; issuingOrganization?: string;
-  issueDate?: Date | string | null; expiryDate: Date | string; renewalStatus?: "Not Started" | "Renewal In Progress" | "Submitted" | "Renewed"; verificationStatus?: "Unverified" | "Pending Verification" | "Verified";
-  documentKey?: string; renewalCycleKey: string; remarks?: string;
-}) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db.insert(nurseCredentials).values(data as any).returning({ id: nurseCredentials.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const issue = data.issueDate ? (data.issueDate instanceof Date ? data.issueDate.toISOString().slice(0, 10) : String(data.issueDate)) : null;
-  const expiry = data.expiryDate instanceof Date ? data.expiryDate.toISOString().slice(0, 10) : String(data.expiryDate);
-  const res = sqlite.prepare(`
-    INSERT INTO nurseCredentials (nurseId, credentialTypeId, licenseNumber, issuingOrganization, issueDate, expiryDate, renewalStatus, verificationStatus, documentKey, renewalCycleKey, remarks)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    data.nurseId, data.credentialTypeId, data.licenseNumber ?? null, data.issuingOrganization ?? null,
-    issue, expiry, data.renewalStatus ?? "Not Started", data.verificationStatus ?? "Unverified",
-    data.documentKey ?? null, data.renewalCycleKey, data.remarks ?? null
-  );
-  return Number(res.lastInsertRowid);
-}
-
-export async function updateCredential(id: number, data: Partial<typeof nurseCredentials.$inferInsert>) {
-  const db = await getDb();
-  if (db) {
-    await db.update(nurseCredentials).set(data).where(eq(nurseCredentials.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const sets: string[] = [];
-  const vals: any[] = [];
-  const fields = ["licenseNumber", "issuingOrganization", "renewalStatus", "verificationStatus", "documentKey", "renewalCycleKey", "remarks"] as const;
-  for (const f of fields) {
-    if (data[f] !== undefined) { sets.push(`${f} = ?`); vals.push(data[f] ?? null); }
-  }
-  if (data.issueDate !== undefined) {
-    sets.push("issueDate = ?");
-    vals.push(data.issueDate ? (data.issueDate instanceof Date ? data.issueDate.toISOString().slice(0, 10) : String(data.issueDate)) : null);
-  }
-  if (data.expiryDate !== undefined) {
-    sets.push("expiryDate = ?");
-    vals.push(data.expiryDate instanceof Date ? data.expiryDate.toISOString().slice(0, 10) : String(data.expiryDate));
-  }
-  if (sets.length) {
-    vals.push(id);
-    sqlite.prepare(`UPDATE nurseCredentials SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-  }
-}
-
-/**
- * Upsert the PRC Registered Nurse License credential for a nurse.
- * Updates the existing PRC credential if found, or inserts a new one with a default 3-year validity.
- * Validates uniqueness across all other nurses to prevent collisions.
- */
-export async function upsertNursePrcLicense(
-  nurseId: number,
-  licenseNumber: string | null | undefined,
-  dates?: { issueDate?: Date | string | null; expiryDate?: Date | string | null },
-  options?: { credentialId?: number },
-): Promise<
-  | { ok: true; credentialId?: number }
-  | {
-      ok: false;
-      reason:
-        | "conflict"
-        | "missing_expiry"
-        | "invalid_dates"
-        | "not_found"
-        | "invalid_credential_type";
-    }
-> {
-  const norm = licenseNumber !== undefined ? (licenseNumber ? licenseNumber.trim() : null) : undefined;
-  if (norm) {
-    const matchingNurseIds = await findNurseIdsByLicenseNumber(norm);
-    const hasConflict = matchingNurseIds.some((id) => id !== nurseId);
-    if (hasConflict) {
-      return { ok: false, reason: "conflict" };
-    }
-  }
-
-  const creds = await listCredentials({ nurseId });
-  const types = await listCredentialTypes(true);
-  const prcType = types.find((t) => t.name.toLowerCase().includes("prc")) ?? types[0];
-
-  let existingPrc: (typeof creds)[0] | undefined;
-  if (options?.credentialId !== undefined) {
-    existingPrc = creds.find((c) => c.id === options.credentialId);
-    if (!existingPrc) return { ok: false, reason: "not_found" };
-    if (prcType && existingPrc.credentialTypeId !== prcType.id) {
-      return { ok: false, reason: "invalid_credential_type" };
-    }
-  } else {
-    existingPrc = creds.find((c) => prcType && c.credentialTypeId === prcType.id);
-  }
-
-  if (existingPrc) {
-    let effectiveDates;
-    try {
-      effectiveDates = validateEffectivePrcDates({
-        existingIssueDate: existingPrc.issueDate,
-        existingExpiryDate: existingPrc.expiryDate,
-        patchIssueDate: dates?.issueDate,
-        patchExpiryDate: dates?.expiryDate,
-      });
-    } catch (err: any) {
-      if (err?.message === "Expiry date is required.") {
-        return { ok: false, reason: "missing_expiry" };
-      }
-      return { ok: false, reason: "invalid_dates" };
-    }
-
-    const existingNorm = existingPrc.licenseNumber ? existingPrc.licenseNumber.trim() : null;
-    const incomingNorm = licenseNumber !== undefined ? norm : existingNorm;
-    const isNumberChanged = licenseNumber !== undefined && existingNorm !== incomingNorm;
-
-    const existingIssueKey = existingPrc.issueDate ? dateKey(existingPrc.issueDate) : "";
-    const incomingIssueKey = effectiveDates.effectiveIssueDate ? dateKey(effectiveDates.effectiveIssueDate) : "";
-    const isIssueChanged = dates?.issueDate !== undefined && existingIssueKey !== incomingIssueKey;
-
-    const existingExpiryKey = existingPrc.expiryDate ? dateKey(existingPrc.expiryDate) : "";
-    const incomingExpiryKey = dateKey(effectiveDates.effectiveExpiryDate);
-    const isExpiryChanged = dates?.expiryDate !== undefined && existingExpiryKey !== incomingExpiryKey;
-
-    const isDetailsChanged = isNumberChanged || isIssueChanged || isExpiryChanged;
-
-    const patch: Record<string, unknown> = {};
-    if (licenseNumber !== undefined) {
-      patch.licenseNumber = norm;
-    }
-    if (dates?.issueDate !== undefined) {
-      patch.issueDate = effectiveDates.effectiveIssueDate;
-    }
-    if (dates?.expiryDate !== undefined) {
-      patch.expiryDate = effectiveDates.effectiveExpiryDate;
-      if (isExpiryChanged) {
-        patch.renewalCycleKey = renewalCycleKey(`${existingPrc.id}-${effectiveDates.effectiveExpiryDate.toISOString()}`);
-      }
-    }
-    if (isDetailsChanged) {
-      patch.verificationStatus = "Pending Verification";
-    }
-
-    if (Object.keys(patch).length > 0) {
-      await updateCredential(existingPrc.id, patch);
-    }
-    return { ok: true, credentialId: existingPrc.id };
-  }
-
-  // Creating a new PRC credential
-  if (norm !== undefined || dates?.issueDate !== undefined || dates?.expiryDate !== undefined) {
-    if (!norm && dates?.expiryDate === undefined && dates?.issueDate === undefined) {
-      return { ok: true };
-    }
-    // F9: Do not fabricate validity dates (never default to +3 years)
-    if (dates?.expiryDate === undefined || dates?.expiryDate === null || dates?.expiryDate === "") {
-      return { ok: false, reason: "missing_expiry" };
-    }
-
-    let effectiveDates;
-    try {
-      effectiveDates = validateEffectivePrcDates({
-        patchIssueDate: dates?.issueDate,
-        patchExpiryDate: dates?.expiryDate,
-      });
-    } catch (err: any) {
-      if (err?.message === "Expiry date is required.") {
-        return { ok: false, reason: "missing_expiry" };
-      }
-      return { ok: false, reason: "invalid_dates" };
-    }
-
-    const typeId = prcType ? prcType.id : 1;
-    const credId = await createCredential({
-      nurseId,
-      credentialTypeId: typeId,
-      licenseNumber: norm ?? undefined,
-      issuingOrganization: prcType?.issuingOrganizationDefault || "Professional Regulation Commission (PRC)",
-      issueDate: effectiveDates.effectiveIssueDate ?? undefined,
-      expiryDate: effectiveDates.effectiveExpiryDate,
-      renewalStatus: "Not Started",
-      verificationStatus: "Pending Verification",
-      renewalCycleKey: renewalCycleKey(`prc-${nurseId}-${Date.now()}`),
-    });
-    await updateCredential(credId, {
-      renewalCycleKey: renewalCycleKey(`${credId}-${effectiveDates.effectiveExpiryDate.toISOString()}`),
-    });
-    return { ok: true, credentialId: credId };
-  }
-
-  return { ok: true };
-}
-
-export async function listCredentialTypes(includeInactive = true) {
-  const db = await getDb();
-  if (db) {
-    const q = includeInactive ? db.select().from(credentialTypes) : db.select().from(credentialTypes).where(eq(credentialTypes.active, true));
-    return await q.orderBy(asc(credentialTypes.name));
-  }
-  const sqlite = getSqliteDb();
-  const query = includeInactive ? "SELECT * FROM credentialTypes ORDER BY name ASC" : "SELECT * FROM credentialTypes WHERE active = 1 ORDER BY name ASC";
-  const rows = sqlite.prepare(query).all() as any[];
-  return rows.map((r) => ({ ...r, active: Boolean(r.active) }));
-}
-
-export async function createCredentialType(name: string, issuingOrganizationDefault?: string) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db
-      .insert(credentialTypes)
-      .values({ name, issuingOrganizationDefault })
-      .returning({ id: credentialTypes.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const res = sqlite.prepare("INSERT INTO credentialTypes (name, issuingOrganizationDefault, active) VALUES (?, ?, 1)").run(name, issuingOrganizationDefault ?? null);
-  return Number(res.lastInsertRowid);
-}
-
-export async function updateCredentialType(id: number, data: { name?: string; issuingOrganizationDefault?: string; active?: boolean }) {
-  const db = await getDb();
-  if (db) {
-    await db.update(credentialTypes).set(data).where(eq(credentialTypes.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const sets: string[] = [];
-  const vals: any[] = [];
-  if (data.name !== undefined) { sets.push("name = ?"); vals.push(data.name); }
-  if (data.issuingOrganizationDefault !== undefined) { sets.push("issuingOrganizationDefault = ?"); vals.push(data.issuingOrganizationDefault); }
-  if (data.active !== undefined) { sets.push("active = ?"); vals.push(data.active ? 1 : 0); }
-  if (sets.length) {
-    vals.push(id);
-    sqlite.prepare(`UPDATE credentialTypes SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-  }
-}
-
-/* ---------------- License reminders ---------------- */
-export async function listReminders() {
-  const db = await getDb();
-  if (db) return await db.select().from(licenseReminders).orderBy(desc(licenseReminders.generatedAt));
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM licenseReminders ORDER BY date(generatedAt) DESC").all() as any[];
-}
-
-export async function createReminder(data: { credentialId: number; thresholdDays: number; renewalCycleKey: string; triggerDate: Date | string }): Promise<number> {
-  const db = await getDb();
-  if (db) {
-    const existing = await db
-      .select({ id: licenseReminders.id })
-      .from(licenseReminders)
-      .where(and(eq(licenseReminders.credentialId, data.credentialId), eq(licenseReminders.thresholdDays, data.thresholdDays), eq(licenseReminders.renewalCycleKey, data.renewalCycleKey)))
-      .limit(1);
-    if (existing.length > 0) return existing[0].id;
-    const [row] = await db.insert(licenseReminders).values(data as any).returning({ id: licenseReminders.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const existing = sqlite.prepare("SELECT id FROM licenseReminders WHERE credentialId = ? AND thresholdDays = ? AND renewalCycleKey = ?").get(data.credentialId, data.thresholdDays, data.renewalCycleKey) as any;
-  if (existing) return existing.id;
-  const trigger = data.triggerDate instanceof Date ? data.triggerDate.toISOString().slice(0, 10) : String(data.triggerDate);
-  const res = sqlite.prepare("INSERT INTO licenseReminders (credentialId, thresholdDays, renewalCycleKey, triggerDate) VALUES (?, ?, ?, ?)").run(data.credentialId, data.thresholdDays, data.renewalCycleKey, trigger);
-  return Number(res.lastInsertRowid);
-}
-
-export async function acknowledgeReminder(id: number) {
-  const db = await getDb();
-  if (db) {
-    await db.update(licenseReminders).set({ acknowledgedAt: new Date(), status: "acknowledged" }).where(eq(licenseReminders.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("UPDATE licenseReminders SET acknowledgedAt = CURRENT_TIMESTAMP, status = 'acknowledged' WHERE id = ?").run(id);
-}
-
-export async function markReminderExpiredByCredential(credentialId: number) {
-  const db = await getDb();
-  if (db) {
-    await db.update(licenseReminders).set({ status: "expired" }).where(eq(licenseReminders.credentialId, credentialId));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("UPDATE licenseReminders SET status = 'expired' WHERE credentialId = ?").run(credentialId);
-}
-
-/* ---------------- Training ---------------- */
-export async function listTrainingCatalog(includeInactive = false) {
-  const db = await getDb();
-  if (db) {
-    const q = includeInactive ? db.select().from(trainingCatalog) : db.select().from(trainingCatalog).where(eq(trainingCatalog.active, true));
-    return await q.orderBy(asc(trainingCatalog.name));
-  }
-  const sqlite = getSqliteDb();
-  const query = includeInactive ? "SELECT * FROM trainingCatalog ORDER BY name ASC" : "SELECT * FROM trainingCatalog WHERE active = 1 ORDER BY name ASC";
-  const rows = sqlite.prepare(query).all() as any[];
-  return rows.map((r) => ({ ...r, active: Boolean(r.active), renewalRequired: Boolean(r.renewalRequired) }));
-}
-
-export async function createTrainingType(data: { name: string; category?: string; kind?: "Training" | "Seminar" | "LDI"; renewalRequired?: boolean; defaultValidityMonths?: number | null }) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db.insert(trainingCatalog).values(data as any).returning({ id: trainingCatalog.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const res = sqlite.prepare("INSERT INTO trainingCatalog (name, category, kind, renewalRequired, defaultValidityMonths, active) VALUES (?, ?, ?, ?, ?, 1)").run(
-    data.name, data.category ?? null, data.kind ?? "Training", data.renewalRequired ? 1 : 0, data.defaultValidityMonths ?? null
-  );
-  return Number(res.lastInsertRowid);
-}
-
-export async function updateTrainingType(id: number, data: Partial<typeof trainingCatalog.$inferInsert>) {
-  const db = await getDb();
-  if (db) {
-    await db.update(trainingCatalog).set(data).where(eq(trainingCatalog.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const sets: string[] = [];
-  const vals: any[] = [];
-  if (data.name !== undefined) { sets.push("name = ?"); vals.push(data.name); }
-  if (data.category !== undefined) { sets.push("category = ?"); vals.push(data.category); }
-  if (data.kind !== undefined) { sets.push("kind = ?"); vals.push(data.kind); }
-  if (data.renewalRequired !== undefined) { sets.push("renewalRequired = ?"); vals.push(data.renewalRequired ? 1 : 0); }
-  if (data.defaultValidityMonths !== undefined) { sets.push("defaultValidityMonths = ?"); vals.push(data.defaultValidityMonths); }
-  if (data.active !== undefined) { sets.push("active = ?"); vals.push(data.active ? 1 : 0); }
-  if (sets.length) {
-    vals.push(id);
-    sqlite.prepare(`UPDATE trainingCatalog SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-  }
-}
-
-export async function listNurseTrainings(opts: { nurseId?: number } = {}) {
-  const db = await getDb();
-  if (db) {
-    const q = opts.nurseId !== undefined
-      ? db.select().from(nurseTrainings).where(eq(nurseTrainings.nurseId, opts.nurseId))
-      : db.select().from(nurseTrainings);
-    return await q.orderBy(desc(nurseTrainings.scheduledDate));
-  }
-  const sqlite = getSqliteDb();
-  if (opts.nurseId !== undefined) {
-    return sqlite.prepare("SELECT * FROM nurseTrainings WHERE nurseId = ? ORDER BY date(scheduledDate) DESC").all(opts.nurseId) as any[];
-  }
-  return sqlite.prepare("SELECT * FROM nurseTrainings ORDER BY date(scheduledDate) DESC").all() as any[];
-}
-
-export async function createNurseTraining(data: Partial<typeof nurseTrainings.$inferInsert> & { nurseId: number; trainingId: number }) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db.insert(nurseTrainings).values(data as any).returning({ id: nurseTrainings.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const sched = data.scheduledDate ? (data.scheduledDate instanceof Date ? data.scheduledDate.toISOString().slice(0, 10) : String(data.scheduledDate)) : null;
-  const comp = data.completionDate ? (data.completionDate instanceof Date ? data.completionDate.toISOString().slice(0, 10) : String(data.completionDate)) : null;
-  const exp = data.expiryDate ? (data.expiryDate instanceof Date ? data.expiryDate.toISOString().slice(0, 10) : String(data.expiryDate)) : null;
-  const res = sqlite.prepare(`
-    INSERT INTO nurseTrainings (
-      nurseId, trainingId, eventId, participationRole, provider, status, scheduledDate, completionDate, expiryDate,
-      trainingHours, cpdUnits, certificateNumber, certificateKey, remarks, scheduleVersion, staffResponse,
-      staffResponseReason, attendanceOutcome, evidenceStatus, evidenceRequired, conflictOverrideReason, conflictOverrideBy
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    data.nurseId,
-    data.trainingId,
-    data.eventId ?? null,
-    data.participationRole ?? "Participant",
-    data.provider ?? null,
-    data.status ?? "Scheduled",
-    sched,
-    comp,
-    exp,
-    data.trainingHours ?? null,
-    data.cpdUnits ?? null,
-    data.certificateNumber ?? null,
-    data.certificateKey ?? null,
-    data.remarks ?? null,
-    data.scheduleVersion ?? 1,
-    data.staffResponse ?? "Pending",
-    data.staffResponseReason ?? null,
-    data.attendanceOutcome ?? "not_recorded",
-    data.evidenceStatus ?? "None",
-    data.evidenceRequired !== undefined ? (data.evidenceRequired ? 1 : 0) : 0,
-    data.conflictOverrideReason ?? null,
-    data.conflictOverrideBy ?? null
-  );
-  return Number(res.lastInsertRowid);
-}
-
-export async function updateNurseTraining(id: number, data: Partial<typeof nurseTrainings.$inferInsert>) {
-  const db = await getDb();
-  if (db) {
-    await db.update(nurseTrainings).set(data).where(eq(nurseTrainings.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const sets: string[] = [];
-  const vals: any[] = [];
-  const fields = [
-    "status",
-    "participationRole",
-    "provider",
-    "trainingHours",
-    "cpdUnits",
-    "certificateNumber",
-    "certificateKey",
-    "remarks",
-    "scheduleVersion",
-    "staffResponse",
-    "staffResponseReason",
-    "staffResponseVersion",
-    "attendanceOutcome",
-    "attendanceRecordedBy",
-    "attendanceNote",
-    "evidenceStatus",
-    "evidenceRequired",
-    "evidenceReviewedBy",
-    "evidenceReviewNote",
-    "conflictOverrideReason",
-    "conflictOverrideBy",
-  ] as const;
-  for (const f of fields) {
-    if (data[f] !== undefined) {
-      sets.push(`${f} = ?`);
-      vals.push(data[f] ?? null);
-    }
-  }
-  if (data.scheduledDate !== undefined) {
-    sets.push("scheduledDate = ?");
-    vals.push(data.scheduledDate ? (data.scheduledDate instanceof Date ? data.scheduledDate.toISOString().slice(0, 10) : String(data.scheduledDate)) : null);
-  }
-  if (data.completionDate !== undefined) {
-    sets.push("completionDate = ?");
-    vals.push(data.completionDate ? (data.completionDate instanceof Date ? data.completionDate.toISOString().slice(0, 10) : String(data.completionDate)) : null);
-  }
-  if (data.expiryDate !== undefined) {
-    sets.push("expiryDate = ?");
-    vals.push(data.expiryDate ? (data.expiryDate instanceof Date ? data.expiryDate.toISOString().slice(0, 10) : String(data.expiryDate)) : null);
-  }
-  if (data.staffRespondedAt !== undefined) {
-    sets.push("staffRespondedAt = ?");
-    vals.push(data.staffRespondedAt ? (data.staffRespondedAt instanceof Date ? data.staffRespondedAt.toISOString() : String(data.staffRespondedAt)) : null);
-  }
-  if (data.attendanceRecordedAt !== undefined) {
-    sets.push("attendanceRecordedAt = ?");
-    vals.push(data.attendanceRecordedAt ? (data.attendanceRecordedAt instanceof Date ? data.attendanceRecordedAt.toISOString() : String(data.attendanceRecordedAt)) : null);
-  }
-  if (data.evidenceSubmittedAt !== undefined) {
-    sets.push("evidenceSubmittedAt = ?");
-    vals.push(data.evidenceSubmittedAt ? (data.evidenceSubmittedAt instanceof Date ? data.evidenceSubmittedAt.toISOString() : String(data.evidenceSubmittedAt)) : null);
-  }
-  if (data.evidenceReviewedAt !== undefined) {
-    sets.push("evidenceReviewedAt = ?");
-    vals.push(data.evidenceReviewedAt ? (data.evidenceReviewedAt instanceof Date ? data.evidenceReviewedAt.toISOString() : String(data.evidenceReviewedAt)) : null);
-  }
-  if (sets.length) {
-    vals.push(id);
-    sqlite.prepare(`UPDATE nurseTrainings SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-  }
-}
-
-export async function deleteNurseTraining(id: number) {
-  const db = await getDb();
-  if (db) {
-    return db.transaction(async (tx) => {
-      const [record] = await tx.select().from(nurseTrainings).where(eq(nurseTrainings.id, id)).limit(1);
-      if (!record) return null;
-      await tx.delete(nurseTrainings).where(eq(nurseTrainings.id, id));
-      return record;
-    });
-  }
-  const sqlite = getSqliteDb();
-  return sqlite.transaction(() => {
-    const record = sqlite.prepare("SELECT * FROM nurseTrainings WHERE id = ?").get(id) as typeof nurseTrainings.$inferSelect | undefined;
-    if (!record) return null;
-    sqlite.prepare("DELETE FROM nurseTrainings WHERE id = ?").run(id);
-    return record;
-  })();
-}
-
-/** Find an existing occurrence for a training on the given dates, or create one. Used by CSV import. */
-export async function findOrCreateTrainingEvent(data: {
-  trainingId: number;
-  startDate: Date | string;
-  endDate: Date | string;
-  provider?: string | null;
-  venue?: string | null;
-  remarks?: string | null;
-}): Promise<{ id: number; created: boolean }> {
-  const startKey = dateKey(data.startDate);
-  const endKey = dateKey(data.endDate) || startKey;
-  if (!startKey) throw new Error("findOrCreateTrainingEvent requires a valid startDate");
-  const start = new Date(`${startKey}T00:00:00Z`);
-  const end = new Date(`${endKey}T00:00:00Z`);
-
-  const db = await getDb();
-  if (db) {
-    const [existing] = await db
-      .select({ id: trainingEvents.id })
-      .from(trainingEvents)
-      .where(and(eq(trainingEvents.trainingId, data.trainingId), eq(trainingEvents.startDate, start), eq(trainingEvents.endDate, end)))
-      .limit(1);
-    if (existing) return { id: existing.id, created: false };
-    const [row] = await db
-      .insert(trainingEvents)
-      .values({
-        trainingId: data.trainingId,
-        startDate: start,
-        endDate: end,
-        provider: data.provider ?? null,
-        venue: data.venue ?? null,
-        remarks: data.remarks ?? null,
-      })
-      .returning({ id: trainingEvents.id });
-    return { id: row.id, created: true };
-  }
-
-  const sqlite = getSqliteDb();
-  const existing = sqlite
-    .prepare("SELECT id FROM trainingEvents WHERE trainingId = ? AND startDate = ? AND endDate = ? LIMIT 1")
-    .get(data.trainingId, startKey, endKey) as { id: number } | undefined;
-  if (existing) return { id: existing.id, created: false };
-  const res = sqlite
-    .prepare("INSERT INTO trainingEvents (trainingId, provider, venue, startDate, endDate, remarks) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(data.trainingId, data.provider ?? null, data.venue ?? null, startKey, endKey, data.remarks ?? null);
-  return { id: Number(res.lastInsertRowid), created: true };
-}
-
-export async function getNurseTrainingById(id: number) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db.select().from(nurseTrainings).where(eq(nurseTrainings.id, id)).limit(1);
+    const row = sqlite.prepare("SELECT * FROM users WHERE openId = ?").get(openId) as User | undefined;
     return row ?? null;
   }
-  const sqlite = getSqliteDb();
-  return (sqlite.prepare("SELECT * FROM nurseTrainings WHERE id = ?").get(id) as typeof nurseTrainings.$inferSelect | undefined) ?? null;
+  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  return result[0] ?? null;
 }
 
-/** Look up an attendance/training record by its natural key, so re-imports do not duplicate rows. */
-export async function findNurseTrainingByKey(params: {
-  nurseId: number;
-  trainingId: number;
-  completionDate?: Date | string | null;
-  eventId?: number | null;
-}): Promise<{ id: number } | null> {
-  const compKey = dateKey(params.completionDate ?? null);
-
+export async function getUserById(id: number): Promise<User | null> {
   const db = await getDb();
-  if (db) {
-    const conditions = [eq(nurseTrainings.nurseId, params.nurseId), eq(nurseTrainings.trainingId, params.trainingId)];
-    if (params.eventId != null) conditions.push(eq(nurseTrainings.eventId, params.eventId));
-    conditions.push(compKey ? eq(nurseTrainings.completionDate, new Date(`${compKey}T00:00:00Z`)) : isNull(nurseTrainings.completionDate));
-    const [row] = await db.select({ id: nurseTrainings.id }).from(nurseTrainings).where(and(...conditions)).limit(1);
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const row = sqlite.prepare("SELECT * FROM users WHERE id = ?").get(id) as User | undefined;
     return row ?? null;
   }
-
-  const sqlite = getSqliteDb();
-  const clauses = ["nurseId = ?", "trainingId = ?"];
-  const vals: any[] = [params.nurseId, params.trainingId];
-  if (params.eventId != null) {
-    clauses.push("eventId = ?");
-    vals.push(params.eventId);
-  }
-  if (compKey) {
-    clauses.push("completionDate = ?");
-    vals.push(compKey);
-  } else {
-    clauses.push("completionDate IS NULL");
-  }
-  const row = sqlite.prepare(`SELECT id FROM nurseTrainings WHERE ${clauses.join(" AND ")} LIMIT 1`).get(...vals) as { id: number } | undefined;
-  return row ?? null;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result[0] ?? null;
 }
 
-export async function deleteTrainingEvent(id: number) {
-  const db = await getDb();
-  if (db) {
-    return db.transaction(async (tx) => {
-      const [selected] = await tx
-        .select({ event: trainingEvents, training: trainingCatalog })
-        .from(trainingEvents)
-        .innerJoin(trainingCatalog, eq(trainingCatalog.id, trainingEvents.trainingId))
-        .where(eq(trainingEvents.id, id))
-        .limit(1);
-      if (!selected) return null;
-      const attendance = await tx.select({ id: nurseTrainings.id }).from(nurseTrainings).where(eq(nurseTrainings.eventId, id));
-      await tx.delete(nurseTrainings).where(eq(nurseTrainings.eventId, id));
-      await tx.delete(trainingEvents).where(eq(trainingEvents.id, id));
-      return { ...selected, attendanceDeleted: attendance.length };
-    });
-  }
-  const sqlite = getSqliteDb();
-  return sqlite.transaction(() => {
-    const selected = sqlite.prepare(`
-      SELECT e.*, c.id AS catalogId, c.name AS trainingName, c.kind AS trainingKind
-      FROM trainingEvents e
-      INNER JOIN trainingCatalog c ON c.id = e.trainingId
-      WHERE e.id = ?
-    `).get(id) as ({
-      id: number;
-      trainingId: number;
-      startDate: string;
-      catalogId: number;
-      trainingName: string;
-      trainingKind: "Training" | "Seminar" | "LDI";
-    } & Record<string, unknown>) | undefined;
-    if (!selected) return null;
-    const attendanceDeleted = Number((sqlite.prepare("SELECT COUNT(*) AS count FROM nurseTrainings WHERE eventId = ?").get(id) as { count: number }).count);
-    sqlite.prepare("DELETE FROM nurseTrainings WHERE eventId = ?").run(id);
-    sqlite.prepare("DELETE FROM trainingEvents WHERE id = ?").run(id);
-    const { catalogId, trainingName, trainingKind, ...event } = selected;
-    return {
-      event,
-      training: { id: catalogId, name: trainingName, kind: trainingKind },
-      attendanceDeleted,
-    };
-  })();
-}
+/* -------------------------------------------------------------------------- */
+/*                            PATIENTS & DOCTORS                              */
+/* -------------------------------------------------------------------------- */
 
-export async function deleteTrainingCatalogItem(id: number) {
-  const db = await getDb();
-  if (db) {
-    return db.transaction(async (tx) => {
-      const [catalog] = await tx.select().from(trainingCatalog).where(eq(trainingCatalog.id, id)).limit(1);
-      if (!catalog) return null;
-      const attendance = await tx.select({ id: nurseTrainings.id }).from(nurseTrainings).where(eq(nurseTrainings.trainingId, id));
-      const events = await tx.select({ id: trainingEvents.id }).from(trainingEvents).where(eq(trainingEvents.trainingId, id));
-      await tx.delete(nurseTrainings).where(eq(nurseTrainings.trainingId, id));
-      await tx.delete(trainingEvents).where(eq(trainingEvents.trainingId, id));
-      await tx.delete(areaTrainingRequirements).where(eq(areaTrainingRequirements.trainingId, id));
-      await tx.delete(trainingCatalog).where(eq(trainingCatalog.id, id));
-      return {
-        catalog,
-        eventsDeleted: events.length,
-        attendanceDeleted: attendance.length,
-      };
-    });
-  }
-  const sqlite = getSqliteDb();
-  return sqlite.transaction(() => {
-    const catalog = sqlite.prepare("SELECT * FROM trainingCatalog WHERE id = ?").get(id) as typeof trainingCatalog.$inferSelect | undefined;
-    if (!catalog) return null;
-    const attendanceDeleted = Number((sqlite.prepare("SELECT COUNT(*) AS count FROM nurseTrainings WHERE trainingId = ?").get(id) as { count: number }).count);
-    const eventsDeleted = Number((sqlite.prepare("SELECT COUNT(*) AS count FROM trainingEvents WHERE trainingId = ?").get(id) as { count: number }).count);
-    sqlite.prepare("DELETE FROM nurseTrainings WHERE trainingId = ?").run(id);
-    sqlite.prepare("DELETE FROM trainingEvents WHERE trainingId = ?").run(id);
-    sqlite.prepare("DELETE FROM areaTrainingRequirements WHERE trainingId = ?").run(id);
-    sqlite.prepare("DELETE FROM trainingCatalog WHERE id = ?").run(id);
-    return {
-      catalog: {
-        ...catalog,
-        active: Boolean(catalog.active),
-        renewalRequired: Boolean(catalog.renewalRequired),
-      },
-      eventsDeleted,
-      attendanceDeleted,
-    };
-  })();
-}
+export * from "./dbPatients";
 
-export async function getAreaTrainingRequirementIds(areaId: number) {
-  const db = await getDb();
-  if (db) {
-    const rows = await db
-      .select({ trainingId: areaTrainingRequirements.trainingId })
-      .from(areaTrainingRequirements)
-      .where(and(eq(areaTrainingRequirements.areaId, areaId), eq(areaTrainingRequirements.required, true)));
-    return rows.map((r) => r.trainingId);
-  }
-  const sqlite = getSqliteDb();
-  const rows = sqlite.prepare("SELECT trainingId FROM areaTrainingRequirements WHERE areaId = ? AND required = 1").all(areaId) as { trainingId: number }[];
-  return rows.map((r) => r.trainingId);
-}
 
-/** Every required (area, training) pair. */
-export async function listRequiredTrainings(): Promise<{ areaId: number; trainingId: number }[]> {
-  const db = await getDb();
-  if (db) {
-    return db
-      .select({ areaId: areaTrainingRequirements.areaId, trainingId: areaTrainingRequirements.trainingId })
-      .from(areaTrainingRequirements)
-      .where(eq(areaTrainingRequirements.required, true));
-  }
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT areaId, trainingId FROM areaTrainingRequirements WHERE required = 1").all() as { areaId: number; trainingId: number }[];
-}
 
-export async function setAreaTrainingRequirement(areaId: number, trainingId: number, required: boolean) {
-  const db = await getDb();
-  if (db) {
-    await db
-      .insert(areaTrainingRequirements)
-      .values({ areaId, trainingId, required })
-      .onConflictDoUpdate({
-        target: [areaTrainingRequirements.areaId, areaTrainingRequirements.trainingId],
-        set: { required },
-      });
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("INSERT INTO areaTrainingRequirements (areaId, trainingId, required) VALUES (?, ?, ?) ON CONFLICT(areaId, trainingId) DO UPDATE SET required = excluded.required").run(areaId, trainingId, required ? 1 : 0);
-}
+/* -------------------------------------------------------------------------- */
+/*                                  SETTINGS                                  */
+/* -------------------------------------------------------------------------- */
 
-/* ---------------- Calendar events ---------------- */
-export async function listCustomEvents(opts: { from?: Date | string; to?: Date | string; nurseId?: number; areaId?: number } = {}) {
-  const db = await getDb();
-  if (db) {
-    const conds = [];
-    if (opts.from) conds.push(gte(customCalendarEvents.eventDate, opts.from as any));
-    if (opts.to) conds.push(lte(customCalendarEvents.eventDate, opts.to as any));
-    if (opts.nurseId !== undefined) conds.push(eq(customCalendarEvents.nurseId, opts.nurseId));
-    if (opts.areaId !== undefined) conds.push(eq(customCalendarEvents.areaId, opts.areaId));
-    const q = conds.length ? db.select().from(customCalendarEvents).where(and(...conds)) : db.select().from(customCalendarEvents);
-    return await q.orderBy(asc(customCalendarEvents.eventDate));
-  }
-  const sqlite = getSqliteDb();
-  const conds: string[] = [];
-  const params: any[] = [];
-  if (opts.from) { conds.push("date(eventDate) >= date(?)"); params.push(opts.from instanceof Date ? opts.from.toISOString().slice(0, 10) : String(opts.from)); }
-  if (opts.to) { conds.push("date(eventDate) <= date(?)"); params.push(opts.to instanceof Date ? opts.to.toISOString().slice(0, 10) : String(opts.to)); }
-  if (opts.nurseId !== undefined) { conds.push("nurseId = ?"); params.push(opts.nurseId); }
-  if (opts.areaId !== undefined) { conds.push("areaId = ?"); params.push(opts.areaId); }
-  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const rows = sqlite.prepare(`SELECT * FROM customCalendarEvents ${where} ORDER BY date(eventDate) ASC`).all(...params) as any[];
-  return rows.map((r) => ({ ...r, allDay: Boolean(r.allDay) }));
-}
-
-export async function createCustomEvent(data: {
-  title: string; eventDate: Date | string; startTime?: string | null; endTime?: string | null; allDay?: boolean;
-  nurseId?: number | null; areaId?: number | null; description?: string;
-}) {
-  const db = await getDb();
-  if (db) {
-    const [row] = await db.insert(customCalendarEvents).values(data as any).returning({ id: customCalendarEvents.id });
-    return row.id;
-  }
-  const sqlite = getSqliteDb();
-  const dateStr = data.eventDate instanceof Date ? data.eventDate.toISOString().slice(0, 10) : String(data.eventDate);
-  const res = sqlite.prepare("INSERT INTO customCalendarEvents (title, eventDate, startTime, endTime, allDay, nurseId, areaId, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
-    data.title, dateStr, data.startTime ?? null, data.endTime ?? null, data.allDay !== false ? 1 : 0, data.nurseId ?? null, data.areaId ?? null, data.description ?? null
-  );
-  return Number(res.lastInsertRowid);
-}
-
-export async function updateCustomEvent(id: number, data: Partial<typeof customCalendarEvents.$inferInsert>) {
-  const db = await getDb();
-  if (db) {
-    await db.update(customCalendarEvents).set(data).where(eq(customCalendarEvents.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const sets: string[] = [];
-  const vals: any[] = [];
-  if (data.title !== undefined) { sets.push("title = ?"); vals.push(data.title); }
-  if (data.eventDate !== undefined) { sets.push("eventDate = ?"); vals.push(data.eventDate instanceof Date ? data.eventDate.toISOString().slice(0, 10) : String(data.eventDate)); }
-  if (data.startTime !== undefined) { sets.push("startTime = ?"); vals.push(data.startTime); }
-  if (data.endTime !== undefined) { sets.push("endTime = ?"); vals.push(data.endTime); }
-  if (data.allDay !== undefined) { sets.push("allDay = ?"); vals.push(data.allDay ? 1 : 0); }
-  if (data.nurseId !== undefined) { sets.push("nurseId = ?"); vals.push(data.nurseId); }
-  if (data.areaId !== undefined) { sets.push("areaId = ?"); vals.push(data.areaId); }
-  if (data.description !== undefined) { sets.push("description = ?"); vals.push(data.description); }
-  if (sets.length) {
-    vals.push(id);
-    sqlite.prepare(`UPDATE customCalendarEvents SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-  }
-}
-
-export async function deleteCustomEvent(id: number) {
-  const db = await getDb();
-  if (db) {
-    await db.delete(customCalendarEvents).where(eq(customCalendarEvents.id, id));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("DELETE FROM customCalendarEvents WHERE id = ?").run(id);
-}
-
-/* ---------------- Notifications ---------------- */
-export function getNotificationLogicalKey(n: {
-  id?: number;
-  type: string;
-  nurseId?: number | null;
-  relatedEntityType?: string | null;
-  relatedEntityId?: number | null;
-  title?: string | null;
-}): string {
-  if (n.type === "license.expired") {
-    return `license.expired:${n.nurseId ?? ""}:${n.relatedEntityType ?? ""}:${n.relatedEntityId ?? ""}`;
-  }
-  if (n.type === "license.renewalReminder") {
-    const prefix = (n.title ?? "").split(" — ")[0].trim();
-    return `license.renewalReminder:${n.nurseId ?? ""}:${n.relatedEntityType ?? ""}:${n.relatedEntityId ?? ""}:${prefix}`;
-  }
-  if (n.relatedEntityType && n.relatedEntityId) {
-    return `${n.type}:${n.nurseId ?? ""}:${n.relatedEntityType}:${n.relatedEntityId}`;
-  }
-  return `notif:${n.id ?? Math.random()}`;
-}
-
-export async function listNotifications(limit = 100) {
-  const db = await getDb();
-  let rawRows: any[] = [];
-  if (db) {
-    rawRows = await db.select().from(notifications).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(limit * 3);
-  } else {
-    const sqlite = getSqliteDb();
-    rawRows = sqlite.prepare("SELECT * FROM notifications ORDER BY datetime(createdAt) DESC, id DESC LIMIT ?").all(limit * 3) as any[];
-  }
-
-  const seen = new Set<string>();
-  const deduplicated: any[] = [];
-  for (const row of rawRows) {
-    const key = getNotificationLogicalKey(row);
-    if (!seen.has(key)) {
-      seen.add(key);
-      deduplicated.push(row);
-      if (deduplicated.length >= limit) break;
-    }
-  }
-  return deduplicated;
-}
-
-/**
- * SQL form of getNotificationLogicalKey. Keep the two in step: the pglite test
- * in notification-count.test.ts compares them row for row.
- */
-const notificationLogicalKeySql = sql`case
-  when ${notifications.type} = 'license.expired' then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', coalesce(${notifications.relatedEntityType}, ''), ':', coalesce(${notifications.relatedEntityId}::text, ''))
-  when ${notifications.type} = 'license.renewalReminder' then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', coalesce(${notifications.relatedEntityType}, ''), ':', coalesce(${notifications.relatedEntityId}::text, ''), ':', btrim(split_part(coalesce(${notifications.title}, ''), ' — ', 1)))
-  when coalesce(${notifications.relatedEntityType}, '') <> '' and coalesce(${notifications.relatedEntityId}, 0) <> 0 then concat(${notifications.type}, ':', coalesce(${notifications.nurseId}::text, ''), ':', ${notifications.relatedEntityType}, ':', ${notifications.relatedEntityId}::text)
-  else concat('notif:', ${notifications.id}::text)
-end`;
-
-/** Unread count with duplicates collapsed, computed in one aggregate query. */
-export async function countUnreadNotificationsPg(db: PgDb): Promise<number> {
-  const [row] = await db
-    .select({ count: sql<number>`count(distinct ${notificationLogicalKeySql})::int` })
-    .from(notifications)
-    .where(isNull(notifications.readAt));
-  return Number(row?.count ?? 0);
-}
-
-export async function countUnreadNotifications() {
-  const db = await getDb();
-  if (db) return countUnreadNotificationsPg(db);
-  const sqlite = getSqliteDb();
-  const unreadRows = sqlite.prepare("SELECT * FROM notifications WHERE readAt IS NULL").all() as any[];
-
-  const seen = new Set<string>();
-  for (const row of unreadRows) {
-    const key = getNotificationLogicalKey(row);
-    seen.add(key);
-  }
-  return seen.size;
-}
-
-export async function createNotification(data: { type: string; severity: string; title: string; message?: string; nurseId?: number | null; relatedEntityType?: string; relatedEntityId?: number | null; dayKey?: string }): Promise<number> {
-  const db = await getDb();
-  if (db) {
-    const dayKey = data.dayKey != null ? new Date(data.dayKey + "T00:00:00") : new Date(todayDate().slice(0, 10) + "T00:00:00");
-    await db
-      .insert(notifications)
-      .values({
-        type: data.type,
-        severity: data.severity,
-        title: data.title,
-        message: data.message ?? null,
-        nurseId: data.nurseId ?? null,
-        relatedEntityType: data.relatedEntityType ?? null,
-        relatedEntityId: data.relatedEntityId ?? null,
-        dayKey,
-      })
-      .onConflictDoNothing();
-    return 1;
-  }
-  const sqlite = getSqliteDb();
-  const dayKey = data.dayKey ?? todayDate();
-  const res = sqlite.prepare("INSERT INTO notifications (type, severity, title, message, nurseId, relatedEntityType, relatedEntityId, dayKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
-    data.type, data.severity, data.title, data.message ?? null, data.nurseId ?? null, data.relatedEntityType ?? null, data.relatedEntityId ?? null, dayKey
-  );
-  return Number(res.lastInsertRowid);
-}
-
-export async function createNotificationsBatch(data: Array<{ type: string; severity: string; title: string; message?: string; nurseId?: number | null; relatedEntityType?: string; relatedEntityId?: number | null; dayKey?: string }>): Promise<void> {
-  if (data.length === 0) return;
-  const db = await getDb();
-  if (db) {
-    const rawRows = data.map((d) => ({
-      type: d.type,
-      severity: d.severity,
-      title: d.title,
-      message: d.message ?? null,
-      nurseId: d.nurseId ?? null,
-      relatedEntityType: d.relatedEntityType ?? null,
-      relatedEntityId: d.relatedEntityId ?? null,
-      dayKey: d.dayKey != null ? new Date(d.dayKey + "T00:00:00") : new Date(todayDate().slice(0, 10) + "T00:00:00"),
-    }));
-    // Deduplicate in-memory to prevent Postgres "cannot affect row a second time" batch conflict error
-    const seen = new Set<string>();
-    const rows = rawRows.filter((r) => {
-      const k = `${r.type}:${r.nurseId}:${r.relatedEntityType}:${r.relatedEntityId}:${dateKey(r.dayKey)}`;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-    if (rows.length > 0) {
-      await db.insert(notifications).values(rows).onConflictDoNothing();
-    }
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const insert = sqlite.prepare("INSERT OR IGNORE INTO notifications (type, severity, title, message, nurseId, relatedEntityType, relatedEntityId, dayKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-  const insertAll = sqlite.transaction((rows: typeof data) => {
-    for (const d of rows) {
-      insert.run(d.type, d.severity, d.title, d.message ?? null, d.nurseId ?? null, d.relatedEntityType ?? null, d.relatedEntityId ?? null, d.dayKey ?? todayDate());
-    }
-  });
-  insertAll(data);
-}
-
-export async function markNotificationRead(id: number) {
-  const db = await getDb();
-  if (db) {
-    const target = await db.select().from(notifications).where(eq(notifications.id, id)).limit(1);
-    if (target.length > 0) {
-      const t = target[0];
-      if (t.relatedEntityType && t.relatedEntityId) {
-        await db.update(notifications)
-          .set({ readAt: new Date() })
-          .where(sql`${notifications.type} = ${t.type} AND (${notifications.nurseId} = ${t.nurseId} OR (${notifications.nurseId} IS NULL AND ${t.nurseId} IS NULL)) AND ${notifications.relatedEntityType} = ${t.relatedEntityType} AND ${notifications.relatedEntityId} = ${t.relatedEntityId} AND ${notifications.readAt} IS NULL`);
-      } else {
-        await db.update(notifications).set({ readAt: new Date() }).where(eq(notifications.id, id));
-      }
-    }
-    return;
-  }
-  const sqlite = getSqliteDb();
-  const target = sqlite.prepare("SELECT * FROM notifications WHERE id = ?").get(id) as any;
-  if (target && target.relatedEntityType && target.relatedEntityId) {
-    sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE type = ? AND (nurseId = ? OR (nurseId IS NULL AND ? IS NULL)) AND relatedEntityType = ? AND relatedEntityId = ? AND readAt IS NULL")
-      .run(target.type, target.nurseId ?? null, target.nurseId ?? null, target.relatedEntityType, target.relatedEntityId);
-  } else {
-    sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-  }
-}
-
-export async function markAllNotificationsRead() {
-  const db = await getDb();
-  if (db) {
-    await db.update(notifications).set({ readAt: new Date() }).where(isNull(notifications.readAt));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("UPDATE notifications SET readAt = CURRENT_TIMESTAMP WHERE readAt IS NULL").run();
-}
-
-/* ---------------- Activity log ---------------- */
-export async function logActivity(data: { supervisorId?: number | null; nurseId?: number | null; actionType: string; entityType?: string; entityId?: number | null; summary: string; metadata?: Record<string, unknown> | null }) {
-  const db = await getDb();
-  if (db) {
-    await db.insert(activityLog).values(data);
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("INSERT INTO activityLog (supervisorId, nurseId, actionType, entityType, entityId, summary, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
-    data.supervisorId ?? null, data.nurseId ?? null, data.actionType, data.entityType ?? null, data.entityId ?? null, data.summary, data.metadata ? JSON.stringify(data.metadata) : null
-  );
-}
-
-export async function listActivityForNurse(nurseId: number) {
-  const db = await getDb();
-  if (db) return await db.select().from(activityLog).where(eq(activityLog.nurseId, nurseId)).orderBy(desc(activityLog.createdAt)).limit(200);
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM activityLog WHERE nurseId = ? ORDER BY date(createdAt) DESC LIMIT 200").all(nurseId) as any[];
-}
-
-/* ---------------- Settings ---------------- */
 export async function getSetting(key: string): Promise<string | null> {
   const db = await getDb();
-  if (db) {
-    const rows = await db.select().from(appSettings).where(eq(appSettings.key, key)).limit(1);
-    return rows[0]?.value ?? null;
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const row = sqlite.prepare("SELECT value FROM appSettings WHERE key = ?").get(key) as { value: string } | undefined;
+    return row?.value ?? null;
   }
-  const sqlite = getSqliteDb();
-  const row = sqlite.prepare("SELECT value FROM appSettings WHERE key = ?").get(key) as any;
-  return row?.value ?? null;
+  const [match] = await db.select({ value: appSettings.value }).from(appSettings).where(eq(appSettings.key, key)).limit(1);
+  return match?.value ?? null;
 }
 
-export async function setSetting(key: string, value: string | null) {
+export async function setSetting(key: string, value: string): Promise<void> {
   const db = await getDb();
-  if (db) {
-    await db.insert(appSettings).values({ key, value }).onConflictDoUpdate({ target: appSettings.key, set: { value } });
+  if (!db) {
+    const sqlite = getSqliteDb();
+    sqlite
+      .prepare(
+        `INSERT INTO appSettings (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = CURRENT_TIMESTAMP`
+      )
+      .run(key, value);
     return;
   }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("INSERT INTO appSettings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+  await db
+    .insert(appSettings)
+    .values({ key, value })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value, updatedAt: new Date() },
+    });
 }
 
-export async function getAllSettings() {
+export async function getAllSettings(): Promise<Record<string, string>> {
   const db = await getDb();
-  if (db) return await db.select().from(appSettings);
-  const sqlite = getSqliteDb();
-  return sqlite.prepare("SELECT * FROM appSettings").all() as any[];
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const rows = sqlite.prepare("SELECT key, value FROM appSettings").all() as { key: string; value: string }[];
+    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  }
+  const rows = await db.select({ key: appSettings.key, value: appSettings.value }).from(appSettings);
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
-/* ---------------- Aggregates ---------------- */
-export async function countActiveNurses(today?: Date) {
+/* -------------------------------------------------------------------------- */
+/*                                ACTIVITY LOG                                */
+/* -------------------------------------------------------------------------- */
+
+export async function logActivity(
+  actorUserId: number | null,
+  patientId: number | null,
+  action: string,
+  details?: unknown,
+  ipAddress?: string | null,
+  userAgent?: string | null
+): Promise<void> {
+  const detailsStr = details ? (typeof details === "string" ? details : JSON.stringify(details)) : null;
   const db = await getDb();
-  if (db) {
-    const rows = await db.select({ count: sql<number>`count(*)` }).from(nurses).where(activeNurseCondition());
-    return Number(rows[0]?.count ?? 0);
+  if (!db) {
+    const sqlite = getSqliteDb();
+    sqlite
+      .prepare("INSERT INTO activityLog (actorUserId, patientId, action, details, ipAddress, userAgent) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(actorUserId, patientId, action, detailsStr, ipAddress ?? null, userAgent ?? null);
+    return;
   }
-  const sqlite = getSqliteDb();
-  const row = sqlite.prepare(`SELECT count(*) as count FROM nurses WHERE archivedAt IS NULL AND employmentStatus NOT IN (${INACTIVE_STATUS_SQL_LIST})`).get() as { count: number };
-  return row.count;
+  await db.insert(activityLog).values({
+    actorUserId,
+    patientId,
+    action,
+    details: detailsStr,
+    ipAddress,
+    userAgent,
+  });
 }
 
-/* ---------------- Email Logs Ledger ---------------- */
-export async function recordEmailLog(data: InsertEmailLog): Promise<number> {
+export async function listActivityLogs(patientId?: number, limit = 50): Promise<ActivityLog[]> {
   const db = await getDb();
-  if (db) {
-    const [row] = await db.insert(emailLogs).values(data).returning({ id: emailLogs.id });
-    return Number(row?.id ?? 0);
+  if (!db) {
+    const sqlite = getSqliteDb();
+    if (patientId) {
+      return sqlite.prepare("SELECT * FROM activityLog WHERE patientId = ? ORDER BY id DESC LIMIT ?").all(patientId, limit) as ActivityLog[];
+    }
+    return sqlite.prepare("SELECT * FROM activityLog ORDER BY id DESC LIMIT ?").all(limit) as ActivityLog[];
   }
-  const sqlite = getSqliteDb();
-  const info = sqlite
-    .prepare(
-      `INSERT INTO emailLogs (nurseId, recipientEmail, emailType, referenceId, thresholdKey, subject, status, errorMessage, sentAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    )
-    .run(
-      data.nurseId,
-      data.recipientEmail,
-      data.emailType,
-      data.referenceId ?? null,
-      data.thresholdKey ?? null,
-      data.subject,
-      data.status ?? "sent",
-      data.errorMessage ?? null
-    );
-  return Number(info.lastInsertRowid);
+  if (patientId) {
+    return db.select().from(activityLog).where(eq(activityLog.patientId, patientId)).orderBy(desc(activityLog.id)).limit(limit);
+  }
+  return db.select().from(activityLog).orderBy(desc(activityLog.id)).limit(limit);
 }
 
-export async function isEmailDuplicate(params: {
-  nurseId: number;
-  emailType: string;
-  referenceId?: number | null;
-  thresholdKey?: string | null;
-  includeMock?: boolean;
-}): Promise<boolean> {
-  const countMock = params.includeMock ?? !process.env.RESEND_API_KEY;
-  const statuses = countMock ? ["sent", "mock_sent"] : ["sent"];
+/* -------------------------------------------------------------------------- */
+/*                               NOTIFICATIONS                                */
+/* -------------------------------------------------------------------------- */
 
+export async function createNotification(data: InsertNotification): Promise<Notification> {
   const db = await getDb();
-  if (db) {
-    const conditions = [
-      eq(emailLogs.nurseId, params.nurseId),
-      eq(emailLogs.emailType, params.emailType),
-      inArray(emailLogs.status, statuses),
-    ];
-    if (params.referenceId !== undefined) {
-      conditions.push(params.referenceId === null ? isNull(emailLogs.referenceId) : eq(emailLogs.referenceId, params.referenceId));
-    }
-    if (params.thresholdKey !== undefined) {
-      conditions.push(params.thresholdKey === null ? isNull(emailLogs.thresholdKey) : eq(emailLogs.thresholdKey, params.thresholdKey));
-    }
-    const rows = await db.select({ id: emailLogs.id }).from(emailLogs).where(and(...conditions)).limit(1);
-    return rows.length > 0;
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const info = sqlite
+      .prepare("INSERT INTO notifications (patientId, title, message, type, read, linkUrl) VALUES (?, ?, ?, ?, 0, ?)")
+      .run(data.patientId ?? null, data.title, data.message, data.type ?? "info", data.linkUrl ?? null);
+    return sqlite.prepare("SELECT * FROM notifications WHERE id = ?").get(Number(info.lastInsertRowid)) as Notification;
   }
-  const sqlite = getSqliteDb();
-  const statusList = statuses.map((s) => `'${s}'`).join(", ");
-  let query = `SELECT id FROM emailLogs WHERE nurseId = ? AND emailType = ? AND status IN (${statusList})`;
-  const binds: any[] = [params.nurseId, params.emailType];
-  if (params.referenceId !== undefined) {
-    if (params.referenceId === null) {
-      query += ` AND referenceId IS NULL`;
-    } else {
-      query += ` AND referenceId = ?`;
-      binds.push(params.referenceId);
-    }
-  }
-  if (params.thresholdKey !== undefined) {
-    if (params.thresholdKey === null) {
-      query += ` AND thresholdKey IS NULL`;
-    } else {
-      query += ` AND thresholdKey = ?`;
-      binds.push(params.thresholdKey);
-    }
-  }
-  query += ` LIMIT 1`;
-  const row = sqlite.prepare(query).get(...binds);
-  return Boolean(row);
+  const [row] = await db.insert(notifications).values(data).returning();
+  return row;
 }
 
-export async function listRecentEmailLogs(limit = 50) {
+export async function listNotifications(patientId: number): Promise<Notification[]> {
   const db = await getDb();
-  if (db) {
-    return await db
-      .select({
-        id: emailLogs.id,
-        nurseId: emailLogs.nurseId,
-        recipientEmail: emailLogs.recipientEmail,
-        emailType: emailLogs.emailType,
-        referenceId: emailLogs.referenceId,
-        thresholdKey: emailLogs.thresholdKey,
-        subject: emailLogs.subject,
-        status: emailLogs.status,
-        errorMessage: emailLogs.errorMessage,
-        sentAt: emailLogs.sentAt,
-        nurseName: sql<string | null>`concat(${nurses.firstName}, ' ', ${nurses.lastName})`,
-        nursePhotoKey: nurses.profilePhotoKey,
-      })
-      .from(emailLogs)
-      .leftJoin(nurses, eq(nurses.id, emailLogs.nurseId))
-      .orderBy(desc(emailLogs.sentAt))
-      .limit(limit);
+  if (!db) {
+    const sqlite = getSqliteDb();
+    return sqlite.prepare("SELECT * FROM notifications WHERE patientId = ? ORDER BY id DESC").all(patientId) as Notification[];
   }
-  const sqlite = getSqliteDb();
-  return sqlite
-    .prepare(
-      `SELECT l.*, (n.firstName || ' ' || n.lastName) as nurseName, n.profilePhotoKey as nursePhotoKey
-       FROM emailLogs l
-       LEFT JOIN nurses n ON n.id = l.nurseId
-       ORDER BY l.sentAt DESC LIMIT ?`
-    )
-    .all(limit) as (EmailLog & { nurseName?: string | null; nursePhotoKey?: string | null })[];
+  return db.select().from(notifications).where(eq(notifications.patientId, patientId)).orderBy(desc(notifications.id));
 }
 
-/* ---------------- Reminder Lock / Lease ---------------- */
-export async function acquireReminderLock(leaseDurationMs = 5 * 60 * 1000): Promise<boolean> {
-  const now = Date.now();
-  const expiresAt = now + leaseDurationMs;
-  const dbConn = await getDb();
-  if (dbConn) {
-    const current = await dbConn.select().from(appSettings).where(eq(appSettings.key, "reminder_lock")).limit(1);
-    if (current.length > 0 && current[0].value) {
-      try {
-        const parsed = JSON.parse(current[0].value);
-        if (parsed.leaseExpiresAt && parsed.leaseExpiresAt > now) {
-          return false;
-        }
-      } catch {
-        // Corrupt lock value, proceed to override
-      }
-    }
-    const val = JSON.stringify({ lockedAt: now, leaseExpiresAt: expiresAt });
-    await dbConn
-      .insert(appSettings)
-      .values({ key: "reminder_lock", value: val })
-      .onConflictDoUpdate({ target: appSettings.key, set: { value: val } });
-    return true;
+export async function countUnreadNotifications(patientId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const row = sqlite.prepare("SELECT count(*) as count FROM notifications WHERE patientId = ? AND read = 0").get(patientId) as { count: number };
+    return row.count;
   }
+  const result = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(notifications)
+    .where(and(eq(notifications.patientId, patientId), eq(notifications.read, false)));
+  return Number(result[0]?.count ?? 0);
+}
 
-  const sqlite = getSqliteDb();
-  const row = sqlite.prepare("SELECT value FROM appSettings WHERE key = ?").get("reminder_lock") as any;
-  if (row?.value) {
-    try {
-      const parsed = JSON.parse(row.value);
-      if (parsed.leaseExpiresAt && parsed.leaseExpiresAt > now) {
-        return false;
-      }
-    } catch {
-      // Corrupt lock value
-    }
+export async function markNotificationRead(id: number, patientId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    sqlite.prepare("UPDATE notifications SET read = 1 WHERE id = ? AND patientId = ?").run(id, patientId);
+    return;
   }
-  const val = JSON.stringify({ lockedAt: now, leaseExpiresAt: expiresAt });
-  sqlite.prepare("INSERT INTO appSettings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run("reminder_lock", val);
+  await db.update(notifications).set({ read: true }).where(and(eq(notifications.id, id), eq(notifications.patientId, patientId)));
+}
+
+export async function markAllNotificationsRead(patientId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    sqlite.prepare("UPDATE notifications SET read = 1 WHERE patientId = ?").run(patientId);
+    return;
+  }
+  await db.update(notifications).set({ read: true }).where(eq(notifications.patientId, patientId));
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                STORED FILES                                */
+/* -------------------------------------------------------------------------- */
+
+export async function saveStoredFile(data: InsertStoredFile): Promise<StoredFile> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const info = sqlite
+      .prepare("INSERT INTO storedFiles (fileName, fileType, fileSize, storageKey) VALUES (?, ?, ?, ?)")
+      .run(data.fileName, data.fileType, data.fileSize, data.storageKey);
+    return sqlite.prepare("SELECT * FROM storedFiles WHERE id = ?").get(Number(info.lastInsertRowid)) as StoredFile;
+  }
+  const [file] = await db.insert(storedFiles).values(data).returning();
+  return file;
+}
+
+export async function getStoredFile(id: number): Promise<StoredFile | null> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const row = sqlite.prepare("SELECT * FROM storedFiles WHERE id = ?").get(id) as StoredFile | undefined;
+    return row ?? null;
+  }
+  const [file] = await db.select().from(storedFiles).where(eq(storedFiles.id, id)).limit(1);
+  return file ?? null;
+}
+
+export async function getStoredFileByStorageKey(storageKey: string): Promise<StoredFile | null> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const row = sqlite.prepare("SELECT * FROM storedFiles WHERE storageKey = ?").get(storageKey) as StoredFile | undefined;
+    return row ?? null;
+  }
+  const [file] = await db.select().from(storedFiles).where(eq(storedFiles.storageKey, storageKey)).limit(1);
+  return file ?? null;
+}
+
+export async function deleteStoredFile(storageKey: string): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    sqlite.prepare("DELETE FROM storedFiles WHERE storageKey = ?").run(storageKey);
+    return;
+  }
+  await db.delete(storedFiles).where(eq(storedFiles.storageKey, storageKey));
+}
+
+export async function purgeOrphanStoredFiles(olderThanDays = 2): Promise<number> {
+  const cutoff = new Date(Date.now() - olderThanDays * 86400000);
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const info = sqlite.prepare("DELETE FROM storedFiles WHERE createdAt < ?").run(cutoff.toISOString());
+    return info.changes;
+  }
+  const deleted = await db.delete(storedFiles).where(sql`${storedFiles.createdAt} < ${cutoff}`).returning();
+  return deleted.length;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                 EMAIL LOGS                                 */
+/* -------------------------------------------------------------------------- */
+
+export async function logEmail(data: InsertEmailLog): Promise<EmailLog> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    const info = sqlite
+      .prepare("INSERT INTO emailLogs (recipientEmail, subject, templateName, status, errorMessage, patientId) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(data.recipientEmail, data.subject, data.templateName, data.status, data.errorMessage ?? null, data.patientId ?? null);
+    return sqlite.prepare("SELECT * FROM emailLogs WHERE id = ?").get(Number(info.lastInsertRowid)) as EmailLog;
+  }
+  const [row] = await db.insert(emailLogs).values(data).returning();
+  return row;
+}
+
+export async function listEmailLogs(limit = 100): Promise<EmailLog[]> {
+  const db = await getDb();
+  if (!db) {
+    const sqlite = getSqliteDb();
+    return sqlite.prepare("SELECT * FROM emailLogs ORDER BY id DESC LIMIT ?").all(limit) as EmailLog[];
+  }
+  return db.select().from(emailLogs).orderBy(desc(emailLogs.id)).limit(limit);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         REMINDER CONCURRENCY LOCK                          */
+/* -------------------------------------------------------------------------- */
+
+let _reminderLockHeld = false;
+
+export async function acquireReminderLock(): Promise<boolean> {
+  if (_reminderLockHeld) return false;
+  _reminderLockHeld = true;
   return true;
 }
 
 export async function releaseReminderLock(): Promise<void> {
-  const dbConn = await getDb();
-  if (dbConn) {
-    await dbConn.delete(appSettings).where(eq(appSettings.key, "reminder_lock"));
-    return;
-  }
-  const sqlite = getSqliteDb();
-  sqlite.prepare("DELETE FROM appSettings WHERE key = ?").run("reminder_lock");
+  _reminderLockHeld = false;
 }
-
-let _storedFilesTableEnsured = false;
-async function ensureStoredFilesTable(): Promise<void> {
-  if (_storedFilesTableEnsured) return;
-  const pg = getBatchClient();
-  if (pg) {
-    try {
-      await pg.unsafe(`
-        CREATE TABLE IF NOT EXISTS nursetrack."storedFiles" (
-          id SERIAL PRIMARY KEY,
-          key VARCHAR(512) NOT NULL UNIQUE,
-          data TEXT NOT NULL,
-          "mimeType" VARCHAR(128) NOT NULL,
-          "fileSize" INTEGER NOT NULL,
-          "createdAt" TIMESTAMP NOT NULL DEFAULT NOW()
-        );
-      `);
-      _storedFilesTableEnsured = true;
-      return;
-    } catch (e) {
-      console.warn("[Database] Could not create nursetrack.storedFiles table:", e);
-    }
-  }
-  const sqlite = getSqliteDb();
-  if (sqlite) {
-    try {
-      sqlite.exec(`
-        CREATE TABLE IF NOT EXISTS storedFiles (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          key TEXT NOT NULL UNIQUE,
-          data TEXT NOT NULL,
-          mimeType TEXT NOT NULL,
-          fileSize INTEGER NOT NULL,
-          createdAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-        );
-      `);
-      _storedFilesTableEnsured = true;
-    } catch (e) {
-      console.warn("[Database] Could not create sqlite storedFiles table:", e);
-    }
-  }
-}
-
-export async function saveStoredFile(
-  key: string,
-  base64Data: string,
-  mimeType: string,
-  fileSize: number,
-): Promise<void> {
-  await ensureStoredFilesTable();
-  const pg = getBatchClient();
-  if (pg) {
-    await pg.unsafe(
-      `
-      INSERT INTO nursetrack."storedFiles" (key, data, "mimeType", "fileSize", "createdAt")
-      VALUES ($1, $2, $3, $4, NOW())
-      ON CONFLICT (key) DO UPDATE
-      SET data = EXCLUDED.data,
-          "mimeType" = EXCLUDED."mimeType",
-          "fileSize" = EXCLUDED."fileSize",
-          "createdAt" = NOW()
-    `,
-      [key, base64Data, mimeType, fileSize],
-    );
-    return;
-  }
-
-  const d = await getDb();
-  if (d) {
-    try {
-      await d
-        .insert(storedFiles)
-        .values({
-          key,
-          data: base64Data,
-          mimeType,
-          fileSize,
-        })
-        .onConflictDoUpdate({
-          target: storedFiles.key,
-          set: {
-            data: base64Data,
-            mimeType,
-            fileSize,
-            createdAt: new Date(),
-          },
-        });
-      return;
-    } catch {
-      // Fallback to SQLite
-    }
-  }
-
-  const sqlite = getSqliteDb();
-  sqlite
-    .prepare(
-      `INSERT INTO storedFiles (key, data, mimeType, fileSize, createdAt)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(key) DO UPDATE SET data = excluded.data, mimeType = excluded.mimeType, fileSize = excluded.fileSize, createdAt = CURRENT_TIMESTAMP`,
-    )
-    .run(key, base64Data, mimeType, fileSize);
-}
-
-export async function getStoredFile(
-  key: string,
-): Promise<{ key: string; data: string; mimeType: string; fileSize: number } | null> {
-  await ensureStoredFilesTable();
-  const pg = getBatchClient();
-  if (pg) {
-    try {
-      const rows = await pg.unsafe<{ key: string; data: string; mimeType: string; fileSize: number }[]>(
-        `SELECT key, data, "mimeType", "fileSize" FROM nursetrack."storedFiles" WHERE key = $1 LIMIT 1`,
-        [key],
-      );
-      if (rows && rows.length > 0) return rows[0];
-    } catch (err) {
-      console.warn("[Database] getStoredFile pg query failed:", err);
-    }
-  }
-
-  const d = await getDb();
-  if (d) {
-    try {
-      const rows = await d.select().from(storedFiles).where(eq(storedFiles.key, key)).limit(1);
-      if (rows && rows.length > 0) {
-        return {
-          key: rows[0].key,
-          data: rows[0].data,
-          mimeType: rows[0].mimeType,
-          fileSize: rows[0].fileSize,
-        };
-      }
-    } catch {
-      // Fallback to SQLite
-    }
-  }
-
-  try {
-    const sqlite = getSqliteDb();
-    const row = sqlite
-      .prepare(`SELECT key, data, mimeType, fileSize FROM storedFiles WHERE key = ? LIMIT 1`)
-      .get(key) as { key: string; data: string; mimeType: string; fileSize: number } | undefined;
-    return row ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export async function deleteStoredFile(key: string): Promise<void> {
-  await ensureStoredFilesTable();
-  const pg = getBatchClient();
-  if (pg) {
-    try {
-      await pg.unsafe(`DELETE FROM nursetrack."storedFiles" WHERE key = $1`, [key]);
-      return;
-    } catch (err) {
-      console.warn("[Database] deleteStoredFile pg query failed:", err);
-    }
-  }
-
-  const d = await getDb();
-  if (d) {
-    try {
-      await d.delete(storedFiles).where(eq(storedFiles.key, key));
-      return;
-    } catch {
-      // Fall through to sqlite
-    }
-  }
-
-  try {
-    const sqlite = getSqliteDb();
-    sqlite.prepare("DELETE FROM storedFiles WHERE key = ?").run(key);
-  } catch (err) {
-    console.warn("[Database] deleteStoredFile sqlite failed:", err);
-  }
-}
-
-/**
- * Sweep and delete unreferenced stored files older than the safety threshold (default 2 hours).
- * Prevents orphaned binary files from accumulating when photos or documents are replaced.
- */
-export async function purgeOrphanStoredFiles(olderThanHours = 2): Promise<number> {
-  await ensureStoredFilesTable();
-  const timeClausePg =
-    olderThanHours <= 0
-      ? ""
-      : `AND "createdAt" < NOW() - INTERVAL '${Math.max(1, Math.floor(olderThanHours))} hours'`;
-  const timeClauseSqlite =
-    olderThanHours <= 0
-      ? ""
-      : `AND datetime(createdAt) <= datetime('now', '-${Math.max(1, Math.floor(olderThanHours))} hours')`;
-
-  const pg = getBatchClient();
-  if (pg) {
-    try {
-      const deleted = await pg.unsafe<{ count: number }[]>(`
-        WITH deleted AS (
-          DELETE FROM nursetrack."storedFiles"
-          WHERE key NOT IN (
-              SELECT "profilePhotoKey" FROM nursetrack.nurses WHERE "profilePhotoKey" IS NOT NULL
-              UNION
-              SELECT "documentKey" FROM nursetrack."nurseCredentials" WHERE "documentKey" IS NOT NULL
-              UNION
-              SELECT "certificateKey" FROM nursetrack."nurseTrainings" WHERE "certificateKey" IS NOT NULL
-            )
-            ${timeClausePg}
-          RETURNING id
-        )
-        SELECT count(*)::int AS count FROM deleted;
-      `);
-      return deleted[0]?.count ?? 0;
-    } catch (err) {
-      console.warn("[Database] purgeOrphanStoredFiles pg query failed:", err);
-    }
-  }
-
-  try {
-    const sqlite = getSqliteDb();
-    const res = sqlite
-      .prepare(
-        `
-      DELETE FROM storedFiles
-      WHERE key NOT IN (
-          SELECT profilePhotoKey FROM nurses WHERE profilePhotoKey IS NOT NULL
-          UNION
-          SELECT documentKey FROM nurseCredentials WHERE documentKey IS NOT NULL
-          UNION
-          SELECT certificateKey FROM nurseTrainings WHERE certificateKey IS NOT NULL
-        )
-        ${timeClauseSqlite}
-    `,
-      )
-      .run();
-    return res.changes;
-  } catch (err) {
-    console.warn("[Database] purgeOrphanStoredFiles sqlite query failed:", err);
-    return 0;
-  }
-}
-
-
