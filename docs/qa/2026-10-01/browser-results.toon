@@ -1,0 +1,559 @@
+checks[142]:
+  - name: Cell Active patients
+    pass: true
+    detail:
+      expected: 10
+      observed: 10
+  - name: Expanded Active patients
+    pass: true
+    detail:
+      headingCount: 10
+      rows: 10
+  - name: "Cell Recipients, work-up"
+    pass: true
+    detail:
+      expected: 7
+      observed: 7
+  - name: "Expanded Recipients, work-up"
+    pass: true
+    detail:
+      headingCount: 7
+      rows: 7
+  - name: "Cell Recipients, Post-KT"
+    pass: true
+    detail:
+      expected: 1
+      observed: 1
+  - name: "Expanded Recipients, Post-KT"
+    pass: true
+    detail:
+      headingCount: 1
+      rows: 1
+  - name: Cell Donors
+    pass: true
+    detail:
+      expected: 2
+      observed: 2
+  - name: Expanded Donors
+    pass: true
+    detail:
+      headingCount: 2
+      rows: 2
+  - name: "Stage Orientation: 0 recipients. Open filtered list"
+    pass: true
+    detail:
+      expected: 0
+      rows: 0
+  - name: "Stage Phase 1 work-up: 6 recipients. Open filtered list"
+    pass: true
+    detail:
+      expected: 6
+      rows: 6
+  - name: "Stage Phase 2 work-up: 1 recipient. Open filtered list"
+    pass: true
+    detail:
+      expected: 1
+      rows: 1
+  - name: "Stage Clearances: 0 recipients. Open filtered list"
+    pass: true
+    detail:
+      expected: 0
+      rows: 0
+  - name: "Stage PhilHealth Z: 0 recipients. Open filtered list"
+    pass: true
+    detail:
+      expected: 0
+      rows: 0
+  - name: "Stage Phase 3 pre-admission: 0 recipients. Open filtered list"
+    pass: true
+    detail:
+      expected: 0
+      rows: 0
+  - name: "Stage Post-KT: 1 recipient. Open filtered list"
+    pass: true
+    detail:
+      expected: 1
+      rows: 1
+  - name: "Stage Orientation: 0 donors. Open filtered list"
+    pass: true
+    detail:
+      expected: 0
+      rows: 0
+  - name: "Stage Phase 1 work-up: 1 donor. Open filtered list"
+    pass: true
+    detail:
+      expected: 1
+      rows: 1
+  - name: "Stage Phase 2 work-up: 0 donors. Open filtered list"
+    pass: true
+    detail:
+      expected: 0
+      rows: 0
+  - name: "Stage Clearances: 0 donors. Open filtered list"
+    pass: true
+    detail:
+      expected: 0
+      rows: 0
+  - name: "Stage Phase 3 pre-admission: 0 donors. Open filtered list"
+    pass: true
+    detail:
+      expected: 0
+      rows: 0
+  - name: "Stage Post-donation: 1 donor. Open filtered list"
+    pass: true
+    detail:
+      expected: 1
+      rows: 1
+  - name: "Search   aLeXaNdRiA  "
+    pass: true
+    detail:
+      headerCount: 1
+      rows: 1
+  - name: Dashboard record link
+    pass: true
+  - name: Search SYNTHETIC-KTP-2026-0000000001
+    pass: true
+    detail:
+      headerCount: 5
+      rows: 5
+  - name: Search Zeta
+    pass: true
+    detail:
+      headerCount: 1
+      rows: 1
+      statusVisible: true
+  - name: Inactive search status
+    pass: true
+    detail: Patient search1
+  - name: Search does-not-exist-qa
+    pass: true
+    detail:
+      headerCount: 0
+      rows: 0
+  - name: Search clear restores Overdue
+    pass: true
+  - name: Dashboard uses one patient request
+    pass: true
+    detail: []
+  - name: Profile renders synthetic record
+    pass: true
+  - name: Profile doctor names
+    pass: true
+  - name: Age from birth date
+    pass: true
+  - name: Controlled /patients/p08
+    pass: true
+    detail:
+      text: "Skip to profile content\nDashboard\nPatients\nSettings\nKA\n\nKT unit admin\nSample account\n\nInvalid patient ID\nBack to patients"
+      calls: []
+  - name: No request for invalid /patients/p08
+    pass: true
+    detail: []
+  - name: Controlled /patients/1abc
+    pass: true
+    detail:
+      text: "Skip to profile content\nDashboard\nPatients\nSettings\nKA\n\nKT unit admin\nSample account\n\nInvalid patient ID\nBack to patients"
+      calls: []
+  - name: No request for invalid /patients/1abc
+    pass: true
+    detail: []
+  - name: Controlled /patients/9007199254740992
+    pass: true
+    detail:
+      text: "Skip to profile content\nDashboard\nPatients\nSettings\nKA\n\nKT unit admin\nSample account\n\nInvalid patient ID\nBack to patients"
+      calls: []
+  - name: No request for invalid /patients/9007199254740992
+    pass: true
+    detail: []
+  - name: Controlled /patients/999999
+    pass: true
+    detail:
+      text: "Skip to profile content\nDashboard\nPatients\nSettings\nKA\n\nKT unit admin\nSample account\n\nPatient not found\nBack to patients"
+      calls[1]: "/api/trpc/patients.getById,doctors.list"
+  - name: Malformed date profile remains readable
+    pass: true
+  - name: Null date profile remains readable
+    pass: true
+  - name: Dashboard network failure offers retry
+    pass: true
+  - name: Dashboard retry restores live dataset
+    pass: true
+  - name: No page overflow /patients 360x800
+    pass: true
+    detail:
+      scrollWidth: 360
+  - name: Navigation supported /patients 360
+    pass: true
+    detail: []
+  - name: Mobile patient accessible link 360
+    pass: true
+    detail[2]{text,visible}:
+      "AVLong Patient Name For Responsive Verification, Alexandria Synthetic Extremely Long Given Name ",true
+      "Long Patient Name For Responsive Verification, Alexandria Synthetic Extremely Long Given Name ",false
+  - name: Mobile visible HRN 360
+    pass: true
+  - name: Mobile visible Type 360
+    pass: true
+  - name: Mobile visible Stage 360
+    pass: true
+  - name: Mobile visible Status 360
+    pass: true
+  - name: Mobile visible Nephrologist 360
+    pass: true
+  - name: Mobile visible Fellow 360
+    pass: true
+  - name: No page overflow /settings 360x800
+    pass: true
+    detail:
+      scrollWidth: 360
+  - name: Navigation supported /settings 360
+    pass: true
+    detail: []
+  - name: All Settings tabs visible 360
+    pass: true
+    detail[3]{text,left,right,top}:
+      General & Hotline,20,186.109375,184.4375
+      Privacy & Consent,20,189.015625,232.4375
+      Care Team Doctors,20,194.078125,280.4375
+  - name: Care Team Doctors opens 360
+    pass: true
+  - name: No page overflow /patients/2 360x800
+    pass: true
+    detail:
+      scrollWidth: 360
+  - name: Navigation supported /patients/2 360
+    pass: true
+    detail: []
+  - name: No Send message 360
+    pass: true
+  - name: No page overflow /dashboard 360x800
+    pass: true
+    detail:
+      scrollWidth: 360
+  - name: Navigation supported /dashboard 360
+    pass: true
+    detail: []
+  - name: No page overflow /patients 390x844
+    pass: true
+    detail:
+      scrollWidth: 390
+  - name: Navigation supported /patients 390
+    pass: true
+    detail: []
+  - name: Mobile patient accessible link 390
+    pass: true
+    detail[2]{text,visible}:
+      "AVLong Patient Name For Responsive Verification, Alexandria Synthetic Extremely Long Given Name ",true
+      "Long Patient Name For Responsive Verification, Alexandria Synthetic Extremely Long Given Name ",false
+  - name: Mobile visible HRN 390
+    pass: true
+  - name: Mobile visible Type 390
+    pass: true
+  - name: Mobile visible Stage 390
+    pass: true
+  - name: Mobile visible Status 390
+    pass: true
+  - name: Mobile visible Nephrologist 390
+    pass: true
+  - name: Mobile visible Fellow 390
+    pass: true
+  - name: No page overflow /settings 390x844
+    pass: true
+    detail:
+      scrollWidth: 390
+  - name: Navigation supported /settings 390
+    pass: true
+    detail: []
+  - name: All Settings tabs visible 390
+    pass: true
+    detail[3]{text,left,right,top}:
+      General & Hotline,20,186.109375,184.75
+      Privacy & Consent,190.109375,359.125,184.75
+      Care Team Doctors,20,194.078125,232.75
+  - name: Care Team Doctors opens 390
+    pass: true
+  - name: No page overflow /patients/2 390x844
+    pass: true
+    detail:
+      scrollWidth: 390
+  - name: Navigation supported /patients/2 390
+    pass: true
+    detail: []
+  - name: No Send message 390
+    pass: true
+  - name: No page overflow /dashboard 390x844
+    pass: true
+    detail:
+      scrollWidth: 390
+  - name: Navigation supported /dashboard 390
+    pass: true
+    detail: []
+  - name: No page overflow /patients 430x932
+    pass: true
+    detail:
+      scrollWidth: 430
+  - name: Navigation supported /patients 430
+    pass: true
+    detail: []
+  - name: Mobile patient accessible link 430
+    pass: true
+    detail[2]{text,visible}:
+      "AVLong Patient Name For Responsive Verification, Alexandria Synthetic Extremely Long Given Name ",true
+      "Long Patient Name For Responsive Verification, Alexandria Synthetic Extremely Long Given Name ",false
+  - name: Mobile visible HRN 430
+    pass: true
+  - name: Mobile visible Type 430
+    pass: true
+  - name: Mobile visible Stage 430
+    pass: true
+  - name: Mobile visible Status 430
+    pass: true
+  - name: Mobile visible Nephrologist 430
+    pass: true
+  - name: Mobile visible Fellow 430
+    pass: true
+  - name: No page overflow /settings 430x932
+    pass: true
+    detail:
+      scrollWidth: 430
+  - name: Navigation supported /settings 430
+    pass: true
+    detail: []
+  - name: All Settings tabs visible 430
+    pass: true
+    detail[3]{text,left,right,top}:
+      General & Hotline,20,186.109375,185.1875
+      Privacy & Consent,190.109375,359.125,185.1875
+      Care Team Doctors,20,194.078125,233.1875
+  - name: Care Team Doctors opens 430
+    pass: true
+  - name: No page overflow /patients/2 430x932
+    pass: true
+    detail:
+      scrollWidth: 430
+  - name: Navigation supported /patients/2 430
+    pass: true
+    detail: []
+  - name: No Send message 430
+    pass: true
+  - name: No page overflow /dashboard 430x932
+    pass: true
+    detail:
+      scrollWidth: 430
+  - name: Navigation supported /dashboard 430
+    pass: true
+    detail: []
+  - name: No page overflow /patients 844x390
+    pass: true
+    detail:
+      scrollWidth: 844
+  - name: Navigation supported /patients 844
+    pass: true
+    detail: []
+  - name: No page overflow /settings 844x390
+    pass: true
+    detail:
+      scrollWidth: 844
+  - name: Navigation supported /settings 844
+    pass: true
+    detail: []
+  - name: All Settings tabs visible 844
+    pass: true
+    detail[3]{text,left,right,top}:
+      General & Hotline,28,194.109375,175.609375
+      Privacy & Consent,198.109375,367.125,175.609375
+      Care Team Doctors,371.125,545.203125,175.609375
+  - name: Care Team Doctors opens 844
+    pass: true
+  - name: No page overflow /patients/2 844x390
+    pass: true
+    detail:
+      scrollWidth: 844
+  - name: Navigation supported /patients/2 844
+    pass: true
+    detail: []
+  - name: No Send message 844
+    pass: true
+  - name: No page overflow /dashboard 844x390
+    pass: true
+    detail:
+      scrollWidth: 844
+  - name: Navigation supported /dashboard 844
+    pass: true
+    detail: []
+  - name: No page overflow /patients 1024x768
+    pass: true
+    detail:
+      scrollWidth: 1024
+  - name: Navigation supported /patients 1024
+    pass: true
+    detail: []
+  - name: No page overflow /settings 1024x768
+    pass: true
+    detail:
+      scrollWidth: 1024
+  - name: Navigation supported /settings 1024
+    pass: true
+    detail: []
+  - name: All Settings tabs visible 1024
+    pass: true
+    detail[3]{text,left,right,top}:
+      General & Hotline,116,273.734375,127.546875
+      Privacy & Consent,277.734375,438.1875,127.546875
+      Care Team Doctors,442.1875,607.390625,127.546875
+  - name: Care Team Doctors opens 1024
+    pass: true
+  - name: No page overflow /patients/2 1024x768
+    pass: true
+    detail:
+      scrollWidth: 1024
+  - name: Navigation supported /patients/2 1024
+    pass: true
+    detail: []
+  - name: No Send message 1024
+    pass: true
+  - name: No page overflow /dashboard 1024x768
+    pass: true
+    detail:
+      scrollWidth: 1024
+  - name: Navigation supported /dashboard 1024
+    pass: true
+    detail: []
+  - name: No page overflow /patients 1440x1000
+    pass: true
+    detail:
+      scrollWidth: 1440
+  - name: Navigation supported /patients 1440
+    pass: true
+    detail: []
+  - name: No page overflow /settings 1440x1000
+    pass: true
+    detail:
+      scrollWidth: 1440
+  - name: Navigation supported /settings 1440
+    pass: true
+    detail: []
+  - name: All Settings tabs visible 1440
+    pass: true
+    detail[3]{text,left,right,top}:
+      General & Hotline,408,565.734375,132
+      Privacy & Consent,569.734375,730.1875,132
+      Care Team Doctors,734.1875,899.390625,132
+  - name: Care Team Doctors opens 1440
+    pass: true
+  - name: No page overflow /patients/2 1440x1000
+    pass: true
+    detail:
+      scrollWidth: 1440
+  - name: Navigation supported /patients/2 1440
+    pass: true
+    detail: []
+  - name: No Send message 1440
+    pass: true
+  - name: No page overflow /dashboard 1440x1000
+    pass: true
+    detail:
+      scrollWidth: 1440
+  - name: Navigation supported /dashboard 1440
+    pass: true
+    detail: []
+  - name: Unsupported route recovery /calendar
+    pass: true
+  - name: Return Home /calendar
+    pass: true
+  - name: Unsupported route recovery /messages
+    pass: true
+  - name: Return Home /messages
+    pass: true
+  - name: Unsupported route recovery /nurses
+    pass: true
+  - name: Return Home /nurses
+    pass: true
+  - name: Anonymous dashboard API denied
+    pass: true
+  - name: Patient dashboard API denied
+    pass: true
+  - name: "Manifest http://localhost:4173"
+    pass: true
+    detail:
+      origin: "http://localhost:4173"
+      status: 200
+      contentType: application/manifest+json
+      redirectHost: null
+      validJson: true
+      iconStatus: 200
+      iconType: image/png
+  - name: "Manifest https://ktp-beryl.vercel.app"
+    pass: true
+    detail:
+      origin: "https://ktp-beryl.vercel.app"
+      status: 200
+      contentType: application/manifest+json; charset=utf-8
+      redirectHost: null
+      validJson: true
+      iconStatus: 200
+      iconType: image/png
+  - name: "Manifest https://ktp-alai2.vercel.app"
+    pass: true
+    detail:
+      origin: "https://ktp-alai2.vercel.app"
+      status: 302
+      contentType: text/plain
+      redirectHost: vercel.com
+      validJson: false
+  - name: No uncaught page errors
+    pass: true
+    detail: []
+screenshots[12]: "C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate-dashboard-search.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate-dashboard.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate-profile.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate-dashboard-error.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate--patients-390.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate--settings-390.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate--patients-2-390.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate--dashboard-390.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate--patients-1440.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate--settings-1440.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate--patients-2-1440.png","C:/Users/ORGANT~1/AppData/Local/Temp/ktp-qa-a20ccd723f6443b8ba68bf93dda6fdc8/candidate--dashboard-1440.png"
+pageErrors: []
+network[67]: /api/trpc/auth.me,/api/trpc/dashboard.initial,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/doctors.list,/api/trpc/auth.me,/api/trpc/doctors.list,/api/trpc/auth.me,/api/trpc/doctors.list,/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/dashboard.initial,/api/trpc/dashboard.initial,/api/trpc/dashboard.initial,/api/trpc/auth.me,"/api/trpc/patients.list,doctors.list",/api/trpc/auth.me,"/api/trpc/settings.getAll,doctors.list",/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/auth.me,"/api/trpc/patients.list,doctors.list",/api/trpc/auth.me,/api/trpc/doctors.list,/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/auth.me,"/api/trpc/patients.list,doctors.list",/api/trpc/auth.me,/api/trpc/doctors.list,/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/auth.me,"/api/trpc/patients.list,doctors.list",/api/trpc/auth.me,/api/trpc/doctors.list,/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/auth.me,"/api/trpc/patients.list,doctors.list",/api/trpc/auth.me,/api/trpc/doctors.list,/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/auth.me,"/api/trpc/patients.list,doctors.list",/api/trpc/auth.me,/api/trpc/doctors.list,/api/trpc/auth.me,"/api/trpc/patients.getById,doctors.list",/api/trpc/auth.me,/api/trpc/auth.me,/api/trpc/auth.me,/api/trpc/auth.me
+counts[4]{label,observed,rows,headingCount}:
+  Active patients,10,10,10
+  "Recipients, work-up",7,7,7
+  "Recipients, Post-KT",1,1,1
+  Donors,2,2,2
+viewports[24]{path,width,height,scrollWidth}:
+  /patients,360,800,360
+  /settings,360,800,360
+  /patients/2,360,800,360
+  /dashboard,360,800,360
+  /patients,390,844,390
+  /settings,390,844,390
+  /patients/2,390,844,390
+  /dashboard,390,844,390
+  /patients,430,932,430
+  /settings,430,932,430
+  /patients/2,430,932,430
+  /dashboard,430,932,430
+  /patients,844,390,844
+  /settings,844,390,844
+  /patients/2,844,390,844
+  /dashboard,844,390,844
+  /patients,1024,768,1024
+  /settings,1024,768,1024
+  /patients/2,1024,768,1024
+  /dashboard,1024,768,1024
+  /patients,1440,1000,1440
+  /settings,1440,1000,1440
+  /patients/2,1440,1000,1440
+  /dashboard,1440,1000,1440
+manifests[3]:
+  - origin: "http://localhost:4173"
+    status: 200
+    contentType: application/manifest+json
+    redirectHost: null
+    validJson: true
+    iconStatus: 200
+    iconType: image/png
+  - origin: "https://ktp-beryl.vercel.app"
+    status: 200
+    contentType: application/manifest+json; charset=utf-8
+    redirectHost: null
+    validJson: true
+    iconStatus: 200
+    iconType: image/png
+  - origin: "https://ktp-alai2.vercel.app"
+    status: 302
+    contentType: text/plain
+    redirectHost: vercel.com
+    validJson: false

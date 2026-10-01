@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle, Home, LayoutDashboard, Users } from "lucide-react";
+import { AlertCircle, Home, LayoutDashboard } from "lucide-react";
 import { useLocation } from "wouter";
 
 export default function NotFound() {
@@ -40,14 +40,7 @@ export default function NotFound() {
               <LayoutDashboard className="h-4 w-4" />
               Dashboard
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => setLocation("/nurses")}
-              className="gap-2"
-            >
-              <Users className="h-4 w-4" />
-              Nurses Directory
-            </Button>
+
           </div>
         </CardContent>
       </Card>

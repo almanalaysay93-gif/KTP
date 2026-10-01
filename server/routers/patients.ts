@@ -97,7 +97,7 @@ export const patientsRouter = router({
     }),
 
   getById: adminProcedure
-    .input(z.object({ id: z.number() }))
+    .input(z.object({ id: z.number().int().positive().safe() }))
     .query(async ({ ctx, input }) => {
       const patient = await db.getPatientById(input.id);
       if (!patient) {
@@ -182,7 +182,7 @@ export const patientsRouter = router({
   update: adminProcedure
     .input(
       z.object({
-        id: z.number(),
+        id: z.number().int().positive().safe(),
         data: patientInputSchema.partial(),
       })
     )
@@ -246,7 +246,7 @@ export const patientsRouter = router({
   archive: adminProcedure
     .input(
       z.object({
-        id: z.number(),
+        id: z.number().int().positive().safe(),
         status: z.enum(["Inactive", "Deceased", "Transferred"]),
         reason: z.string().optional(),
       })
@@ -272,7 +272,7 @@ export const patientsRouter = router({
     }),
 
   activityLogs: adminProcedure
-    .input(z.object({ patientId: z.number(), limit: z.number().optional() }))
+    .input(z.object({ patientId: z.number().int().positive().safe(), limit: z.number().optional() }))
     .query(async ({ input }) => {
       return db.listActivityLogs(input.patientId, input.limit ?? 50);
     }),

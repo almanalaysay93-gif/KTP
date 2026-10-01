@@ -111,6 +111,8 @@ function Dashboard() {
                 id="triage-panel"
                 selection={selection}
                 aggregates={aggregates}
+                data={data}
+                today={MOCK_TODAY}
                 query={query}
                 actions={actions}
                 state={regionState}

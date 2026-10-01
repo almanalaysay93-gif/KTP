@@ -158,7 +158,7 @@ function Profile() {
             <ClayCard>
               <h2 className="type-title mb-1 text-ink">Lab values</h2>
               <p className="type-body-sm mb-4 text-ink-muted">Superseded results are not charted.</p>
-              <LabValuesTable patientId={patient.id} tests={LAB_TESTS} data={data} caption="Lab values" />
+              <LabValuesTable patientId={String(patient.id)} tests={LAB_TESTS} data={data} caption="Lab values" />
             </ClayCard>
           </Entrance>
         </ClayTabsContent>
@@ -210,6 +210,7 @@ function Profile() {
       <PageTransition routeKey="patient" focusHeading={false}>
         <main id="profile" tabIndex={-1} className="mx-auto w-full max-w-[1120px] px-4 pb-16 pt-3 outline-none md:px-6 lg:px-8 lg:pb-20 lg:pt-8">
           <PatientHeader
+            today={MOCK_TODAY}
             patient={patient}
             linked={linked}
             doctors={DOCTORS}
@@ -239,7 +240,7 @@ function Profile() {
               )}
             </section>
             <div className="min-w-0 lg:col-span-5">
-              <LabTrendChart patientId={patient.id} tests={LAB_TESTS} data={data} state={previewState} onRetry={retry} />
+              <LabTrendChart patientId={String(patient.id)} tests={LAB_TESTS} data={data} state={previewState} onRetry={retry} />
             </div>
           </div>
 

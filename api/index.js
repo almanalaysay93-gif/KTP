@@ -1457,9 +1457,15 @@ var init_db = __esm({
 });
 
 // shared/ktp.ts
-function todayDate() {
-  const d = /* @__PURE__ */ new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function todayDate(now = /* @__PURE__ */ new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now);
+  const get = (type) => parts.find((part) => part.type === type).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 function isValidStageForPatientType(stage, patientType) {
   if (patientType === "Recipient") {
@@ -2110,7 +2116,7 @@ var patientsRouter = router({
   ).query(async ({ input }) => {
     return listPatients(input);
   }),
-  getById: adminProcedure.input(z2.object({ id: z2.number() })).query(async ({ ctx, input }) => {
+  getById: adminProcedure.input(z2.object({ id: z2.number().int().positive().safe() })).query(async ({ ctx, input }) => {
     const patient = await getPatientById(input.id);
     if (!patient) {
       throw new TRPCError2({ code: "NOT_FOUND", message: "Patient not found" });
@@ -2173,7 +2179,7 @@ var patientsRouter = router({
   }),
   update: adminProcedure.input(
     z2.object({
-      id: z2.number(),
+      id: z2.number().int().positive().safe(),
       data: patientInputSchema.partial()
     })
   ).mutation(async ({ ctx, input }) => {
@@ -2223,7 +2229,7 @@ var patientsRouter = router({
   }),
   archive: adminProcedure.input(
     z2.object({
-      id: z2.number(),
+      id: z2.number().int().positive().safe(),
       status: z2.enum(["Inactive", "Deceased", "Transferred"]),
       reason: z2.string().optional()
     })
@@ -2243,7 +2249,7 @@ var patientsRouter = router({
     );
     return updated;
   }),
-  activityLogs: adminProcedure.input(z2.object({ patientId: z2.number(), limit: z2.number().optional() })).query(async ({ input }) => {
+  activityLogs: adminProcedure.input(z2.object({ patientId: z2.number().int().positive().safe(), limit: z2.number().optional() })).query(async ({ input }) => {
     return listActivityLogs(input.patientId, input.limit ?? 50);
   })
 });
@@ -2365,8 +2371,9 @@ var dashboardRouter = router({
   initial: adminProcedure.query(async () => {
     const patients2 = await listPatients();
     const today = todayDate();
-    const recipients = patients2.filter((p) => p.patientType === "Recipient");
-    const donors = patients2.filter((p) => p.patientType === "Donor");
+    const active = patients2.filter((p) => p.status === "Active");
+    const recipients = active.filter((p) => p.patientType === "Recipient");
+    const donors = active.filter((p) => p.patientType === "Donor");
     const recipientStages = {};
     for (const p of recipients) {
       recipientStages[p.stage] = (recipientStages[p.stage] || 0) + 1;
@@ -2377,6 +2384,8 @@ var dashboardRouter = router({
     }
     return {
       today,
+      patients: patients2,
+      activeCount: active.length,
       totalPatients: patients2.length,
       recipientCount: recipients.length,
       donorCount: donors.length,

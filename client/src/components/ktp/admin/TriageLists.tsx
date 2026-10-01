@@ -1,19 +1,21 @@
+import { SERVICE_TYPE_LABEL, STAGE_ADMIN_LABEL } from "@/lib/ktpLabels";
+import { daysSinceSurgery, patientDisplayName } from "@/lib/ktpPatientView";
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { ClayAvatar, StatusChip } from "@/components/clay";
-import { MotionClayButton, StaggerItem, StaggerList } from "@/components/motion";
 import {
-  SERVICE_TYPE_LABEL,
-  STAGE_ADMIN_LABEL,
-  daysSinceSurgery,
-  patientDisplayName,
+  MotionClayButton,
+  StaggerItem,
+  StaggerList,
+} from "@/components/motion";
+import {
   type ClaimDueRow,
   type OverdueServiceRow,
   type Patient,
   type RescheduleRow,
   type ServiceRecord,
   type SupersededUnfiledRow,
-} from "@/pages/preview/mock";
+} from "@/lib/ktpViewTypes";
 import { fmtDate, fmtTime, fmtWeekday, overdueBy, timeLeft } from "./format";
 import type { DueSoonRow } from "./triage";
 
@@ -35,7 +37,9 @@ export const REPEAT_REASON_LABEL = {
 export function serviceLabel(record: ServiceRecord): string {
   const type = SERVICE_TYPE_LABEL[record.serviceType];
   // "Tacro trough" under "Tacro test" adds nothing; "Monthly panel" under "Laboratory" does.
-  const redundant = record.label.toLowerCase().startsWith(type.split(" ")[0].toLowerCase());
+  const redundant = record.label
+    .toLowerCase()
+    .startsWith(type.split(" ")[0].toLowerCase());
   const base = redundant ? type : `${type}, ${record.label}`;
   return record.repeatOfId ? `${base} (repeat)` : base;
 }
@@ -71,11 +75,17 @@ function Row({
         />
         <div className="flex min-w-0 flex-col gap-0.5">
           <p className="flex flex-wrap items-baseline gap-x-2">
-            <span className="type-body font-bold text-ink">{patientDisplayName(patient)}</span>
+            <span className="type-body font-bold text-ink">
+              {patientDisplayName(patient)}
+            </span>
             <span className="type-data text-ink-muted">{patient.hrn}</span>
           </p>
           <p className="type-body-sm text-ink">{line2}</p>
-          {line3 ? <div className="type-body-sm flex flex-wrap items-center gap-x-2 gap-y-1 text-ink-muted">{line3}</div> : null}
+          {line3 ? (
+            <div className="type-body-sm flex flex-wrap items-center gap-x-2 gap-y-1 text-ink-muted">
+              {line3}
+            </div>
+          ) : null}
           {quote ? (
             <blockquote className="type-body-sm mt-1 rounded-sm bg-row-hover px-3 py-2 text-ink">
               <span className="sr-only">Patient note: </span>
@@ -89,7 +99,15 @@ function Row({
   );
 }
 
-function OpenButton({ patient, onOpen, profile = false }: { patient: Patient; onOpen: (p: Patient) => void; profile?: boolean }) {
+function OpenButton({
+  patient,
+  onOpen,
+  profile = false,
+}: {
+  patient: Patient;
+  onOpen: (p: Patient) => void;
+  profile?: boolean;
+}) {
   return (
     <MotionClayButton
       variant="icon"
@@ -114,7 +132,13 @@ function List({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function OverdueList({ rows, actions }: { rows: OverdueServiceRow[]; actions: RowActions }) {
+export function OverdueList({
+  rows,
+  actions,
+}: {
+  rows: OverdueServiceRow[];
+  actions: RowActions;
+}) {
   return (
     <List label="Overdue services">
       {rows.map(({ patient, record, daysOverdue }) => (
@@ -125,17 +149,31 @@ export function OverdueList({ rows, actions }: { rows: OverdueServiceRow[]; acti
           line3={
             <>
               <span className="type-data">Due {fmtDate(record.dueDate)}</span>
-              <StatusChip status="overdue" label={overdueBy(daysOverdue)} srContext="Overdue by" />
+              <StatusChip
+                status="overdue"
+                label={overdueBy(daysOverdue)}
+                srContext="Overdue by"
+              />
             </>
           }
-          action={<OpenButton patient={patient} onOpen={actions.onOpenPatient} />}
+          action={
+            <OpenButton patient={patient} onOpen={actions.onOpenPatient} />
+          }
         />
       ))}
     </List>
   );
 }
 
-function MarkFiledButton({ patient, record, onMarkFiled }: { patient: Patient; record: ServiceRecord; onMarkFiled: RowActions["onMarkFiled"] }) {
+function MarkFiledButton({
+  patient,
+  record,
+  onMarkFiled,
+}: {
+  patient: Patient;
+  record: ServiceRecord;
+  onMarkFiled: RowActions["onMarkFiled"];
+}) {
   return (
     <MotionClayButton
       variant="secondary"
@@ -148,7 +186,13 @@ function MarkFiledButton({ patient, record, onMarkFiled }: { patient: Patient; r
   );
 }
 
-export function ClaimsDueList({ rows, actions }: { rows: ClaimDueRow[]; actions: RowActions }) {
+export function ClaimsDueList({
+  rows,
+  actions,
+}: {
+  rows: ClaimDueRow[];
+  actions: RowActions;
+}) {
   return (
     <List label="Claims due within 7 days">
       {rows.map(({ patient, record, daysLeft }) => (
@@ -158,21 +202,39 @@ export function ClaimsDueList({ rows, actions }: { rows: ClaimDueRow[]; actions:
           line2={serviceLabel(record)}
           line3={
             <>
-              <span className="type-data">Deadline {fmtDate(record.claimDeadline)}</span>
-              <StatusChip status="due-soon" label={timeLeft(daysLeft)} srContext="Time left:" />
+              <span className="type-data">
+                Deadline {fmtDate(record.claimDeadline)}
+              </span>
+              <StatusChip
+                status="due-soon"
+                label={timeLeft(daysLeft)}
+                srContext="Time left:"
+              />
             </>
           }
-          action={<MarkFiledButton patient={patient} record={record} onMarkFiled={actions.onMarkFiled} />}
+          action={
+            <MarkFiledButton
+              patient={patient}
+              record={record}
+              onMarkFiled={actions.onMarkFiled}
+            />
+          }
         />
       ))}
     </List>
   );
 }
 
-export function RescheduleList({ rows, actions }: { rows: RescheduleRow[]; actions: RowActions }) {
+export function RescheduleList({
+  rows,
+  actions,
+}: {
+  rows: RescheduleRow[];
+  actions: RowActions;
+}) {
   return (
     <List label="Reschedule requests">
-      {rows.map((row) => {
+      {rows.map(row => {
         const { patient, appointment } = row;
         return (
           <Row
@@ -182,10 +244,13 @@ export function RescheduleList({ rows, actions }: { rows: RescheduleRow[]; actio
             line3={
               <>
                 <span className="type-data">
-                  {fmtWeekday(appointment.startsAt)}, {fmtTime(appointment.startsAt)}
+                  {fmtWeekday(appointment.startsAt)},{" "}
+                  {fmtTime(appointment.startsAt)}
                 </span>
                 {appointment.respondedAt ? (
-                  <span className="type-data">requested {fmtDate(appointment.respondedAt)}</span>
+                  <span className="type-data">
+                    requested {fmtDate(appointment.respondedAt)}
+                  </span>
                 ) : null}
               </>
             }
@@ -207,7 +272,13 @@ export function RescheduleList({ rows, actions }: { rows: RescheduleRow[]; actio
   );
 }
 
-export function SupersededClaimsList({ rows, actions }: { rows: SupersededUnfiledRow[]; actions: RowActions }) {
+export function SupersededClaimsList({
+  rows,
+  actions,
+}: {
+  rows: SupersededUnfiledRow[];
+  actions: RowActions;
+}) {
   return (
     <List label="Superseded, claim not filed">
       {rows.map(({ patient, record }) => (
@@ -219,18 +290,36 @@ export function SupersededClaimsList({ rows, actions }: { rows: SupersededUnfile
             <>
               <StatusChip status="superseded" />
               <span className="type-data">{fmtDate(record.serviceDate)}</span>
-              <span>{record.repeatReason ? REPEAT_REASON_LABEL[record.repeatReason] : null}</span>
-              <span className="type-data">deadline {fmtDate(record.claimDeadline)}</span>
+              <span>
+                {record.repeatReason
+                  ? REPEAT_REASON_LABEL[record.repeatReason]
+                  : null}
+              </span>
+              <span className="type-data">
+                deadline {fmtDate(record.claimDeadline)}
+              </span>
             </>
           }
-          action={<MarkFiledButton patient={patient} record={record} onMarkFiled={actions.onMarkFiled} />}
+          action={
+            <MarkFiledButton
+              patient={patient}
+              record={record}
+              onMarkFiled={actions.onMarkFiled}
+            />
+          }
         />
       ))}
     </List>
   );
 }
 
-export function DueSoonList({ rows, actions }: { rows: DueSoonRow[]; actions: RowActions }) {
+export function DueSoonList({
+  rows,
+  actions,
+}: {
+  rows: DueSoonRow[];
+  actions: RowActions;
+}) {
   return (
     <List label="Services due in 7 days">
       {rows.map(({ patient, record, daysLeft }) => (
@@ -241,38 +330,64 @@ export function DueSoonList({ rows, actions }: { rows: DueSoonRow[]; actions: Ro
           line3={
             <>
               <span className="type-data">Due {fmtDate(record.dueDate)}</span>
-              <StatusChip status="due-soon" label={timeLeft(daysLeft)} srContext="Due soon:" />
+              <StatusChip
+                status="due-soon"
+                label={timeLeft(daysLeft)}
+                srContext="Due soon:"
+              />
             </>
           }
-          action={<OpenButton patient={patient} onOpen={actions.onOpenPatient} />}
+          action={
+            <OpenButton patient={patient} onOpen={actions.onOpenPatient} />
+          }
         />
       ))}
     </List>
   );
 }
 
-export function PatientList({ patients, label, actions }: { patients: Patient[]; label: string; actions: RowActions }) {
+export function PatientList({
+  patients,
+  label,
+  actions,
+  today,
+}: {
+  patients: Patient[];
+  label: string;
+  actions: RowActions;
+  today: string;
+}) {
   return (
     <List label={label}>
-      {patients.map((patient) => {
-        const day = daysSinceSurgery(patient);
+      {patients.map(patient => {
+        const day = daysSinceSurgery(patient, today);
         return (
           <Row
             key={patient.id}
             patient={patient}
-            line2={`${patient.patientType}, ${STAGE_ADMIN_LABEL[patient.stage]}`}
+            line2={`${patient.patientType}, ${STAGE_ADMIN_LABEL[patient.stage]}, ${patient.status}`}
             line3={
               day !== null ? (
                 <span className="type-data">
-                  {patient.patientType === "Recipient" ? "Post-KT" : "Post-donation"} day {day}
+                  {patient.patientType === "Recipient"
+                    ? "Post-KT"
+                    : "Post-donation"}{" "}
+                  day {day}
                 </span>
               ) : (
                 <span className="type-data">
-                  {patient.age} y, {patient.sex}
+                  {patient.age === null ? "Age not set" : `${patient.age} y`},{" "}
+                  {patient.sex ?? "Sex not set"}
                 </span>
               )
             }
-            action={<OpenButton profile patient={patient} onOpen={actions.onOpenPatient} />}
+            action={
+              <OpenButton
+                profile
+                patient={patient}
+                onOpen={actions.onOpenPatient}
+              />
+            }
           />
         );
       })}

@@ -1,3 +1,4 @@
+import { ADMIN_HREFS } from "@/lib/ktpAdminRoutes";
 import { useEffect, useState } from "react";
 import { Plus, Save, ShieldAlert, UserCheck } from "lucide-react";
 import { AdminShell, AdminToaster, useAdminToast } from "@/components/ktp/admin";
@@ -6,13 +7,7 @@ import { MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/moti
 import { trpc } from "@/lib/trpc";
 import { DOCTOR_ROLES, type DoctorRole } from "@shared/ktp";
 
-const ADMIN_HREFS = {
-  dashboard: "/dashboard",
-  patients: "/patients",
-  calendar: "/calendar",
-  messages: "/messages",
-  settings: "/settings",
-} as const;
+
 
 export default function SettingsPage() {
   const toast = useAdminToast();
@@ -102,6 +97,7 @@ export default function SettingsPage() {
           <AdminShell
             current="settings"
             hrefs={ADMIN_HREFS}
+            hideUnavailable
             mobileTitle="Settings"
             skipTo="settings-content"
             skipLabel="Skip to settings content"
@@ -117,7 +113,7 @@ export default function SettingsPage() {
 
                 <div className="mt-8">
                   <ClayTabs defaultValue="general">
-                    <ClayTabsList>
+                    <ClayTabsList className="h-auto w-full flex-wrap overflow-visible rounded-2xl sm:w-fit sm:flex-nowrap sm:rounded-full">
                       <ClayTabsTrigger value="general">General & Hotline</ClayTabsTrigger>
                       <ClayTabsTrigger value="privacy">Privacy & Consent</ClayTabsTrigger>
                       <ClayTabsTrigger value="doctors">Care Team Doctors</ClayTabsTrigger>

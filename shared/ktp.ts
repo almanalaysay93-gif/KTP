@@ -92,18 +92,34 @@ export type RiskCategory = (typeof RISK_CATEGORIES)[number];
 export type ClaimStatus = "Filed" | "Overdue" | "DueSoon" | "Open" | "None";
 
 /** Safely extract a YYYY-MM-DD key from a Date object or date string */
-export function dateKey(value: string | Date | null | undefined): string {
-  if (value === null || value === undefined) return "";
+export function dateKey(value: unknown): string {
+  let key: string;
   if (value instanceof Date) {
-    if (isNaN(value.getTime())) return "";
-    return value.toISOString().slice(0, 10);
-  }
-  return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : "";
+    if (!Number.isFinite(value.getTime())) return "";
+    key = value.toISOString().slice(0, 10);
+  } else if (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value)
+  ) {
+    if (value.includes("T") && !Number.isFinite(new Date(value).getTime())) return "";
+    key = value.slice(0, 10);
+  } else return "";
+  const date = new Date(`${key}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) &&
+    date.toISOString().slice(0, 10) === key
+    ? key
+    : "";
 }
 
-export function todayDate(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+export function todayDate(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const get = (type: string) => parts.find(part => part.type === type)!.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
 export function parseLocalDate(value: string | Date | null | undefined): Date {

@@ -1,0 +1,15 @@
+[2]:
+  - origin: "http://localhost:4173"
+    link:
+      href: /site.webmanifest
+      crossOrigin: use-credentials
+    manifestFound: true
+    errors: []
+    console: []
+  - origin: "https://ktp-beryl.vercel.app"
+    link:
+      href: /site.webmanifest
+      crossOrigin: null
+    manifestFound: true
+    errors: []
+    console: []

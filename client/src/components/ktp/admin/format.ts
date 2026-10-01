@@ -1,76 +1,99 @@
+import { dateKey, todayDate } from "@shared/ktp";
 /*
  * Admin formatting helpers (VOICE.md section 5). Date-only math in UTC so a date never
  * shifts with the machine time zone. Date-times are read by their written (Manila) clock.
  */
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
 const MONTHS_LONG = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const DAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DAYS_LONG = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
 
-function toIso(val: string | Date | null | undefined): string {
-  if (!val) return "";
-  if (val instanceof Date) return val.toISOString();
-  return String(val);
+function parts(value: string | Date | null | undefined) {
+  const key = dateKey(value);
+  if (!key) return null;
+  const [y, m, d] = key.split("-").map(Number);
+  return { y, m, d, weekday: new Date(`${key}T00:00:00Z`).getUTCDay() };
 }
 
-function parts(iso: string | Date | null | undefined) {
-  const str = toIso(iso);
-  if (!str) return { y: 1970, m: 1, d: 1, weekday: 4 };
-  const [y, m, d] = str.slice(0, 10).split("-").map(Number);
-  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return { y, m, d, weekday };
+export function fmtDate(value: string | Date | null | undefined): string {
+  const p = parts(value);
+  return p
+    ? `${String(p.d).padStart(2, "0")} ${MONTHS[p.m - 1]} ${p.y}`
+    : "Not set";
 }
-
-/** Table date: "01 Oct 2026". */
-export function fmtDate(iso: string | Date | null | undefined): string {
-  if (!iso) return "Not set";
-  const { y, m, d } = parts(iso);
-  return `${String(d).padStart(2, "0")} ${MONTHS[m - 1]} ${y}`;
+export function fmtDayMonth(value: string | Date): string {
+  const p = parts(value);
+  return p ? `${String(p.d).padStart(2, "0")} ${MONTHS[p.m - 1]}` : "Not set";
 }
-
-/** Cell date: "01 Oct". */
-export function fmtDayMonth(iso: string | Date): string {
-  const { m, d } = parts(iso);
-  return `${String(d).padStart(2, "0")} ${MONTHS[m - 1]}`;
+export function fmtTick(value: string | Date): string {
+  const p = parts(value);
+  return p ? `${p.d} ${MONTHS[p.m - 1]}` : "Not set";
 }
-
-/** Chart tick: "6 May". */
-export function fmtTick(iso: string | Date): string {
-  const { m, d } = parts(iso);
-  return `${d} ${MONTHS[m - 1]}`;
+export function fmtWeekday(value: string | Date): string {
+  const timestamp = value instanceof Date || value.includes("T");
+  const p = parts(timestamp ? (dateKey(value) ? todayDate(new Date(value)) : "") : value);
+  return p ? `${DAYS[p.weekday]} ${p.d} ${MONTHS[p.m - 1]}` : "Not set";
 }
-
-/** Short with weekday: "Thu 1 Oct". */
-export function fmtWeekday(iso: string | Date): string {
-  const { m, d, weekday } = parts(iso);
-  return `${DAYS[weekday]} ${d} ${MONTHS[m - 1]}`;
+export function fmtLongDate(value: string | Date): string {
+  const p = parts(value);
+  return p
+    ? `${DAYS_LONG[p.weekday]}, ${p.d} ${MONTHS_LONG[p.m - 1]} ${p.y}`
+    : "Not set";
 }
-
-/** Header date line: "Wednesday, 30 September 2026". */
-export function fmtLongDate(iso: string | Date): string {
-  const { y, m, d, weekday } = parts(iso);
-  return `${DAYS_LONG[weekday]}, ${d} ${MONTHS_LONG[m - 1]} ${y}`;
+export function fmtTime(value: string | Date): string {
+  if (!dateKey(value)) return "Not set";
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Not set";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
 }
-
-/** "7:00 AM" from "2026-10-01T07:00:00+08:00". */
-export function fmtTime(isoDateTime: string | Date): string {
-  const str = toIso(isoDateTime);
-  const [hh, mm] = str.slice(11, 16).split(":").map(Number);
-  const suffix = hh >= 12 ? "PM" : "AM";
-  const h12 = hh % 12 === 0 ? 12 : hh % 12;
-  return `${h12}:${String(mm).padStart(2, "0")} ${suffix}`;
-}
-
-/** Calendar-month add with day clamping: 31 Jan + 1 = 28 Feb. */
-export function addMonths(iso: string | Date, months: number): string {
-  const { y, m, d } = parts(iso);
-  const target = new Date(Date.UTC(y, m - 1 + months, 1));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(d, lastDay));
+export function addMonths(value: string | Date, months: number): string {
+  const p = parts(value);
+  if (!p) return "";
+  const target = new Date(Date.UTC(p.y, p.m - 1 + months, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  target.setUTCDate(Math.min(p.d, lastDay));
   return target.toISOString().slice(0, 10);
 }
 

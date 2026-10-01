@@ -27,6 +27,7 @@ const NAV: { id: AdminNavId; label: string; Icon: LucideIcon }[] = [
 
 export interface AdminShellProps {
   current: AdminNavId;
+  hideUnavailable?: boolean;
   /** Nav items with a real destination. Others announce "Preview only". */
   hrefs: Partial<Record<AdminNavId, string>>;
   /** Title in the phone top bar. */
@@ -39,7 +40,7 @@ export interface AdminShellProps {
   children: ReactNode;
 }
 
-export function AdminShell({ current, hrefs, mobileTitle, mobileActions, skipTo, skipLabel, children }: AdminShellProps) {
+export function AdminShell({ current, hrefs, hideUnavailable = false, mobileTitle, mobileActions, skipTo, skipLabel, children }: AdminShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const toast = useAdminToast();
   const previewOnly = (label: string) => toast({ title: "Preview only", body: `${label} is not part of this preview.`, tone: "info" });
@@ -59,7 +60,7 @@ export function AdminShell({ current, hrefs, mobileTitle, mobileActions, skipTo,
           <img src="/branding/ots-logo.png" alt="Organ Transplant Services, established 2017" width={200} height={74} className="hidden h-auto w-[200px] mix-blend-multiply xl:block" />
           <img src="/branding/ots-mark.png" alt="Organ Transplant Services" width={48} height={48} className="mx-auto size-12 rounded-sm mix-blend-multiply xl:hidden" />
         </Link>
-        <NavList current={current} hrefs={hrefs} onPreviewOnly={previewOnly} variant="side" />
+        <NavList current={current} hrefs={hrefs} hideUnavailable={hideUnavailable} onPreviewOnly={previewOnly} variant="side" />
         <AdminBlock onSignOut={() => previewOnly("Sign out")} variant="side" />
       </aside>
 
@@ -82,7 +83,7 @@ export function AdminShell({ current, hrefs, mobileTitle, mobileActions, skipTo,
       <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
         {/* Own layout namespace: the hidden sidebar keeps its nav-pill mounted. */}
         <LayoutGroup id="drawer">
-          <NavList current={current} hrefs={hrefs} onPreviewOnly={previewOnly} variant="drawer" onNavigate={() => setDrawerOpen(false)} />
+          <NavList current={current} hrefs={hrefs} hideUnavailable={hideUnavailable} onPreviewOnly={previewOnly} variant="drawer" onNavigate={() => setDrawerOpen(false)} />
         </LayoutGroup>
         <AdminBlock onSignOut={() => previewOnly("Sign out")} variant="drawer" />
       </Drawer>
@@ -95,12 +96,14 @@ export function AdminShell({ current, hrefs, mobileTitle, mobileActions, skipTo,
 function NavList({
   current,
   hrefs,
+  hideUnavailable,
   onPreviewOnly,
   variant,
   onNavigate,
 }: {
   current: AdminNavId;
   hrefs: AdminShellProps["hrefs"];
+  hideUnavailable: boolean;
   onPreviewOnly: (label: string) => void;
   variant: "side" | "drawer";
   onNavigate?: () => void;
@@ -109,7 +112,7 @@ function NavList({
   return (
     <nav aria-label="Admin navigation">
       <ul className="flex flex-col gap-1">
-        {NAV.map(({ id, label, Icon }) => {
+        {NAV.filter((item) => !hideUnavailable || hrefs[item.id]).map(({ id, label, Icon }) => {
           const active = id === current;
           const href = hrefs[id];
           const itemClass = cn(

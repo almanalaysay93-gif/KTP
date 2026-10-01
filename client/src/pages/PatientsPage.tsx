@@ -1,3 +1,5 @@
+import { PatientMobileList } from "@/components/ktp/PatientMobileList";
+import { ADMIN_HREFS } from "@/lib/ktpAdminRoutes";
 import { useEffect, useState } from "react";
 import { Plus, Search, Filter, ArrowUpDown } from "lucide-react";
 import { Link, useLocation } from "wouter";
@@ -12,13 +14,7 @@ import { MotionClayButton, MotionRoot, OrganGridBackdrop, PageTransition } from 
 import { trpc } from "@/lib/trpc";
 import { type PatientType, type PatientStatus, PATIENT_TYPES, PATIENT_STATUSES } from "@shared/ktp";
 
-const ADMIN_HREFS = {
-  dashboard: "/dashboard",
-  patients: "/patients",
-  calendar: "/calendar",
-  messages: "/messages",
-  settings: "/settings",
-} as const;
+
 
 export default function PatientsPage() {
   const [, navigate] = useLocation();
@@ -49,6 +45,7 @@ export default function PatientsPage() {
           <AdminShell
             current="patients"
             hrefs={ADMIN_HREFS}
+            hideUnavailable
             mobileTitle="Patients"
             skipTo="patients-table"
             skipLabel="Skip to patients list"
@@ -85,7 +82,7 @@ export default function PatientsPage() {
 
                 {/* Filters and Search Bar */}
                 <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl bg-surface-1 p-3">
-                  <div className="relative min-w-[200px] flex-1">
+                  <div className="relative min-w-0 basis-full sm:basis-auto sm:min-w-[200px] flex-1">
                     <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
                     <input
                       type="text"
@@ -123,7 +120,15 @@ export default function PatientsPage() {
 
                 {/* Patient Table */}
                 <div id="patients-table" className="mt-6 overflow-hidden rounded-2xl border border-hairline bg-surface-1">
-                  <div className="overflow-x-auto">
+                  {patientsQuery.isError ? (
+                    <div role="alert" className="flex flex-col items-start gap-3 p-4">
+                      <p>Could not load patients.</p>
+                      <ClayButton onClick={() => patientsQuery.refetch()}>Retry</ClayButton>
+                    </div>
+                  ) : patientsQuery.isLoading ? <p className="p-4 md:hidden" aria-busy="true">Loading patient registry...</p>
+                    : patients.length === 0 ? <p className="p-4 md:hidden">No patients found. Try adjusting your search or filters.</p>
+                    : <PatientMobileList patients={patients} doctors={doctorsMap} />}
+                  <div className={`hidden overflow-x-auto ${patientsQuery.isError ? "" : "md:block"}`}>
                     <table className="w-full text-left">
                       <thead>
                         <tr className="border-b border-hairline bg-surface-2 text-ink-muted type-label">
@@ -173,7 +178,9 @@ export default function PatientsPage() {
                                     />
                                     <div>
                                       <p className="font-semibold text-ink type-body">
+                                        <Link href={`/patients/${patient.id}`} className="clay-focus inline-flex min-h-11 items-center">
                                         {patient.lastName}, {patient.firstName} {patient.suffix ?? ""}
+                                        </Link>
                                       </p>
                                       <p className="text-ink-muted type-body-sm">{patient.accountEmail}</p>
                                     </div>

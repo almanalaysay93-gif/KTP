@@ -1,0 +1,27 @@
+[11]:
+  - name: Mobile patient link focus + Enter
+    pass: true
+  - name: Linked donor numeric route
+    pass: true
+  - name: Linked recipient numeric route
+    pass: true
+  - name: Mobile drawer valid destinations
+    pass: true
+    detail:
+      text: "Navigation\n\nAdmin navigation\n\nDashboard\nPatients\nSettings\nKA\n\nKT unit admin\nSample account"
+      hrefs[3]: /dashboard,/patients,/settings
+  - name: Settings keyboard Privacy tab
+    pass: true
+  - name: Settings keyboard Doctors tab
+    pass: true
+  - name: Local UI enrollment profile
+    pass: true
+    detail: "22"
+  - name: Enrollment refreshes cached dashboard
+    pass: true
+  - name: Enrolled record searchable
+    pass: true
+  - name: Edit status refreshes cached dashboard
+    pass: true
+  - name: Edited record searchable with inactive status
+    pass: true

@@ -1,6 +1,6 @@
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import { computeClaimStatus, todayDate } from "@shared/ktp";
+import { todayDate } from "@shared/ktp";
 
 export const dashboardRouter = router({
   initial: adminProcedure.query(async () => {
@@ -8,8 +8,9 @@ export const dashboardRouter = router({
     const today = todayDate();
 
     // Stage & type counts
-    const recipients = patients.filter((p) => p.patientType === "Recipient");
-    const donors = patients.filter((p) => p.patientType === "Donor");
+    const active = patients.filter(p => p.status === "Active");
+    const recipients = active.filter(p => p.patientType === "Recipient");
+    const donors = active.filter(p => p.patientType === "Donor");
 
     const recipientStages: Record<string, number> = {};
     for (const p of recipients) {
@@ -24,6 +25,8 @@ export const dashboardRouter = router({
     // In Phase A2, services and appointments are empty until Phase A3 tables are populated
     return {
       today,
+      patients,
+      activeCount: active.length,
       totalPatients: patients.length,
       recipientCount: recipients.length,
       donorCount: donors.length,

@@ -51,7 +51,8 @@ export function daysSinceSurgery(
   patient: { surgeryDate?: string | Date | null },
   today: string | Date = MOCK_TODAY,
 ): number | null {
-  return patient.surgeryDate ? diffDays(today, patient.surgeryDate) : null;
+  const days = patient.surgeryDate ? diffDays(today, patient.surgeryDate) : NaN;
+  return Number.isFinite(days) ? days : null;
 }
 
 /** "Villacorta, Analyn F." */
@@ -76,7 +77,7 @@ function byServiceDateDesc(a: ServiceRecord, b: ServiceRecord): number {
 
 /** Latest Done record (by service date) and earliest Planned record (by due date). */
 export function serviceTracker(
-  patientId: string,
+  patientId: string | number,
   serviceType: ServiceType,
   data: MockDataset = MOCK_DATASET,
   today: string = MOCK_TODAY,
@@ -101,7 +102,7 @@ export function serviceTracker(
 
 /** The four tracker cards in display order: Meds, Laboratory, Tacro, X-ray and USD. */
 export function serviceTrackers(
-  patientId: string,
+  patientId: string | number,
   data: MockDataset = MOCK_DATASET,
   today: string = MOCK_TODAY,
 ): ServiceTracker[] {
@@ -186,7 +187,7 @@ export function dashboardAggregates(
  * which table views use to show them greyed.
  */
 export function labSeries(
-  patientId: string,
+  patientId: string | number,
   labTestId: string,
   data: MockDataset = MOCK_DATASET,
   options: { includeSuperseded?: boolean } = {},

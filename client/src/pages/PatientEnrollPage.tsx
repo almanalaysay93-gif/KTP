@@ -1,6 +1,9 @@
+import { parsePatientId } from "@/lib/ktpPatientView";
+import { dateKey } from "@shared/ktp";
+import { ADMIN_HREFS } from "@/lib/ktpAdminRoutes";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useParams } from "wouter";
 import { AdminShell, AdminToaster, useAdminToast } from "@/components/ktp/admin";
 import { ClayButton, ClayCard } from "@/components/clay";
 import { MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
@@ -15,18 +18,15 @@ import {
   isValidStageForPatientType,
 } from "@shared/ktp";
 
-const ADMIN_HREFS = {
-  dashboard: "/dashboard",
-  patients: "/patients",
-  calendar: "/calendar",
-  messages: "/messages",
-  settings: "/settings",
-} as const;
+
 
 export default function PatientEnrollPage({ id }: { id?: string }) {
   const [, navigate] = useLocation();
   const toast = useAdminToast();
-  const editId = id ? parseInt(id, 10) : undefined;
+  const params = useParams<{ id?: string }>();
+  const rawId = id ?? params.id;
+  const editId = parsePatientId(rawId) ?? undefined;
+  const utils = trpc.useUtils();
 
   const [patientType, setPatientType] = useState<PatientType>("Recipient");
   const [hrn, setHrn] = useState("");
@@ -72,14 +72,14 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
       setLastName(p.lastName);
       setSuffix(p.suffix ?? "");
       setSex((p.sex as "M" | "F") ?? "");
-      setBirthDate(p.birthDate ? (p.birthDate instanceof Date ? p.birthDate.toISOString().slice(0, 10) : String(p.birthDate).slice(0, 10)) : "");
+      setBirthDate(dateKey(p.birthDate));
       setContactNumber(p.contactNumber ?? "");
       setAccountEmail(p.accountEmail);
       setNephrologistId(p.nephrologistId ?? undefined);
       setFellowId(p.fellowId ?? undefined);
       setStage(p.stage);
       setRiskCategory((p.riskCategory as "StandardLow" | "High") ?? "");
-      setSurgeryDate(p.surgeryDate ? (p.surgeryDate instanceof Date ? p.surgeryDate.toISOString().slice(0, 10) : String(p.surgeryDate).slice(0, 10)) : "");
+      setSurgeryDate(dateKey(p.surgeryDate));
       setLinkedRecipientId(p.linkedRecipientId ?? undefined);
       setFollowupMonths(p.followupMonths ?? 1);
       setStatus(p.status as PatientStatus);
@@ -132,10 +132,20 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
         toast({ title: "Patient enrolled", body: "New patient was enrolled successfully.", tone: "info" });
         navigate(`/patients/${created.id}`);
       }
+      await Promise.all([utils.dashboard.initial.invalidate(), utils.patients.list.invalidate(), utils.patients.getById.invalidate()]);
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to save patient record.");
     }
   };
+
+  if (rawId && (!editId || existingQuery.isError)) {
+    return <div className="flex min-h-dvh flex-col items-start gap-4 bg-ground p-6">
+      <h1 className="type-title">{!editId ? "Invalid patient ID" : "Could not load patient record"}</h1>
+      {editId ? <ClayButton onClick={() => existingQuery.refetch()}>Retry</ClayButton> : null}
+      <Link href="/patients" className="clay-focus inline-flex min-h-11 items-center text-brick">Back to patients</Link>
+    </div>;
+  }
+  if (editId && existingQuery.isLoading) return <p className="p-6">Loading patient record...</p>;
 
   const stagesList = patientType === "Recipient" ? RECIPIENT_STAGES : DONOR_STAGES;
   const isSurgeryRequired = stage === "PostKT" || stage === "PostDonation";
@@ -150,6 +160,7 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
           <AdminShell
             current="patients"
             hrefs={ADMIN_HREFS}
+            hideUnavailable
             mobileTitle={editId ? "Edit patient" : "Enroll patient"}
             skipTo="patient-form"
             skipLabel="Skip to patient form"
