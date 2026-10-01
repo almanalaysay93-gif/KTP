@@ -213,8 +213,25 @@ function ActionForm({ action, onDone }: { action: ServiceAction; onDone: () => v
             ) : null}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <ClayInput label="New date" type="date" defaultValue={addDays(action.appointment.startsAt.slice(0, 10), 3)} />
-            <ClayInput label="New time" type="time" defaultValue={action.appointment.startsAt.slice(11, 16)} />
+            <ClayInput
+              label="New date"
+              type="date"
+              defaultValue={addDays(
+                ((action.appointment.startsAt as unknown) instanceof Date
+                  ? (action.appointment.startsAt as unknown as Date).toISOString()
+                  : String(action.appointment.startsAt)
+                ).slice(0, 10),
+                3
+              )}
+            />
+            <ClayInput
+              label="New time"
+              type="time"
+              defaultValue={((action.appointment.startsAt as unknown) instanceof Date
+                ? (action.appointment.startsAt as unknown as Date).toISOString()
+                : String(action.appointment.startsAt)
+              ).slice(11, 16)}
+            />
           </div>
         </>
       ) : null}

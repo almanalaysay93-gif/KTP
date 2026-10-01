@@ -121,7 +121,7 @@ export default function PatientDetailPage(props: { id?: string }) {
                   <PatientHeader
                     patient={patient as any}
                     linked={(linkedRecipient ?? linkedDonors[0]) as any ?? null}
-                    doctors={[nephrologist, fellow].filter(Boolean) as any}
+                    doctors={(doctorsQuery.data ?? []) as any}
                     backHref="/patients"
                     onRecordResult={() => setAction({ kind: "claim", patient: patient as any, record: null as any })}
                     onSendMessage={() => navigate("/messages")}

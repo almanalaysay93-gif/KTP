@@ -27,7 +27,8 @@ export function AppointmentsPanel({
   return (
     <StaggerList as="ul" aria-label="Appointments" className="flex flex-col">
       {sorted.map((a) => {
-        const past = a.startsAt.slice(0, 10) < MOCK_TODAY;
+        const startsAtStr = (a.startsAt as unknown) instanceof Date ? (a.startsAt as unknown as Date).toISOString() : String(a.startsAt);
+        const past = startsAtStr.slice(0, 10) < MOCK_TODAY;
         const chip = RESPONSE_CHIP[a.response];
         return (
           <StaggerItem as="li" key={a.id} className="grid gap-x-6 gap-y-2 border-b border-hairline py-4 last:border-b-0 md:grid-cols-[180px_minmax(0,1fr)_auto] md:items-center">

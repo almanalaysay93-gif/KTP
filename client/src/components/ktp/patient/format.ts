@@ -12,18 +12,26 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 const MS_PER_DAY = 86_400_000;
 
-function parts(iso: string) {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+function toIso(val: string | Date | null | undefined): string {
+  if (!val) return "";
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
+}
+
+function parts(iso: string | Date | null | undefined) {
+  const str = toIso(iso);
+  if (!str) return { y: 1970, m: 1, d: 1, day: 0 };
+  const [y, m, d] = str.slice(0, 10).split("-").map(Number);
   return { y, m, d, day: Math.round(Date.UTC(y, m - 1, d) / MS_PER_DAY) };
 }
 
 /** Whole days from `today` to `iso` (negative when past). */
-export function daysFrom(iso: string, today: string): number {
+export function daysFrom(iso: string | Date, today: string | Date): number {
   return parts(iso).day - parts(today).day;
 }
 
 /** "Thu, 1 Oct", or "Thu, 1 Oct 2027" when the year is not the current one. */
-export function patientDate(iso: string, today: string): string {
+export function patientDate(iso: string | Date, today: string | Date): string {
   const { y, m, d } = parts(iso);
   const weekday = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
   const base = `${weekday}, ${d} ${MONTHS[m - 1]}`;
@@ -31,7 +39,7 @@ export function patientDate(iso: string, today: string): string {
 }
 
 /** "Today", "Tomorrow", "In 5 days", "Yesterday", "8 days ago". */
-export function relativeDay(iso: string, today: string): string {
+export function relativeDay(iso: string | Date, today: string | Date): string {
   const n = daysFrom(iso, today);
   if (n === 0) return "Today";
   if (n === 1) return "Tomorrow";
@@ -40,8 +48,9 @@ export function relativeDay(iso: string, today: string): string {
 }
 
 /** "7:00 AM", read from the written Manila time of an ISO date-time. */
-export function patientTime(isoDateTime: string): string {
-  const match = /T(\d{2}):(\d{2})/.exec(isoDateTime);
+export function patientTime(isoDateTime: string | Date): string {
+  const str = toIso(isoDateTime);
+  const match = /T(\d{2}):(\d{2})/.exec(str);
   if (!match) return "";
   const hour = Number(match[1]);
   const suffix = hour < 12 ? "AM" : "PM";

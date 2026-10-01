@@ -50,8 +50,8 @@ export function PatientHeader({ patient, linked, doctors, backHref, onRecordResu
   const steps = order.map((id) => ({ id, label: STEP_SHORT[id] }));
   const current = (order as readonly string[]).indexOf(patient.stage);
   const day = daysSinceSurgery(patient);
-  const neph = doctors.find((d) => d.id === patient.nephrologistId);
-  const fellow = doctors.find((d) => d.id === patient.fellowId);
+  const neph = doctors.find((d) => String(d.id) === String(patient.nephrologistId));
+  const fellow = doctors.find((d) => String(d.id) === String(patient.fellowId));
   const name = patientDisplayName(patient);
   const recipient = isRecipient ? patient : linked;
   const donor = isRecipient ? linked : patient;

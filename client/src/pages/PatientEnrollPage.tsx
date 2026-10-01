@@ -72,14 +72,14 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
       setLastName(p.lastName);
       setSuffix(p.suffix ?? "");
       setSex((p.sex as "M" | "F") ?? "");
-      setBirthDate(p.birthDate ? String(p.birthDate).slice(0, 10) : "");
+      setBirthDate(p.birthDate ? (p.birthDate instanceof Date ? p.birthDate.toISOString().slice(0, 10) : String(p.birthDate).slice(0, 10)) : "");
       setContactNumber(p.contactNumber ?? "");
       setAccountEmail(p.accountEmail);
       setNephrologistId(p.nephrologistId ?? undefined);
       setFellowId(p.fellowId ?? undefined);
       setStage(p.stage);
       setRiskCategory((p.riskCategory as "StandardLow" | "High") ?? "");
-      setSurgeryDate(p.surgeryDate ? String(p.surgeryDate).slice(0, 10) : "");
+      setSurgeryDate(p.surgeryDate ? (p.surgeryDate instanceof Date ? p.surgeryDate.toISOString().slice(0, 10) : String(p.surgeryDate).slice(0, 10)) : "");
       setLinkedRecipientId(p.linkedRecipientId ?? undefined);
       setFollowupMonths(p.followupMonths ?? 1);
       setStatus(p.status as PatientStatus);

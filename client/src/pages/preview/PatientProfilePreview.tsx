@@ -67,7 +67,9 @@ function Profile() {
     const trackers = serviceTrackers(patient.id, data, MOCK_TODAY);
     const appointments = data.appointments.filter((a) => a.patientId === patient.id && !a.cancelledAt);
     const nextAppointment =
-      [...appointments].filter((a) => a.startsAt.slice(0, 10) >= MOCK_TODAY).sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1))[0] ?? null;
+      [...appointments]
+        .filter((a) => (typeof a.startsAt === "string" ? a.startsAt : (a.startsAt as any)?.toISOString?.() ?? "").slice(0, 10) >= MOCK_TODAY)
+        .sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1))[0] ?? null;
     const claimStates = records.filter((r) => r.status !== "Planned").map((r) => claimStatus(r, MOCK_TODAY));
     const claims = {
       unfiled: claimStates.filter((c) => c === "Overdue" || c === "DueSoon" || c === "Open").length,

@@ -23,8 +23,8 @@ const SOON_DAYS = 7;
 
 /** Spec 6.5. Filed wins, then Overdue, DueSoon (today to today + 7), Open, None. */
 export function claimStatus(
-  record: Pick<ServiceRecord, "claimDeadline" | "claimFiledDate">,
-  today: string = MOCK_TODAY,
+  record: { claimDeadline?: string | Date | null; claimFiledDate?: string | Date | null },
+  today: string | Date = MOCK_TODAY,
 ): ClaimStatus {
   if (record.claimFiledDate) return "Filed";
   if (!record.claimDeadline) return "None";
@@ -36,8 +36,8 @@ export function claimStatus(
 
 /** Spec 6.1 and COPY 5.3. Only Planned records have a due state. */
 export function dueState(
-  record: Pick<ServiceRecord, "status" | "dueDate">,
-  today: string = MOCK_TODAY,
+  record: { status: string; dueDate: string | Date },
+  today: string | Date = MOCK_TODAY,
 ): DueState | null {
   if (record.status !== "Planned") return null;
   const daysAway = diffDays(record.dueDate, today);
@@ -48,8 +48,8 @@ export function dueState(
 
 /** Whole days from surgery to today, or null when there is no surgery date. */
 export function daysSinceSurgery(
-  patient: Pick<Patient, "surgeryDate">,
-  today: string = MOCK_TODAY,
+  patient: { surgeryDate?: string | Date | null },
+  today: string | Date = MOCK_TODAY,
 ): number | null {
   return patient.surgeryDate ? diffDays(today, patient.surgeryDate) : null;
 }

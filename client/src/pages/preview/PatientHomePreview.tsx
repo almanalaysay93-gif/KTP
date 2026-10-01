@@ -60,7 +60,10 @@ const CLAIMS: ClaimItemView[] = mine
   .sort((a, b) => (a.deadline < b.deadline ? -1 : 1));
 
 const INITIAL_APPTS: AppointmentView[] = APPOINTMENTS.filter(
-  (a) => a.patientId === PATIENT.id && !a.cancelledAt && a.startsAt.slice(0, 10) >= TODAY,
+  (a) =>
+    a.patientId === PATIENT.id &&
+    !a.cancelledAt &&
+    (typeof a.startsAt === "string" ? a.startsAt : (a.startsAt as any)?.toISOString?.() ?? "").slice(0, 10) >= TODAY,
 )
   .sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1))
   .map(({ id, title, startsAt, location, response, responseNote }) => ({ id, title, startsAt, location, response, responseNote }));
