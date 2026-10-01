@@ -1,5 +1,6 @@
+export const BASELINE_SQL = `
 CREATE SCHEMA IF NOT EXISTS "ktp";
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."activityLog" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"actorUserId" integer,
@@ -10,7 +11,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."activityLog" (
 	"userAgent" text,
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."appSettings" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"key" varchar(64) NOT NULL,
@@ -18,7 +19,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."appSettings" (
 	"updatedAt" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "appSettings_key_unique" UNIQUE("key")
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."appointments" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"patientId" integer NOT NULL,
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."appointments" (
 	"createdAt" timestamp DEFAULT now() NOT NULL,
 	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."checklistCatalog" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
@@ -47,7 +48,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."checklistCatalog" (
 	"createdAt" timestamp DEFAULT now() NOT NULL,
 	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."doctors" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" varchar(128) NOT NULL,
@@ -56,7 +57,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."doctors" (
 	"createdAt" timestamp DEFAULT now() NOT NULL,
 	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."emailLogs" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"recipientEmail" varchar(320) NOT NULL,
@@ -67,7 +68,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."emailLogs" (
 	"patientId" integer,
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."labResults" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"serviceRecordId" integer NOT NULL,
@@ -78,7 +79,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."labResults" (
 	"flag" varchar(16),
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."labTests" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" varchar(128) NOT NULL,
@@ -88,21 +89,21 @@ CREATE TABLE IF NOT EXISTS "ktp"."labTests" (
 	"active" boolean DEFAULT true NOT NULL,
 	"sortOrder" integer DEFAULT 99 NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."messageAcknowledgments" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"messageId" integer NOT NULL,
 	"patientId" integer NOT NULL,
 	"acknowledgedAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."messageRecipients" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"messageId" integer NOT NULL,
 	"patientId" integer NOT NULL,
 	"readAt" timestamp
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."messages" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"senderUserId" integer NOT NULL,
@@ -113,7 +114,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."messages" (
 	"targetPatientId" integer,
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."notifications" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"patientId" integer,
@@ -124,7 +125,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."notifications" (
 	"linkUrl" text,
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."patientChecklist" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"patientId" integer NOT NULL,
@@ -136,7 +137,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."patientChecklist" (
 	"createdAt" timestamp DEFAULT now() NOT NULL,
 	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."patients" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"hrn" varchar(64) NOT NULL,
@@ -166,7 +167,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."patients" (
 	CONSTRAINT "patients_hrn_unique" UNIQUE("hrn"),
 	CONSTRAINT "patients_linkedUserId_unique" UNIQUE("linkedUserId")
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."recordRevisions" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"entityType" varchar(32) NOT NULL,
@@ -177,7 +178,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."recordRevisions" (
 	"userId" integer NOT NULL,
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."reminderOutbox" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"patientId" integer NOT NULL,
@@ -189,7 +190,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."reminderOutbox" (
 	"status" varchar(16) DEFAULT 'pending' NOT NULL,
 	"errorMessage" text
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."serviceRecords" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"patientId" integer NOT NULL,
@@ -209,7 +210,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."serviceRecords" (
 	"createdAt" timestamp DEFAULT now() NOT NULL,
 	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."storedFiles" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"fileName" text NOT NULL,
@@ -218,7 +219,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."storedFiles" (
 	"storageKey" text NOT NULL,
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
---> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS "ktp"."users" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"openId" varchar(64) NOT NULL,
@@ -231,10 +232,11 @@ CREATE TABLE IF NOT EXISTS "ktp"."users" (
 	"lastSignedIn" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "users_openId_unique" UNIQUE("openId")
 );
---> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "patient_checklist_unique_idx" ON "ktp"."patientChecklist" USING btree ("patientId","catalogId");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "patients_hrn_idx" ON "ktp"."patients" USING btree ("hrn");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "patients_email_lower_idx" ON "ktp"."patients" USING btree (lower("accountEmail"));--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "patients_stage_idx" ON "ktp"."patients" USING btree ("stage");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "patients_status_idx" ON "ktp"."patients" USING btree ("status");--> statement-breakpoint
+
+CREATE UNIQUE INDEX IF NOT EXISTS "patient_checklist_unique_idx" ON "ktp"."patientChecklist" USING btree ("patientId","catalogId");
+CREATE UNIQUE INDEX IF NOT EXISTS "patients_hrn_idx" ON "ktp"."patients" USING btree ("hrn");
+CREATE UNIQUE INDEX IF NOT EXISTS "patients_email_lower_idx" ON "ktp"."patients" USING btree (lower("accountEmail"));
+CREATE INDEX IF NOT EXISTS "patients_stage_idx" ON "ktp"."patients" USING btree ("stage");
+CREATE INDEX IF NOT EXISTS "patients_status_idx" ON "ktp"."patients" USING btree ("status");
 CREATE INDEX IF NOT EXISTS "patients_type_idx" ON "ktp"."patients" USING btree ("patientType");
+`;

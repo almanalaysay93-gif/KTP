@@ -26,11 +26,34 @@ import {
   type User,
 } from "../drizzle/schema";
 import { FULL_ACCESS_EMAILS, roleForEmail } from "./adminAccess";
+import { BASELINE_SQL } from "./baselineSql";
 import { getSqliteDb } from "./localDb";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 export type PgDb = PgDatabase<PgQueryResultHKT, any>;
 let _batchPg: ReturnType<typeof postgres> | null = null;
+let _schemaEnsured = false;
+
+async function ensureSchema(client: ReturnType<typeof postgres>) {
+  if (_schemaEnsured) return;
+  _schemaEnsured = true;
+  try {
+    const res = await client`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'ktp' AND table_name = 'users'
+      );
+    `;
+    if (!res[0]?.exists) {
+      console.log("[Database] Initializing ktp schema and tables...");
+      await client.unsafe(BASELINE_SQL);
+      console.log("[Database] ktp schema initialized successfully.");
+    }
+  } catch (error) {
+    console.error("[Database] Auto-migration check failed:", error);
+    _schemaEnsured = false;
+  }
+}
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
@@ -44,6 +67,7 @@ export async function getDb() {
           search_path: "ktp, public",
         },
       });
+      await ensureSchema(client);
       _db = drizzle(client);
     } catch (error) {
       console.warn("[Database] Failed to connect PostgreSQL:", error);
