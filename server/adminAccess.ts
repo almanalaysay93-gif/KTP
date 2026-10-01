@@ -1,5 +1,6 @@
 export const FULL_ACCESS_EMAILS = [
   "nncluster@spmcdvo.net",
+  "share@spmcdvo.net",
   "almanalaysay93@gmail.com",
 ] as const;
 

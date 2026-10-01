@@ -399,4 +399,17 @@ function initSchemaAndSeed(db: Database.Database) {
       insertChecklist.run(name, cat, phase, applies, asInd, sort);
     }
   }
+
+  // Seed default patient for alai12152201@gmail.com if not exists
+  const existingPatient = db.prepare("SELECT * FROM patients WHERE lower(accountEmail) = 'alai12152201@gmail.com'").get();
+  if (!existingPatient) {
+    db.prepare(`
+      INSERT INTO patients (
+        hrn, patientType, firstName, lastName, accountEmail, stage, status, surgeryDate, consentVersion, consentAcceptedAt
+      ) VALUES (
+        'KTP-2026-0001', 'Recipient', 'Alai', 'Patient', 'alai12152201@gmail.com', 'PostKT', 'Active', '2026-01-15', 1, CURRENT_TIMESTAMP
+      )
+    `).run();
+  }
 }
+

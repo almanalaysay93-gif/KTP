@@ -24,7 +24,7 @@ beforeAll(() => {
 beforeEach(() => state.sqlite!.exec("DELETE FROM users"));
 afterAll(() => { state.sqlite!.close(); vi.unstubAllEnvs(); });
 
-it.each(["nncluster@spmcdvo.net", "almanalaysay93@gmail.com", " NNCLUSTER@SPMCDVO.NET "])("grants full access to %s", async email => {
+it.each(["nncluster@spmcdvo.net", "share@spmcdvo.net", "almanalaysay93@gmail.com", " NNCLUSTER@SPMCDVO.NET "])("grants full access to %s", async email => {
   await upsertUser({ openId: "approved", email, role: "user" });
   expect(await touchUserSession("approved")).toMatchObject({ role: "admin" });
 });
@@ -51,7 +51,7 @@ it("blocks stale admin roles at the API boundary while preserving staff access",
   await expect(api.createCaller(ctx).full()).rejects.toMatchObject({ code: "FORBIDDEN" });
   expect(handler).not.toHaveBeenCalled();
   expect(await api.createCaller(ctx).staff()).toBe("staff");
-  for (const email of ["nncluster@spmcdvo.net", "almanalaysay93@gmail.com"]) {
+  for (const email of ["nncluster@spmcdvo.net", "share@spmcdvo.net", "almanalaysay93@gmail.com"]) {
     expect(await api.createCaller({ user: { email, role: "user" } } as TrpcContext).full()).toBe("allowed");
   }
 });

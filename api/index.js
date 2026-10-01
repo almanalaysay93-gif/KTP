@@ -309,6 +309,7 @@ var init_adminAccess = __esm({
     "use strict";
     FULL_ACCESS_EMAILS = [
       "nncluster@spmcdvo.net",
+      "share@spmcdvo.net",
       "almanalaysay93@gmail.com"
     ];
   }
@@ -932,6 +933,16 @@ function initSchemaAndSeed(db) {
       insertChecklist.run(name, cat, phase, applies, asInd, sort);
     }
   }
+  const existingPatient = db.prepare("SELECT * FROM patients WHERE lower(accountEmail) = 'alai12152201@gmail.com'").get();
+  if (!existingPatient) {
+    db.prepare(`
+      INSERT INTO patients (
+        hrn, patientType, firstName, lastName, accountEmail, stage, status, surgeryDate, consentVersion, consentAcceptedAt
+      ) VALUES (
+        'KTP-2026-0001', 'Recipient', 'Alai', 'Patient', 'alai12152201@gmail.com', 'PostKT', 'Active', '2026-01-15', 1, CURRENT_TIMESTAMP
+      )
+    `).run();
+  }
 }
 var require2, __filename, __dirname, _sqliteDb;
 var init_localDb = __esm({
@@ -1210,6 +1221,13 @@ async function ensureSchema(client) {
       await client.unsafe(BASELINE_SQL);
       console.log("[Database] ktp schema initialized successfully.");
     }
+    await client`
+      INSERT INTO "ktp"."patients" (
+        "hrn", "patientType", "firstName", "lastName", "accountEmail", "stage", "status", "surgeryDate", "consentVersion", "consentAcceptedAt"
+      ) VALUES (
+        'KTP-2026-0001', 'Recipient', 'Alai', 'Patient', 'alai12152201@gmail.com', 'PostKT', 'Active', '2026-01-15'::date, 1, now()
+      ) ON CONFLICT ("hrn") DO UPDATE SET "accountEmail" = 'alai12152201@gmail.com', "status" = 'Active';
+    `;
   } catch (error) {
     console.error("[Database] Auto-migration check failed:", error);
     _schemaEnsured = false;
