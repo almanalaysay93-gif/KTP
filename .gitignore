@@ -222,4 +222,3 @@ __pycache__/
 
 .vercel
 scripts/backups/
-api/index.js
