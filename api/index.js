@@ -2101,13 +2101,13 @@ function* patient(patientId) {
   const rows = yield query('SELECT * FROM "patients" WHERE id = ?', patientId);
   return rows[0] ?? fail("Patient not found", "NOT_FOUND");
 }
-function* audit(actor, patientId, action, id2) {
+function* audit(actor, patientId, action, id2, extra) {
   yield query(
     'INSERT INTO "activityLog" ("actorUserId", "patientId", action, details) VALUES (?, ?, ?, ?)',
     actor,
     patientId,
     action,
-    JSON.stringify({ id: id2 })
+    JSON.stringify({ id: id2, ...extra })
   );
 }
 function dateOnly(value) {
@@ -2177,12 +2177,14 @@ async function recordResult(input, actor) {
     if (!current) fail("Service not found", "NOT_FOUND");
     if (current.status !== "Planned") fail("Only planned services can receive results", "CONFLICT");
     if (input.results?.length && !["Laboratory", "Tacro"].includes(current.serviceType)) fail("Lab values require a laboratory or tacrolimus service");
+    const approvalTag = input.nurseApproved ? input.approvedByNurse ? `[Approved by Nurse: ${input.approvedByNurse}]` : "[Approved by Nurse]" : null;
+    const finalNote = [input.note, approvalTag].filter(Boolean).join(" ") || null;
     const changed = yield query(
       `UPDATE "serviceRecords" SET status = 'Done', "serviceDate" = ?, "claimDeadline" = ?, note = COALESCE(?, note), "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = ? AND "patientId" = ? AND status = 'Planned' RETURNING id`,
       input.serviceDate,
       input.claimDeadline ?? null,
-      input.note ?? null,
+      finalNote,
       input.serviceRecordId,
       input.patientId
     );
@@ -2204,7 +2206,10 @@ async function recordResult(input, actor) {
         flag
       );
     }
-    yield* audit(actor, input.patientId, "clinical.result.record", input.serviceRecordId);
+    yield* audit(actor, input.patientId, "clinical.result.record", input.serviceRecordId, {
+      nurseApproved: input.nurseApproved ?? false,
+      approvedByNurse: input.approvedByNurse ?? null
+    });
     return { id: input.serviceRecordId };
   });
 }
@@ -2391,6 +2396,8 @@ var clinicalRouter = router({
     serviceDate: pastDate,
     claimDeadline: date2.optional(),
     note,
+    nurseApproved: z.boolean().optional(),
+    approvedByNurse: z.string().trim().max(200).optional(),
     results: z.array(z.object({ labTestId: id, value: z.string().trim().min(1).max(100) })).max(100).optional()
   }).refine((input) => !input.claimDeadline || input.claimDeadline >= input.serviceDate, "Claim deadline cannot precede service date").refine((input) => new Set(input.results?.map((row) => row.labTestId)).size === (input.results?.length ?? 0), "Each lab test may occur once")).mutation(({ input, ctx }) => recordResult(input, ctx.user.id)),
   setChecklist: adminProcedure.input(patient2.extend({

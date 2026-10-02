@@ -51,9 +51,9 @@ function* patient(patientId: number): Program<Row> {
   return rows[0] ?? fail("Patient not found", "NOT_FOUND");
 }
 
-function* audit(actor: number, patientId: number, action: string, id: number): Program<void> {
+function* audit(actor: number, patientId: number, action: string, id: number, extra?: Record<string, unknown>): Program<void> {
   yield query('INSERT INTO "activityLog" ("actorUserId", "patientId", action, details) VALUES (?, ?, ?, ?)',
-    actor, patientId, action, JSON.stringify({ id }));
+    actor, patientId, action, JSON.stringify({ id, ...extra }));
 }
 
 type DateFields = "dueDate" | "serviceDate" | "claimDeadline" | "claimFiledDate";
@@ -115,7 +115,16 @@ export async function addService(input: AddService, actor: number) {
   });
 }
 
-export type RecordResult = { patientId: number; serviceRecordId: number; serviceDate: string; claimDeadline?: string; note?: string; results?: { labTestId: number; value: string }[] };
+export type RecordResult = {
+  patientId: number;
+  serviceRecordId: number;
+  serviceDate: string;
+  claimDeadline?: string;
+  note?: string;
+  nurseApproved?: boolean;
+  approvedByNurse?: string;
+  results?: { labTestId: number; value: string }[];
+};
 export async function recordResult(input: RecordResult, actor: number) {
   return execute(function* () {
     yield* patient(input.patientId);
@@ -123,9 +132,15 @@ export async function recordResult(input: RecordResult, actor: number) {
     if (!current) fail("Service not found", "NOT_FOUND");
     if (current.status !== "Planned") fail("Only planned services can receive results", "CONFLICT");
     if (input.results?.length && !["Laboratory", "Tacro"].includes(current.serviceType)) fail("Lab values require a laboratory or tacrolimus service");
+    const approvalTag = input.nurseApproved
+      ? input.approvedByNurse
+        ? `[Approved by Nurse: ${input.approvedByNurse}]`
+        : "[Approved by Nurse]"
+      : null;
+    const finalNote = [input.note, approvalTag].filter(Boolean).join(" ") || null;
     const changed = yield query(`UPDATE "serviceRecords" SET status = 'Done', "serviceDate" = ?, "claimDeadline" = ?, note = COALESCE(?, note), "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = ? AND "patientId" = ? AND status = 'Planned' RETURNING id`,
-      input.serviceDate, input.claimDeadline ?? null, input.note ?? null, input.serviceRecordId, input.patientId);
+      input.serviceDate, input.claimDeadline ?? null, finalNote, input.serviceRecordId, input.patientId);
     if (!changed.length) fail("Service already changed; refresh and retry", "CONFLICT");
     for (const value of input.results ?? []) {
       const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', value.labTestId);
@@ -138,7 +153,10 @@ export async function recordResult(input: RecordResult, actor: number) {
       yield query('INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?)',
         input.serviceRecordId, value.labTestId, value.value, test.low, test.high, flag);
     }
-    yield* audit(actor, input.patientId, "clinical.result.record", input.serviceRecordId);
+    yield* audit(actor, input.patientId, "clinical.result.record", input.serviceRecordId, {
+      nurseApproved: input.nurseApproved ?? false,
+      approvedByNurse: input.approvedByNurse ?? null,
+    });
     return { id: input.serviceRecordId };
   });
 }

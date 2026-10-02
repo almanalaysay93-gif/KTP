@@ -22,6 +22,8 @@ export const clinicalRouter = router({
   })).mutation(({ input, ctx }) => clinical.addService(input, ctx.user.id)),
   recordResult: adminProcedure.input(patient.extend({
     serviceRecordId: id, serviceDate: pastDate, claimDeadline: date.optional(), note,
+    nurseApproved: z.boolean().optional(),
+    approvedByNurse: z.string().trim().max(200).optional(),
     results: z.array(z.object({ labTestId: id, value: z.string().trim().min(1).max(100) })).max(100).optional(),
   }).refine(input => !input.claimDeadline || input.claimDeadline >= input.serviceDate, "Claim deadline cannot precede service date")
     .refine(input => new Set(input.results?.map(row => row.labTestId)).size === (input.results?.length ?? 0), "Each lab test may occur once"))

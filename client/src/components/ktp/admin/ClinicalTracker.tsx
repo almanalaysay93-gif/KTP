@@ -2,9 +2,11 @@ import { useState } from "react";
 import { FileUp, Loader2 } from "lucide-react";
 import { ClayButton, ClayCard, ClayInput } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 import { dateKey, suggestNextDueDate, todayDate } from "@shared/ktp";
 import type { ClinicalData } from "./PatientClinicalTabs";
 import { ClinicalForm, ClinicalSelect, field } from "./ClinicalForm";
+import { NurseApprovalCard } from "./NurseApprovalCard";
 
 const serviceNames = {
   Meds: "Medicines",
@@ -161,6 +163,9 @@ function ServiceCard({
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrMessage, setOcrMessage] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [requireApproval, setRequireApproval] = useState(true);
+  const [nurseApproved, setNurseApproved] = useState(false);
+  const [approvingNurse, setApprovingNurse] = useState("");
 
   const canEnterLabs =
     service.serviceType === "Laboratory" || service.serviceType === "Tacro";
@@ -207,6 +212,8 @@ function ServiceCard({
         nextValues[t.labTestId] = t.value;
       }
       setLabValues(prev => ({ ...prev, ...nextValues }));
+      setNurseApproved(false);
+      setRequireApproval(true);
 
       if (res.detectedDate && res.detectedDate <= todayDate()) {
         setServiceDate(res.detectedDate);
@@ -215,7 +222,7 @@ function ServiceCard({
       setOcrMessage(
         `Extracted ${res.extractedCount} lab ${
           res.extractedCount === 1 ? "value" : "values"
-        }${res.detectedDate ? ` (${res.detectedDate})` : ""}. Auto-filled below.`
+        }${res.detectedDate ? ` (${res.detectedDate})` : ""}. Auto-filled below. Review and approve before saving.`
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to parse document";
@@ -262,14 +269,25 @@ function ServiceCard({
           {open && (
             <ClinicalForm
               patientId={patientId}
-              label="Save result"
+              label={
+                requireApproval && !nurseApproved
+                  ? "Save result (Nurse approval required)"
+                  : "Save result"
+              }
+              disabled={requireApproval && !nurseApproved}
               submit={async form => {
+                if (requireApproval && !nurseApproved) {
+                  throw new Error("Attending nurse approval is required before saving.");
+                }
+                const approvedBy = field(form, "approvedByNurse");
                 await result.mutateAsync({
                   patientId,
                   serviceRecordId: service.id,
                   serviceDate: field(form, "serviceDate"),
                   claimDeadline: field(form, "claimDeadline") || undefined,
                   note: field(form, "note"),
+                  nurseApproved: requireApproval ? nurseApproved : undefined,
+                  approvedByNurse: approvedBy || undefined,
                   results: canEnterLabs
                     ? tests
                         .filter(test => field(form, `lab-${test.id}`) !== "")
@@ -280,6 +298,8 @@ function ServiceCard({
                     : [],
                 });
                 setLabValues({});
+                setNurseApproved(false);
+                setApprovingNurse("");
                 setOcrMessage(null);
                 setOcrError(null);
               }}
@@ -365,6 +385,15 @@ function ServiceCard({
                   </div>
                 </fieldset>
               )}
+              <NurseApprovalCard
+                requireApproval={requireApproval}
+                setRequireApproval={setRequireApproval}
+                nurseApproved={nurseApproved}
+                setNurseApproved={setNurseApproved}
+                approvingNurse={approvingNurse}
+                setApprovingNurse={setApprovingNurse}
+                canEnterLabs={canEnterLabs}
+              />
               <ClayInput
                 name="note"
                 label="Result note (optional)"

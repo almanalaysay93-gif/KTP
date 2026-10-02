@@ -40,12 +40,14 @@ export function ClinicalForm({
   children,
   label = "Save",
   reset = false,
+  disabled = false,
 }: {
   patientId: number;
   submit: (data: FormData) => Promise<unknown>;
   children: ReactNode;
   label?: string;
   reset?: boolean;
+  disabled?: boolean;
 }) {
   const utils = trpc.useUtils();
   const lock = useRef(false);
@@ -58,7 +60,7 @@ export function ClinicalForm({
       aria-busy={pending}
       onSubmit={async event => {
         event.preventDefault();
-        if (lock.current) return;
+        if (lock.current || disabled) return;
         const form = event.currentTarget;
         const data = new FormData(form);
         lock.current = true;
@@ -99,7 +101,12 @@ export function ClinicalForm({
           Saved.
         </p>
       )}
-      <ClayButton type="submit" loading={pending} className="self-start">
+      <ClayButton
+        type="submit"
+        loading={pending}
+        disabled={disabled || pending}
+        className="self-start"
+      >
         {label}
       </ClayButton>
     </form>

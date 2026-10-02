@@ -41,6 +41,29 @@ describe("clinical persisted workflows", () => {
     await expect(admin.recordResult({ patientId, serviceRecordId: id, serviceDate: "2026-09-02" })).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(admin.fileClaim({ patientId, id, claimFiledDate: "2026-09-04" })).rejects.toMatchObject({ code: "CONFLICT" });
   });
+  it("records nurse approval and tag in service note and activity log", async () => {
+    const { id } = await service();
+    const initial = await admin.get({ patientId });
+    const test = initial.labTests[0];
+    await admin.recordResult({
+      patientId,
+      serviceRecordId: id,
+      serviceDate: "2026-09-02",
+      nurseApproved: true,
+      approvedByNurse: "RN Dela Cruz",
+      note: "Routine follow-up",
+      results: [{ labTestId: test.id, value: "5.5" }],
+    });
+    const saved = await admin.get({ patientId });
+    expect(saved.services[0].note).toBe("Routine follow-up [Approved by Nurse: RN Dela Cruz]");
+    const auditRow = getSqliteDb().prepare("SELECT details FROM activityLog WHERE patientId=? AND action='clinical.result.record'").get(patientId) as { details: string };
+    const details = JSON.parse(auditRow.details);
+    expect(details).toMatchObject({
+      id,
+      nurseApproved: true,
+      approvedByNurse: "RN Dela Cruz",
+    });
+  });
   it("rolls back completion when a lab test is invalid; rejects cross-patient results", async () => {
     const { id } = await service();
     await expect(admin.recordResult({ patientId, serviceRecordId: id, serviceDate: "2026-09-02", results: [{ labTestId: 999999, value: "1" }] })).rejects.toMatchObject({ code: "NOT_FOUND" });
