@@ -5,6 +5,7 @@ import { todayDate } from "@shared/ktp";
 import type { ClinicalData } from "./PatientClinicalTabs";
 import { ClinicalForm, field } from "./ClinicalForm";
 import { serviceNames } from "./ClinicalTracker";
+import { getNormalValue, groupEntries } from "./labCatalogMeta";
 
 /*
  * Corrections to saved service records, shown on the patient edit page. Each save needs a reason:
@@ -143,16 +144,30 @@ function LabCard({
               {data.labTests.length === 0 && (
                 <p>No active lab tests configured.</p>
               )}
-              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-                {data.labTests.map(test => (
-                  <ClayInput
-                    key={test.id}
-                    name={`lab-${test.id}`}
-                    label={`${test.name} (${test.unit})`}
-                    inputMode="decimal"
-                    maxLength={100}
-                    defaultValue={saved.get(test.id) ?? ""}
-                  />
+              <div className="grid min-w-0 gap-5">
+                {groupEntries(data.labTests).map(({ group, entries }) => (
+                  <div key={group} role="group" aria-label={group} className="min-w-0">
+                    <p className="mb-2 border-b border-hairline pb-1 type-label text-ink-muted">
+                      {group}
+                    </p>
+                    <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                      {entries.map(test => (
+                        <ClayInput
+                          key={test.id}
+                          name={`lab-${test.id}`}
+                          label={`${test.name} (${test.unit})`}
+                          hint={
+                            getNormalValue(test.name)
+                              ? `Normal: ${getNormalValue(test.name)}`
+                              : undefined
+                          }
+                          inputMode="decimal"
+                          maxLength={100}
+                          defaultValue={saved.get(test.id) ?? ""}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </fieldset>

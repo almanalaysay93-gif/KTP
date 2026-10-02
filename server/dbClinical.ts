@@ -166,32 +166,57 @@ export async function recordResult(input: RecordResult, actor: number) {
   });
 }
 
-export type AddLabResult = { patientId: number; phase: LabPhase; serviceDate: string; labTestId: number; value: string };
-// A lab result entered from the Labs tab. Results of one phase and one date share one completed laboratory service.
-export async function addLabResult(input: AddLabResult, actor: number) {
+export type AddLabResults = {
+  patientId: number;
+  phase: LabPhase;
+  serviceDate: string;
+  /** True when a nurse checked the values against the laboratory sheet. Saved in the service note and the activity log. */
+  nurseApproved?: boolean;
+  approvedByNurse?: string;
+  results: { labTestId: number; value: string }[];
+};
+// Lab results entered from the Labs tab. Results of one phase and one date share one completed laboratory service.
+// All results save, or none.
+export async function addLabResults(input: AddLabResults, actor: number) {
   return execute(function* () {
     const profile = yield* patient(input.patientId);
     if (!isValidStageForPatientType(input.phase, profile.patientType)) fail("Phase does not apply to this patient type");
-    const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', input.labTestId);
-    if (!test) fail("Lab test not found", "NOT_FOUND");
-    let [record] = yield query(`SELECT id FROM "serviceRecords" WHERE "patientId" = ? AND phase = ? AND "serviceDate" = ? AND "serviceType" = 'Laboratory' AND status = 'Done' ORDER BY id LIMIT 1`,
+    let [record] = yield query(`SELECT id, note FROM "serviceRecords" WHERE "patientId" = ? AND phase = ? AND "serviceDate" = ? AND "serviceType" = 'Laboratory' AND status = 'Done' ORDER BY id LIMIT 1`,
       input.patientId, input.phase, input.serviceDate);
-    if (!record) [record] = yield query(`INSERT INTO "serviceRecords" ("patientId", "serviceType", label, status, "dueDate", "serviceDate", phase) VALUES (?, 'Laboratory', ?, 'Done', ?, ?, ?) RETURNING id`,
+    if (!record) [record] = yield query(`INSERT INTO "serviceRecords" ("patientId", "serviceType", label, status, "dueDate", "serviceDate", phase) VALUES (?, 'Laboratory', ?, 'Done', ?, ?, ?) RETURNING id, note`,
       input.patientId, `${LAB_PHASE_LABEL[input.phase]} labs`, input.serviceDate, input.serviceDate, input.phase);
-    const saved = yield query('SELECT id FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', record.id, input.labTestId);
-    if (saved.length) fail("This test already has a result for that phase and date. Remove it first, or correct it in Edit patient.", "CONFLICT");
-    const [row] = yield query('INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
-      record.id, input.labTestId, input.value, test.low, test.high, labFlag(input.value, test.low, test.high));
-    // A result completes the checklist item of the same test in the same work-up phase.
+    const approvalTag = input.nurseApproved ? input.approvedByNurse ? `[Approved by Nurse: ${input.approvedByNurse}]` : "[Approved by Nurse]" : null;
+    if (approvalTag && !String(record.note ?? "").includes(approvalTag)) {
+      yield query('UPDATE "serviceRecords" SET note = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?', [record.note, approvalTag].filter(Boolean).join(" "), record.id);
+    }
     const phaseNumber = /^Phase(\d)$/.exec(input.phase)?.[1];
-    const [item] = phaseNumber ? yield query(`SELECT id FROM "checklistCatalog" WHERE name = ? AND phase = ? AND active = true AND ("appliesTo" = 'Both' OR "appliesTo" = ?)`,
-      test.name, Number(phaseNumber), profile.patientType) : [];
-    if (item) yield query(`INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate") VALUES (?, ?, 'Done', ?)
-      ON CONFLICT ("patientId", "catalogId") DO UPDATE SET status = 'Done', "doneDate" = excluded."doneDate", "updatedAt" = CURRENT_TIMESTAMP
-      WHERE "patientChecklist".status <> 'Done'`, input.patientId, item.id, input.serviceDate);
-    yield* audit(actor, input.patientId, "clinical.lab.add", row.id, { serviceRecordId: record.id, phase: input.phase });
-    return { id: row.id as number, serviceRecordId: record.id as number };
+    const ids: number[] = [];
+    for (const result of input.results) {
+      const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', result.labTestId);
+      if (!test) fail("Lab test not found", "NOT_FOUND");
+      const saved = yield query('SELECT id FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', record.id, result.labTestId);
+      if (saved.length) fail(`${test.name} already has a result for that phase and date. Remove it first, or correct it in Edit patient.`, "CONFLICT");
+      const [row] = yield query('INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+        record.id, result.labTestId, result.value, test.low, test.high, labFlag(result.value, test.low, test.high));
+      // A result completes the checklist item of the same test in the same work-up phase.
+      const [item] = phaseNumber ? yield query(`SELECT id FROM "checklistCatalog" WHERE name = ? AND phase = ? AND active = true AND ("appliesTo" = 'Both' OR "appliesTo" = ?)`,
+        test.name, Number(phaseNumber), profile.patientType) : [];
+      if (item) yield query(`INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate") VALUES (?, ?, 'Done', ?)
+        ON CONFLICT ("patientId", "catalogId") DO UPDATE SET status = 'Done', "doneDate" = excluded."doneDate", "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "patientChecklist".status <> 'Done'`, input.patientId, item.id, input.serviceDate);
+      yield* audit(actor, input.patientId, "clinical.lab.add", row.id, {
+        serviceRecordId: record.id, phase: input.phase,
+        nurseApproved: input.nurseApproved ?? false, approvedByNurse: input.approvedByNurse ?? null,
+      });
+      ids.push(row.id as number);
+    }
+    return { ids, serviceRecordId: record.id as number };
   });
+}
+export type AddLabResult = Omit<AddLabResults, "results"> & { labTestId: number; value: string };
+export async function addLabResult({ labTestId, value, ...input }: AddLabResult, actor: number) {
+  const saved = await addLabResults({ ...input, results: [{ labTestId, value }] }, actor);
+  return { id: saved.ids[0], serviceRecordId: saved.serviceRecordId };
 }
 
 export type UpdateService = {

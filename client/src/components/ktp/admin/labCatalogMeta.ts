@@ -95,3 +95,56 @@ export function resultsForItem(
       result.testName === item.name && result.phase === `Phase${item.phase}`
   );
 }
+
+/**
+ * Sub-headings of the Labs table. The tests of one laboratory panel share one group.
+ * A name that is not in this list goes to the last group of its kind.
+ */
+const LAB_GROUPS: [group: string, names: string[]][] = [
+  ["Complete blood count", ["Hemoglobin", "WBC", "Platelets", "Repeat CBC"]],
+  ["Blood typing and coagulation", ["Blood typing ABO and Rh", "Bleeding time", "Clotting time", "PT/INR", "aPTT"]],
+  ["Glucose", ["FBS", "HbA1c"]],
+  ["Kidney function", ["Creatinine", "BUN", "Uric acid"]],
+  ["Liver enzymes", ["ALT (SGPT)", "AST (SGOT)", "ALP"]],
+  ["Electrolytes and minerals", ["Sodium", "Potassium", "Calcium", "Phosphorus", "Magnesium", "iPTH"]],
+  ["Lipid profile", ["Total cholesterol", "Triglycerides", "HDL", "LDL"]],
+  ["Proteins", ["Albumin", "Total protein"]],
+  ["Infection screening", ["Hepatitis B markers", "Anti-HCV", "TPPA/VDRL/RPR", "HIV", "Malaria (BSMP)", "CMV IgG", "EBV IgG", "Varicella IgG", "TB Quantiferon", "Throat swab GS and C/S", "RT-PCR on admission day"]],
+  ["Urine and stool", ["Urinalysis with microscopy", "Urine C/S", "UACR or 24-hour urine protein and creatinine", "Fecalysis with occult blood or FIT", "Pregnancy test", "Repeat urinalysis"]],
+  ["Tissue typing and crossmatch", ["HLA typing class I and II", "PRA screening class I, II, MICA", "Single antigen bead / DSA", "T and B cell crossmatch"]],
+  ["Transplant monitoring", ["Tacrolimus trough", "CMV PCR"]],
+];
+const OTHER_LABS = "Other laboratory tests";
+const GROUP_BY_NAME = new Map(
+  LAB_GROUPS.flatMap(([group, names]) => names.map(name => [name, group] as const))
+);
+const GROUP_ORDER = [
+  "Milestones",
+  ...LAB_GROUPS.map(([group]) => group),
+  OTHER_LABS,
+  "Imaging",
+  "Clearances",
+];
+
+/** The sub-heading of one checklist item or one lab test. */
+export function groupOf(entry: { name: string; category?: string }): string {
+  if (entry.category === "Milestone") return "Milestones";
+  if (entry.category === "Imaging") return "Imaging";
+  if (entry.category === "Clearance") return "Clearances";
+  return GROUP_BY_NAME.get(entry.name) ?? OTHER_LABS;
+}
+
+/** Splits entries into groups, in the order of the Labs table. The order inside a group stays. */
+export function groupEntries<T extends { name: string; category?: string }>(
+  entries: T[]
+): { group: string; entries: T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const entry of entries) {
+    const group = groupOf(entry);
+    groups.set(group, [...(groups.get(group) ?? []), entry]);
+  }
+  return GROUP_ORDER.filter(group => groups.has(group)).map(group => ({
+    group,
+    entries: groups.get(group)!,
+  }));
+}

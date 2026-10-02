@@ -572,7 +572,39 @@ CREATE INDEX IF NOT EXISTS "patients_type_idx" ON "ktp"."patients" USING btree (
 });
 
 // server/clinicalCatalog.ts
-var LAB_CATALOG, CHECKLIST_CATALOG;
+function* syncCatalog() {
+  const tests = new Set((yield query('SELECT name FROM "labTests"')).map((row) => row.name));
+  for (const [name, unit, sort] of LAB_CATALOG) {
+    if (!tests.has(name)) yield query('INSERT INTO "labTests" (name, unit, "sortOrder", active) VALUES (?, ?, ?, true)', name, unit, sort);
+  }
+  const insertItem = (row) => query(
+    `INSERT INTO "checklistCatalog" (name, category, phase, "appliesTo", "asIndicated", "sortOrder", active) VALUES (?, ?, ?, ?, ${flag(row[4])}, ?, true) RETURNING id`,
+    row[0],
+    row[1],
+    row[2],
+    row[3],
+    row[5]
+  );
+  const items = yield query('SELECT * FROM "checklistCatalog"');
+  if (items.length === 0) {
+    for (const row of CHECKLIST_CATALOG) yield insertItem(row);
+    return;
+  }
+  const panels = items.filter((item) => item.active && CHECKLIST_SPLITS[item.name]);
+  if (panels.length === 0) return;
+  yield query('UPDATE "checklistCatalog" SET "sortOrder" = "sortOrder" * 10');
+  for (const panel of panels) {
+    for (const [index2, name] of CHECKLIST_SPLITS[panel.name].entries()) {
+      let [item] = yield query('SELECT id FROM "checklistCatalog" WHERE name = ? AND phase = ? AND active = true', name, panel.phase);
+      if (!item) [item] = yield insertItem([name, panel.category, panel.phase, panel.appliesTo, panel.asIndicated ? 1 : 0, panel.sortOrder * 10 + index2 + 1]);
+      yield query(`INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate", note)
+        SELECT "patientId", ?, status, "doneDate", note FROM "patientChecklist" WHERE "catalogId" = ?
+        ON CONFLICT ("patientId", "catalogId") DO NOTHING`, item.id, panel.id);
+    }
+    yield query('UPDATE "checklistCatalog" SET active = false WHERE id = ?', panel.id);
+  }
+}
+var LAB_CATALOG, CHECKLIST_SPLITS, PANEL_CATALOG, CHECKLIST_CATALOG, query, flag;
 var init_clinicalCatalog = __esm({
   "server/clinicalCatalog.ts"() {
     "use strict";
@@ -591,9 +623,35 @@ var init_clinicalCatalog = __esm({
       ["Triglycerides", "mmol/L", 12],
       ["HDL", "mmol/L", 13],
       ["LDL", "mmol/L", 14],
-      ["CMV PCR", "IU/mL", 15]
+      ["CMV PCR", "IU/mL", 15],
+      // Tests of the work-up panels. New tests go at the end: the lab document parser uses the IDs of the first 15.
+      ["Bleeding time", "min", 16],
+      ["Clotting time", "min", 17],
+      ["PT/INR", "INR", 18],
+      ["aPTT", "s", 19],
+      ["HbA1c", "%", 20],
+      ["Uric acid", "umol/L", 21],
+      ["AST (SGOT)", "U/L", 22],
+      ["ALP", "U/L", 23],
+      ["Calcium", "mmol/L", 24],
+      ["Phosphorus", "mmol/L", 25],
+      ["Magnesium", "mmol/L", 26],
+      ["Albumin", "g/L", 27],
+      ["Total protein", "g/L", 28],
+      ["iPTH", "pmol/L", 29]
     ];
-    CHECKLIST_CATALOG = [
+    CHECKLIST_SPLITS = {
+      "CBC with differential": ["Hemoglobin", "WBC", "Platelets"],
+      "BT, CT, PT/INR, aPTT": ["Bleeding time", "Clotting time", "PT/INR", "aPTT"],
+      "FBS and HbA1c": ["FBS", "HbA1c"],
+      "Creatinine, BUN, uric acid": ["Creatinine", "BUN", "Uric acid"],
+      "SGPT, SGOT, ALP": ["ALT (SGPT)", "AST (SGOT)", "ALP"],
+      "Na, K, Ca, phosphorus, Mg": ["Sodium", "Potassium", "Calcium", "Phosphorus", "Magnesium"],
+      "Lipid profile": ["Total cholesterol", "Triglycerides", "HDL", "LDL"],
+      "Albumin and total protein": ["Albumin", "Total protein"],
+      "Repeat urinalysis and CBC": ["Repeat urinalysis", "Repeat CBC"]
+    };
+    PANEL_CATALOG = [
       // Milestones
       ["Pre-transplant orientation", "Milestone", null, "Both", 0, 1],
       ["Initial nephrology assessment", "Milestone", null, "Both", 0, 2],
@@ -656,6 +714,9 @@ var init_clinicalCatalog = __esm({
       ["Urology", "Clearance", null, "Both", 1, 78],
       ["OB-Gyn with Pap smear or mammogram", "Clearance", null, "Both", 1, 79]
     ];
+    CHECKLIST_CATALOG = PANEL_CATALOG.flatMap(([name, category, phase, appliesTo, asIndicated, sort]) => CHECKLIST_SPLITS[name] ? CHECKLIST_SPLITS[name].map((test, index2) => [test, category, phase, appliesTo, asIndicated, sort * 10 + index2 + 1]) : [[name, category, phase, appliesTo, asIndicated, sort * 10]]);
+    query = (sql4, ...args) => ({ sql: sql4, args });
+    flag = (value) => value ? "true" : "false";
   }
 });
 
@@ -934,22 +995,15 @@ function initSchemaAndSeed(db) {
     insertDoc.run("Dr. Juan Reyes", "Fellow");
     insertDoc.run("Dr. Ana Lim", "Fellow");
   }
-  const labCount = db.prepare("SELECT count(*) as count FROM labTests").get();
-  if (labCount.count === 0) {
-    const insertLab = db.prepare("INSERT INTO labTests (name, unit, sortOrder, active) VALUES (?, ?, ?, 1)");
-    for (const [name, unit, sort] of LAB_CATALOG) {
-      insertLab.run(name, unit, sort);
+  db.transaction(() => {
+    const sync = syncCatalog();
+    let step = sync.next();
+    while (!step.done) {
+      const statement = db.prepare(step.value.sql);
+      const rows = statement.reader ? statement.all(...step.value.args) : (statement.run(...step.value.args), []);
+      step = sync.next(rows);
     }
-  }
-  const checklistCount = db.prepare("SELECT count(*) as count FROM checklistCatalog").get();
-  if (checklistCount.count === 0) {
-    const insertChecklist = db.prepare(
-      "INSERT INTO checklistCatalog (name, category, phase, appliesTo, asIndicated, sortOrder, active) VALUES (?, ?, ?, ?, ?, ?, 1)"
-    );
-    for (const [name, cat, phase, applies, asInd, sort] of CHECKLIST_CATALOG) {
-      insertChecklist.run(name, cat, phase, applies, asInd, sort);
-    }
-  }
+  })();
   const existingPatient = db.prepare("SELECT * FROM patients WHERE lower(accountEmail) = 'alai12152201@gmail.com'").get();
   if (!existingPatient) {
     db.prepare(`
@@ -1037,31 +1091,31 @@ async function listPatients(opts = {}) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    let query3 = "SELECT * FROM patients WHERE 1=1";
+    let query4 = "SELECT * FROM patients WHERE 1=1";
     const params = [];
     if (opts.type) {
-      query3 += " AND patientType = ?";
+      query4 += " AND patientType = ?";
       params.push(opts.type);
     }
     if (opts.stage) {
-      query3 += " AND stage = ?";
+      query4 += " AND stage = ?";
       params.push(opts.stage);
     }
     if (opts.doctorId) {
-      query3 += " AND (nephrologistId = ? OR fellowId = ?)";
+      query4 += " AND (nephrologistId = ? OR fellowId = ?)";
       params.push(opts.doctorId, opts.doctorId);
     }
     if (opts.status) {
-      query3 += " AND status = ?";
+      query4 += " AND status = ?";
       params.push(opts.status);
     }
     if (opts.search) {
       const term = `%${opts.search.toLowerCase()}%`;
-      query3 += " AND (lower(firstName) LIKE ? OR lower(lastName) LIKE ? OR lower(hrn) LIKE ?)";
+      query4 += " AND (lower(firstName) LIKE ? OR lower(lastName) LIKE ? OR lower(hrn) LIKE ?)";
       params.push(term, term, term);
     }
-    query3 += " ORDER BY lastName ASC, firstName ASC";
-    return sqlite.prepare(query3).all(...params);
+    query4 += " ORDER BY lastName ASC, firstName ASC";
+    return sqlite.prepare(query4).all(...params);
   }
   const conditions = [];
   if (opts.type) conditions.push(eq(patients.patientType, opts.type));
@@ -1157,15 +1211,15 @@ async function listDoctors(opts = {}) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    let query3 = "SELECT * FROM doctors WHERE 1=1";
+    let query4 = "SELECT * FROM doctors WHERE 1=1";
     const params = [];
-    if (activeOnly) query3 += " AND active = 1";
+    if (activeOnly) query4 += " AND active = 1";
     if (opts.role) {
-      query3 += " AND role = ?";
+      query4 += " AND role = ?";
       params.push(opts.role);
     }
-    query3 += " ORDER BY name ASC";
-    return sqlite.prepare(query3).all(...params);
+    query4 += " ORDER BY name ASC";
+    return sqlite.prepare(query4).all(...params);
   }
   const conditions = [];
   if (activeOnly) conditions.push(eq(doctors.active, true));
@@ -1543,6 +1597,64 @@ var init_ktp = __esm({
       PostDonation: "Post-donation"
     };
     RISK_CATEGORIES = ["StandardLow", "High"];
+  }
+});
+
+// server/labOcrBridge.ts
+var labOcrBridge_exports = {};
+__export(labOcrBridge_exports, {
+  parseLabBuffer: () => parseLabBuffer,
+  parseLabFile: () => parseLabFile
+});
+import { execFile } from "child_process";
+import fs2 from "fs";
+import os from "os";
+import path2 from "path";
+import { promisify } from "util";
+async function parseLabFile(filePath) {
+  try {
+    const pythonExe = process.platform === "win32" ? "python" : "python3";
+    const { stdout, stderr } = await execFileAsync(pythonExe, [PARSER_SCRIPT, filePath], {
+      timeout: 3e4,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    if (stderr && stderr.includes("Traceback")) {
+      console.error("[Lab OCR Python Error]", stderr);
+    }
+    const parsed = JSON.parse(stdout);
+    return parsed;
+  } catch (err) {
+    console.error("[Lab OCR Execution Failed]", err);
+    return {
+      success: false,
+      detectedDate: null,
+      tests: [],
+      extractedCount: 0,
+      error: err.message || "Failed to execute Python OCR engine"
+    };
+  }
+}
+async function parseLabBuffer(buffer, fileName) {
+  const ext = path2.extname(fileName) || ".pdf";
+  const tempPath = path2.join(os.tmpdir(), `ktp-ocr-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+  try {
+    await fs2.promises.writeFile(tempPath, buffer);
+    return await parseLabFile(tempPath);
+  } finally {
+    try {
+      if (fs2.existsSync(tempPath)) {
+        await fs2.promises.unlink(tempPath);
+      }
+    } catch {
+    }
+  }
+}
+var execFileAsync, PARSER_SCRIPT;
+var init_labOcrBridge = __esm({
+  "server/labOcrBridge.ts"() {
+    "use strict";
+    execFileAsync = promisify(execFile);
+    PARSER_SCRIPT = path2.resolve(process.cwd(), "scripts", "parse_lab_ocr.py");
   }
 });
 
@@ -2083,7 +2195,7 @@ init_db();
 init_localDb();
 init_ktp();
 import { TRPCError as TRPCError2 } from "@trpc/server";
-var query = (sql4, ...args) => ({ sql: sql4, args });
+var query2 = (sql4, ...args) => ({ sql: sql4, args });
 var fail = (message, code = "BAD_REQUEST") => {
   throw new TRPCError2({ code, message });
 };
@@ -2117,11 +2229,11 @@ async function execute(make) {
   });
 }
 function* patient(patientId) {
-  const rows = yield query('SELECT * FROM "patients" WHERE id = ?', patientId);
+  const rows = yield query2('SELECT * FROM "patients" WHERE id = ?', patientId);
   return rows[0] ?? fail("Patient not found", "NOT_FOUND");
 }
 function* audit(actor, patientId, action, id2, extra) {
-  yield query(
+  yield query2(
     'INSERT INTO "activityLog" ("actorUserId", "patientId", action, details) VALUES (?, ?, ?, ?)',
     actor,
     patientId,
@@ -2148,16 +2260,16 @@ function appointment(row) {
 async function getClinical(patientId) {
   return execute(function* () {
     const profile = yield* patient(patientId);
-    const services = yield query('SELECT * FROM "serviceRecords" WHERE "patientId" = ? ORDER BY "dueDate" DESC, id DESC', patientId);
-    const tests = yield query('SELECT * FROM "labTests" WHERE active = true ORDER BY "sortOrder", name');
-    const labs = yield query(`SELECT r.*, t.name AS "testName", t.unit, s."serviceDate", s.phase
+    const services = yield query2('SELECT * FROM "serviceRecords" WHERE "patientId" = ? ORDER BY "dueDate" DESC, id DESC', patientId);
+    const tests = yield query2('SELECT * FROM "labTests" WHERE active = true ORDER BY "sortOrder", name');
+    const labs = yield query2(`SELECT r.*, t.name AS "testName", t.unit, s."serviceDate", s.phase
       FROM "labResults" r JOIN "labTests" t ON t.id = r."labTestId"
       JOIN "serviceRecords" s ON s.id = r."serviceRecordId"
       WHERE s."patientId" = ? AND s.status = 'Done' ORDER BY s."serviceDate" DESC, r.id DESC`, patientId);
-    const checklist = yield query(`SELECT c.*, c.id AS "catalogId", COALESCE(p.status, 'Pending') AS status, p."doneDate", p.note
+    const checklist = yield query2(`SELECT c.*, c.id AS "catalogId", COALESCE(p.status, 'Pending') AS status, p."doneDate", p.note
       FROM "checklistCatalog" c LEFT JOIN "patientChecklist" p ON p."catalogId" = c.id AND p."patientId" = ?
       WHERE c.active = true AND (c."appliesTo" = 'Both' OR c."appliesTo" = ?) ORDER BY c.phase, c."sortOrder", c.id`, patientId, profile.patientType);
-    const visits = yield query('SELECT *, CAST("startsAt" AS TEXT) AS "startsAt", CAST("cancelledAt" AS TEXT) AS "cancelledAt" FROM appointments WHERE "patientId" = ? ORDER BY appointments."startsAt" DESC, id DESC', patientId);
+    const visits = yield query2('SELECT *, CAST("startsAt" AS TEXT) AS "startsAt", CAST("cancelledAt" AS TEXT) AS "cancelledAt" FROM appointments WHERE "patientId" = ? ORDER BY appointments."startsAt" DESC, id DESC', patientId);
     return {
       services: services.map(service),
       labTests: tests,
@@ -2169,15 +2281,15 @@ async function getClinical(patientId) {
 }
 async function listClinicalDashboard() {
   return execute(function* () {
-    const services = yield query('SELECT s.* FROM "serviceRecords" s JOIN patients p ON p.id = s."patientId" WHERE p.status = ?', "Active");
-    const visits = yield query('SELECT a.*, CAST(a."startsAt" AS TEXT) AS "startsAt", CAST(a."cancelledAt" AS TEXT) AS "cancelledAt" FROM appointments a JOIN patients p ON p.id = a."patientId" WHERE p.status = ?', "Active");
+    const services = yield query2('SELECT s.* FROM "serviceRecords" s JOIN patients p ON p.id = s."patientId" WHERE p.status = ?', "Active");
+    const visits = yield query2('SELECT a.*, CAST(a."startsAt" AS TEXT) AS "startsAt", CAST(a."cancelledAt" AS TEXT) AS "cancelledAt" FROM appointments a JOIN patients p ON p.id = a."patientId" WHERE p.status = ?', "Active");
     return { services: services.map(service), appointments: visits.map(appointment) };
   });
 }
 async function addService(input, actor) {
   return execute(function* () {
     yield* patient(input.patientId);
-    const [row] = yield query(
+    const [row] = yield query2(
       'INSERT INTO "serviceRecords" ("patientId", "serviceType", label, "dueDate", note) VALUES (?, ?, ?, ?, ?) RETURNING id',
       input.patientId,
       input.serviceType,
@@ -2198,13 +2310,13 @@ function labFlag(value, lowRaw, highRaw) {
 async function recordResult(input, actor) {
   return execute(function* () {
     yield* patient(input.patientId);
-    const [current] = yield query('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.serviceRecordId, input.patientId);
+    const [current] = yield query2('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.serviceRecordId, input.patientId);
     if (!current) fail("Service not found", "NOT_FOUND");
     if (current.status !== "Planned") fail("Only planned services can receive results", "CONFLICT");
     if (input.results?.length && !["Laboratory", "Tacro"].includes(current.serviceType)) fail("Lab values require a laboratory or tacrolimus service");
     const approvalTag = input.nurseApproved ? input.approvedByNurse ? `[Approved by Nurse: ${input.approvedByNurse}]` : "[Approved by Nurse]" : null;
     const finalNote = [input.note, approvalTag].filter(Boolean).join(" ") || null;
-    const changed = yield query(
+    const changed = yield query2(
       `UPDATE "serviceRecords" SET status = 'Done', "serviceDate" = ?, "claimDeadline" = ?, note = COALESCE(?, note), "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = ? AND "patientId" = ? AND status = 'Planned' RETURNING id`,
       input.serviceDate,
@@ -2215,17 +2327,17 @@ async function recordResult(input, actor) {
     );
     if (!changed.length) fail("Service already changed; refresh and retry", "CONFLICT");
     for (const value of input.results ?? []) {
-      const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', value.labTestId);
+      const [test] = yield query2('SELECT * FROM "labTests" WHERE id = ? AND active = true', value.labTestId);
       if (!test) fail("Lab test not found", "NOT_FOUND");
-      const flag = labFlag(value.value, test.low, test.high);
-      yield query(
+      const flag2 = labFlag(value.value, test.low, test.high);
+      yield query2(
         'INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?)',
         input.serviceRecordId,
         value.labTestId,
         value.value,
         test.low,
         test.high,
-        flag
+        flag2
       );
     }
     yield* audit(actor, input.patientId, "clinical.result.record", input.serviceRecordId, {
@@ -2235,45 +2347,72 @@ async function recordResult(input, actor) {
     return { id: input.serviceRecordId };
   });
 }
-async function addLabResult(input, actor) {
+async function addLabResults(input, actor) {
   return execute(function* () {
     const profile = yield* patient(input.patientId);
     if (!isValidStageForPatientType(input.phase, profile.patientType)) fail("Phase does not apply to this patient type");
-    const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', input.labTestId);
-    if (!test) fail("Lab test not found", "NOT_FOUND");
-    let [record] = yield query(
-      `SELECT id FROM "serviceRecords" WHERE "patientId" = ? AND phase = ? AND "serviceDate" = ? AND "serviceType" = 'Laboratory' AND status = 'Done' ORDER BY id LIMIT 1`,
+    let [record] = yield query2(
+      `SELECT id, note FROM "serviceRecords" WHERE "patientId" = ? AND phase = ? AND "serviceDate" = ? AND "serviceType" = 'Laboratory' AND status = 'Done' ORDER BY id LIMIT 1`,
       input.patientId,
       input.phase,
       input.serviceDate
     );
-    if (!record) [record] = yield query(
-      `INSERT INTO "serviceRecords" ("patientId", "serviceType", label, status, "dueDate", "serviceDate", phase) VALUES (?, 'Laboratory', ?, 'Done', ?, ?, ?) RETURNING id`,
+    if (!record) [record] = yield query2(
+      `INSERT INTO "serviceRecords" ("patientId", "serviceType", label, status, "dueDate", "serviceDate", phase) VALUES (?, 'Laboratory', ?, 'Done', ?, ?, ?) RETURNING id, note`,
       input.patientId,
       `${LAB_PHASE_LABEL[input.phase]} labs`,
       input.serviceDate,
       input.serviceDate,
       input.phase
     );
-    const saved = yield query('SELECT id FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', record.id, input.labTestId);
-    if (saved.length) fail("This test already has a result for that phase and date. Remove it first, or correct it in Edit patient.", "CONFLICT");
-    const [row] = yield query(
-      'INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
-      record.id,
-      input.labTestId,
-      input.value,
-      test.low,
-      test.high,
-      labFlag(input.value, test.low, test.high)
-    );
-    yield* audit(actor, input.patientId, "clinical.lab.add", row.id, { serviceRecordId: record.id, phase: input.phase });
-    return { id: row.id, serviceRecordId: record.id };
+    const approvalTag = input.nurseApproved ? input.approvedByNurse ? `[Approved by Nurse: ${input.approvedByNurse}]` : "[Approved by Nurse]" : null;
+    if (approvalTag && !String(record.note ?? "").includes(approvalTag)) {
+      yield query2('UPDATE "serviceRecords" SET note = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ?', [record.note, approvalTag].filter(Boolean).join(" "), record.id);
+    }
+    const phaseNumber = /^Phase(\d)$/.exec(input.phase)?.[1];
+    const ids = [];
+    for (const result of input.results) {
+      const [test] = yield query2('SELECT * FROM "labTests" WHERE id = ? AND active = true', result.labTestId);
+      if (!test) fail("Lab test not found", "NOT_FOUND");
+      const saved = yield query2('SELECT id FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', record.id, result.labTestId);
+      if (saved.length) fail(`${test.name} already has a result for that phase and date. Remove it first, or correct it in Edit patient.`, "CONFLICT");
+      const [row] = yield query2(
+        'INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+        record.id,
+        result.labTestId,
+        result.value,
+        test.low,
+        test.high,
+        labFlag(result.value, test.low, test.high)
+      );
+      const [item] = phaseNumber ? yield query2(
+        `SELECT id FROM "checklistCatalog" WHERE name = ? AND phase = ? AND active = true AND ("appliesTo" = 'Both' OR "appliesTo" = ?)`,
+        test.name,
+        Number(phaseNumber),
+        profile.patientType
+      ) : [];
+      if (item) yield query2(`INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate") VALUES (?, ?, 'Done', ?)
+        ON CONFLICT ("patientId", "catalogId") DO UPDATE SET status = 'Done', "doneDate" = excluded."doneDate", "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "patientChecklist".status <> 'Done'`, input.patientId, item.id, input.serviceDate);
+      yield* audit(actor, input.patientId, "clinical.lab.add", row.id, {
+        serviceRecordId: record.id,
+        phase: input.phase,
+        nurseApproved: input.nurseApproved ?? false,
+        approvedByNurse: input.approvedByNurse ?? null
+      });
+      ids.push(row.id);
+    }
+    return { ids, serviceRecordId: record.id };
   });
+}
+async function addLabResult({ labTestId, value, ...input }, actor) {
+  const saved = await addLabResults({ ...input, results: [{ labTestId, value }] }, actor);
+  return { id: saved.ids[0], serviceRecordId: saved.serviceRecordId };
 }
 async function updateService(input, actor) {
   return execute(function* () {
     yield* patient(input.patientId);
-    const [current] = yield query('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.id, input.patientId);
+    const [current] = yield query2('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.id, input.patientId);
     if (!current) fail("Service not found", "NOT_FOUND");
     if (current.status === "Superseded") fail("Superseded services cannot be edited", "CONFLICT");
     if (current.status === "Planned" && (input.serviceDate || input.claimFiledDate || input.results?.length)) fail("Record a result before editing result details");
@@ -2299,8 +2438,8 @@ async function updateService(input, actor) {
     if (after.serviceDate && after.claimFiledDate && after.claimFiledDate < after.serviceDate) fail("Claim filing cannot precede service date");
     const labs = 'SELECT * FROM "labResults" WHERE "serviceRecordId" = ? ORDER BY "labTestId", id';
     const values = (rows) => rows.map((row) => ({ labTestId: Number(row.labTestId), value: String(row.value) }));
-    const labsBefore = yield query(labs, input.id);
-    yield query(
+    const labsBefore = yield query2(labs, input.id);
+    yield query2(
       `UPDATE "serviceRecords" SET label = ?, "dueDate" = ?, "serviceDate" = ?, "claimDeadline" = ?, "claimFiledDate" = ?, note = ?, "updatedAt" = CURRENT_TIMESTAMP
       WHERE id = ? AND "patientId" = ?`,
       after.label,
@@ -2315,9 +2454,9 @@ async function updateService(input, actor) {
     for (const value of input.results ?? []) {
       const saved = labsBefore.find((row) => Number(row.labTestId) === value.labTestId);
       if (value.value === "") {
-        if (saved) yield query('DELETE FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', input.id, value.labTestId);
+        if (saved) yield query2('DELETE FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', input.id, value.labTestId);
       } else if (saved) {
-        yield query(
+        yield query2(
           'UPDATE "labResults" SET value = ?, flag = ? WHERE "serviceRecordId" = ? AND "labTestId" = ?',
           value.value,
           labFlag(value.value, saved.lowSnapshot, saved.highSnapshot),
@@ -2325,9 +2464,9 @@ async function updateService(input, actor) {
           value.labTestId
         );
       } else {
-        const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', value.labTestId);
+        const [test] = yield query2('SELECT * FROM "labTests" WHERE id = ? AND active = true', value.labTestId);
         if (!test) fail("Lab test not found", "NOT_FOUND");
-        yield query(
+        yield query2(
           'INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?)',
           input.id,
           value.labTestId,
@@ -2338,10 +2477,10 @@ async function updateService(input, actor) {
         );
       }
     }
-    const labsAfter = yield query(labs, input.id);
+    const labsAfter = yield query2(labs, input.id);
     const snapshot = { before: JSON.stringify({ ...before, labs: values(labsBefore) }), after: JSON.stringify({ ...after, labs: values(labsAfter) }) };
     if (snapshot.before === snapshot.after) fail("No change to save");
-    yield query(
+    yield query2(
       'INSERT INTO "recordRevisions" ("entityType", "entityId", "before", "after", reason, "userId") VALUES (?, ?, ?, ?, ?, ?)',
       "serviceRecord",
       input.id,
@@ -2355,9 +2494,9 @@ async function updateService(input, actor) {
   });
 }
 function* checklistWrite(profile, input, actor) {
-  const [catalog] = yield query('SELECT * FROM "checklistCatalog" WHERE id = ? AND active = true', input.catalogId);
+  const [catalog] = yield query2('SELECT * FROM "checklistCatalog" WHERE id = ? AND active = true', input.catalogId);
   if (!catalog || !["Both", profile.patientType].includes(catalog.appliesTo)) fail("Checklist item not found for this patient", "NOT_FOUND");
-  const [row] = yield query(
+  const [row] = yield query2(
     `INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate", note) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT ("patientId", "catalogId") DO UPDATE SET status = excluded.status, "doneDate" = excluded."doneDate", note = excluded.note, "updatedAt" = CURRENT_TIMESTAMP RETURNING id`,
     input.patientId,
@@ -2385,7 +2524,7 @@ async function setChecklistMany(input, actor) {
 async function addAppointment(input, actor) {
   return execute(function* () {
     yield* patient(input.patientId);
-    const [row] = yield query(
+    const [row] = yield query2(
       'INSERT INTO appointments ("patientId", title, kind, "startsAt", location, note) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
       input.patientId,
       input.title,
@@ -2401,7 +2540,7 @@ async function addAppointment(input, actor) {
 async function cancelAppointment(input, actor) {
   return execute(function* () {
     yield* patient(input.patientId);
-    const [row] = yield query('UPDATE appointments SET "cancelledAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "cancelledAt" IS NULL RETURNING id, title', input.id, input.patientId);
+    const [row] = yield query2('UPDATE appointments SET "cancelledAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "cancelledAt" IS NULL RETURNING id, title', input.id, input.patientId);
     if (!row) fail("Appointment missing or already cancelled", "CONFLICT");
     yield* audit(actor, input.patientId, "clinical.appointment.cancel", row.id);
     return { id: input.id };
@@ -2410,11 +2549,11 @@ async function cancelAppointment(input, actor) {
 async function fileClaim(input, actor) {
   return execute(function* () {
     yield* patient(input.patientId);
-    const [current] = yield query('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.id, input.patientId);
+    const [current] = yield query2('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.id, input.patientId);
     if (!current) fail("Service not found", "NOT_FOUND");
     if (!current.serviceDate || current.status === "Planned") fail("Record a result before filing a claim");
     if (input.claimFiledDate < dateOnly(current.serviceDate)) fail("Claim filing cannot precede service date");
-    const changed = yield query('UPDATE "serviceRecords" SET "claimFiledDate" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "claimFiledDate" IS NULL RETURNING id', input.claimFiledDate, input.id, input.patientId);
+    const changed = yield query2('UPDATE "serviceRecords" SET "claimFiledDate" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "claimFiledDate" IS NULL RETURNING id', input.claimFiledDate, input.id, input.patientId);
     if (!changed.length) fail("Claim already filed", "CONFLICT");
     yield* audit(actor, input.patientId, "clinical.claim.file", input.id);
     return { id: input.id };
@@ -2423,7 +2562,7 @@ async function fileClaim(input, actor) {
 async function respondToAppointment(input) {
   return execute(function* () {
     yield* patient(input.patientId);
-    const [row] = yield query(
+    const [row] = yield query2(
       'UPDATE appointments SET response = ?, "responseNote" = ?, "respondedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "cancelledAt" IS NULL RETURNING id, title',
       input.response,
       input.responseNote ?? null,
@@ -2437,7 +2576,7 @@ async function respondToAppointment(input) {
 }
 async function listAllAppointments() {
   return execute(function* () {
-    const rows = yield query(`
+    const rows = yield query2(`
       SELECT a.*,
         CAST(a."startsAt" AS TEXT) AS "startsAt",
         CAST(a."cancelledAt" AS TEXT) AS "cancelledAt",
@@ -2462,13 +2601,12 @@ var catalogReady;
 function ensureCatalog() {
   return catalogReady ??= getBatchClient().begin(async (tx) => {
     await tx.unsafe('LOCK TABLE "labTests", "checklistCatalog" IN SHARE ROW EXCLUSIVE MODE');
-    const [labs] = await tx.unsafe('SELECT COUNT(*) AS count FROM "labTests"');
-    if (Number(labs.count) === 0) for (const [name, unit, sort] of LAB_CATALOG) {
-      await tx.unsafe('INSERT INTO "labTests" (name, unit, "sortOrder", active) VALUES ($1,$2,$3,true)', [name, unit, sort]);
-    }
-    const [items] = await tx.unsafe('SELECT COUNT(*) AS count FROM "checklistCatalog"');
-    if (Number(items.count) === 0) for (const [name, category, phase, appliesTo, asIndicated, sort] of CHECKLIST_CATALOG) {
-      await tx.unsafe('INSERT INTO "checklistCatalog" (name, category, phase, "appliesTo", "asIndicated", "sortOrder", active) VALUES ($1,$2,$3,$4,$5,$6,true)', [name, category, phase, appliesTo, Boolean(asIndicated), sort]);
+    const sync = syncCatalog();
+    let step = sync.next();
+    while (!step.done) {
+      let parameter = 0;
+      const rows = await tx.unsafe(step.value.sql.replace(/\?/g, () => `$${++parameter}`), step.value.args);
+      step = sync.next([...rows]);
     }
   }).then(() => void 0).catch((error) => {
     catalogReady = void 0;
@@ -2476,54 +2614,8 @@ function ensureCatalog() {
   });
 }
 
-// server/labOcrBridge.ts
-import { execFile } from "child_process";
-import fs2 from "fs";
-import os from "os";
-import path2 from "path";
-import { promisify } from "util";
-var execFileAsync = promisify(execFile);
-var PARSER_SCRIPT = path2.resolve(process.cwd(), "scripts", "parse_lab_ocr.py");
-async function parseLabFile(filePath) {
-  try {
-    const pythonExe = process.platform === "win32" ? "python" : "python3";
-    const { stdout, stderr } = await execFileAsync(pythonExe, [PARSER_SCRIPT, filePath], {
-      timeout: 3e4,
-      maxBuffer: 10 * 1024 * 1024
-    });
-    if (stderr && stderr.includes("Traceback")) {
-      console.error("[Lab OCR Python Error]", stderr);
-    }
-    const parsed = JSON.parse(stdout);
-    return parsed;
-  } catch (err) {
-    console.error("[Lab OCR Execution Failed]", err);
-    return {
-      success: false,
-      detectedDate: null,
-      tests: [],
-      extractedCount: 0,
-      error: err.message || "Failed to execute Python OCR engine"
-    };
-  }
-}
-async function parseLabBuffer(buffer, fileName) {
-  const ext = path2.extname(fileName) || ".pdf";
-  const tempPath = path2.join(os.tmpdir(), `ktp-ocr-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
-  try {
-    await fs2.promises.writeFile(tempPath, buffer);
-    return await parseLabFile(tempPath);
-  } finally {
-    try {
-      if (fs2.existsSync(tempPath)) {
-        await fs2.promises.unlink(tempPath);
-      }
-    } catch {
-    }
-  }
-}
-
 // server/routers/clinical.ts
+init_labOcrBridge();
 init_ktp();
 var id = z.number().int().positive().safe();
 var patient2 = z.object({ patientId: id });
@@ -2559,6 +2651,13 @@ var clinicalRouter = router({
     labTestId: id,
     value: z.string().trim().min(1).max(100)
   })).mutation(({ input, ctx }) => addLabResult(input, ctx.user.id)),
+  addLabResults: adminProcedure.input(patient2.extend({
+    phase: z.enum(LAB_PHASES),
+    serviceDate: pastDate,
+    nurseApproved: z.boolean().optional(),
+    approvedByNurse: z.string().trim().max(200).optional(),
+    results: z.array(z.object({ labTestId: id, value: z.string().trim().min(1).max(100) })).min(1).max(100)
+  }).refine((input) => new Set(input.results.map((row) => row.labTestId)).size === input.results.length, "Each lab test may occur once")).mutation(({ input, ctx }) => addLabResults(input, ctx.user.id)),
   updateService: adminProcedure.input(patient2.extend({
     id,
     reason: z.string().trim().min(3).max(500),
@@ -3001,7 +3100,7 @@ import { z as z7 } from "zod";
 init_db();
 init_localDb();
 import { TRPCError as TRPCError5 } from "@trpc/server";
-var query2 = (sql4, ...args) => ({ sql: sql4, args });
+var query3 = (sql4, ...args) => ({ sql: sql4, args });
 async function execute2(make) {
   if (!process.env.DATABASE_URL) {
     const db = getSqliteDb();
@@ -3047,14 +3146,14 @@ async function createBroadcastMessage(input) {
       patientSql += " AND id = ?";
       patientArgs.push(input.targetPatientId);
     }
-    const recipients = yield query2(patientSql, ...patientArgs);
+    const recipients = yield query3(patientSql, ...patientArgs);
     if (!recipients.length) {
       throw new TRPCError5({
         code: "BAD_REQUEST",
         message: "No active patients match the chosen broadcast target"
       });
     }
-    const [msg] = yield query2(
+    const [msg] = yield query3(
       `INSERT INTO messages ("senderUserId", subject, body, "targetType", "targetStage", "targetPatientId")
        VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
       input.senderUserId,
@@ -3066,12 +3165,12 @@ async function createBroadcastMessage(input) {
     );
     const messageId = msg.id;
     for (const p of recipients) {
-      yield query2(
+      yield query3(
         'INSERT INTO "messageRecipients" ("messageId", "patientId") VALUES (?, ?)',
         messageId,
         p.id
       );
-      yield query2(
+      yield query3(
         `INSERT INTO notifications ("patientId", title, message, type, "linkUrl")
          VALUES (?, ?, ?, 'info', '/me/messages')`,
         p.id,
@@ -3084,7 +3183,7 @@ async function createBroadcastMessage(input) {
 }
 async function listAdminMessages() {
   return execute2(function* () {
-    const rows = yield query2(`
+    const rows = yield query3(`
       SELECT m.id, m."senderUserId", m.subject, m.body, m."targetType", m."targetStage", m."targetPatientId",
         CAST(m."createdAt" AS TEXT) AS "createdAt",
         (SELECT COUNT(*) FROM "messageRecipients" mr WHERE mr."messageId" = m.id) AS "recipientCount",
@@ -3110,7 +3209,7 @@ async function listAdminMessages() {
 }
 async function listPatientMessages(patientId) {
   return execute2(function* () {
-    const rows = yield query2(
+    const rows = yield query3(
       `SELECT m.id, m.subject, m.body,
         CAST(m."createdAt" AS TEXT) AS "createdAt",
         CAST(mr."readAt" AS TEXT) AS "readAt",
@@ -3134,12 +3233,12 @@ async function listPatientMessages(patientId) {
 }
 async function acknowledgePatientMessage(patientId, messageId) {
   return execute2(function* () {
-    yield query2(
+    yield query3(
       'UPDATE "messageRecipients" SET "readAt" = CURRENT_TIMESTAMP WHERE "messageId" = ? AND "patientId" = ? AND "readAt" IS NULL',
       messageId,
       patientId
     );
-    yield query2(
+    yield query3(
       'INSERT INTO "messageAcknowledgments" ("messageId", "patientId") VALUES (?, ?)',
       messageId,
       patientId
@@ -3211,6 +3310,51 @@ var patientPortalRouter = router({
       photoFileId: input.photoFileId
     });
     return updated;
+  }),
+  parseLabDocument: patientProcedure.input(
+    z7.object({
+      fileName: z7.string().min(1).max(255).optional(),
+      base64: z7.string().min(1)
+    })
+  ).mutation(async ({ input }) => {
+    const buffer = Buffer.from(input.base64, "base64");
+    const { parseLabBuffer: parseLabBuffer2 } = await Promise.resolve().then(() => (init_labOcrBridge(), labOcrBridge_exports));
+    return parseLabBuffer2(buffer, input.fileName || "document.pdf");
+  }),
+  submitPatientLab: patientProcedure.input(
+    z7.object({
+      serviceDate: z7.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      note: z7.string().trim().max(1e3).optional(),
+      items: z7.array(
+        z7.object({
+          labTestId: z7.number().int().positive(),
+          value: z7.string().trim().min(1).max(100)
+        })
+      )
+    })
+  ).mutation(async ({ ctx, input }) => {
+    const res = await recordResult(
+      {
+        patientId: ctx.patientId,
+        serviceRecordId: 0,
+        serviceDate: input.serviceDate,
+        label: "Patient self-uploaded lab report",
+        nurseApproved: false,
+        approvedByNurse: "Pending Verification",
+        note: input.note ? `[Patient Upload] ${input.note}` : "[Patient Upload] Pending clinical verification",
+        results: input.items
+      },
+      ctx.user?.id ?? 0
+    );
+    await logActivity(
+      ctx.user?.id ?? 0,
+      ctx.patientId,
+      "PATIENT_UPLOAD_LAB",
+      { serviceDate: input.serviceDate, testCount: input.items.length },
+      ctx.req.ip,
+      ctx.req.headers["user-agent"]
+    );
+    return { success: true, recordId: res?.id };
   })
 });
 
@@ -3237,6 +3381,497 @@ var messagesRouter = router({
       targetStage: input.targetStage,
       targetPatientId: input.targetPatientId
     });
+  })
+});
+
+// server/routers/automations.ts
+import { z as z9 } from "zod";
+
+// server/emailService.ts
+init_db();
+init_localDb();
+init_ktp();
+var DEFAULT_AUTOMATION_CONFIG = {
+  masterEnabled: true,
+  dispatchTimeManila: "08:00",
+  triggers: [
+    {
+      key: "appointment_reminder",
+      label: "Clinic Appointment Notice",
+      description: "Send patient email reminder 2 days before scheduled clinic visit.",
+      enabled: true,
+      leadDays: 2
+    },
+    {
+      key: "overdue_lab",
+      label: "Overdue Lab Workup Alert",
+      description: "Send alert when scheduled laboratory workup due date has passed.",
+      enabled: true,
+      leadDays: 1
+    },
+    {
+      key: "weekly_digest",
+      label: "Weekly Nephrology Digest",
+      description: "Send weekly patient census and pending clearance digest to doctors.",
+      enabled: true,
+      leadDays: 7
+    }
+  ],
+  lastRunAt: null,
+  lastRunStats: null
+};
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+function baseTemplate(title, patientBanner, bodyContent) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { margin:0; padding:0; background-color:#e2e5d5; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#2a301e; }
+    .wrapper { width:100%; max-width:600px; margin:24px auto; background-color:#fbfbf7; border-radius:12px; border:1px solid #cbd0bb; overflow:hidden; }
+    .header { background-color:#f3f4ec; padding:20px 24px; border-bottom:1px solid #cbd0bb; }
+    .title { font-size:18px; font-weight:700; margin:0; color:#2a301e; }
+    .sub { font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:#545b45; margin-top:4px; }
+    .banner { background-color:#d8dcc9; padding:12px 24px; font-size:12px; font-family:monospace; color:#2a301e; border-bottom:1px solid #cbd0bb; }
+    .content { padding:24px; font-size:14px; line-height:1.5; color:#2a301e; }
+    .footer { background-color:#f3f4ec; padding:16px 24px; font-size:11px; color:#545b45; border-top:1px solid #cbd0bb; }
+    .btn { display:inline-block; background-color:#ae3c30; color:#fffaf6; text-decoration:none; padding:10px 18px; font-size:13px; font-weight:600; border-radius:6px; margin-top:16px; }
+    .highlight { background-color:#dcefdc; color:#1d6433; padding:2px 6px; border-radius:4px; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1 class="title">SPMC Kidney Transplant Service</h1>
+      <div class="sub">Clinical Notification System \xB7 Confidential</div>
+    </div>
+    ${patientBanner ? `<div class="banner">${patientBanner}</div>` : ""}
+    <div class="content">
+      ${bodyContent}
+    </div>
+    <div class="footer">
+      Southern Philippines Medical Center \xB7 Kidney Transplant Program<br>
+      This notification is sent automatically. For urgent clinical emergencies, visit the emergency department.
+    </div>
+  </div>
+</body>
+</html>`;
+}
+function renderEmailTemplate(templateName, data) {
+  const patientName = data.patientName || "Patient";
+  const hrn = data.hrn || "KTP-2026-0000";
+  if (templateName === "AppointmentNotice") {
+    const subject2 = `Appointment Notice: ${patientName} (${hrn}) on ${data.appointmentDate || todayDate()}`;
+    const banner = `PATIENT: ${escapeHtml(patientName)} | HRN: ${escapeHtml(hrn)} | VISIT: ${escapeHtml(data.kind || "FollowUp")}`;
+    const body2 = `
+      <p>Dear <strong>${escapeHtml(patientName)}</strong>,</p>
+      <p>This is an automated reminder of your upcoming kidney transplant clinic appointment:</p>
+      <div style="background-color:#f3f4ec; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #cbd0bb;">
+        <p style="margin:0 0 8px 0;"><strong>Date and Time:</strong> <span class="highlight">${escapeHtml(data.appointmentDate || "")} at ${escapeHtml(data.time || "09:00 AM")}</span></p>
+        <p style="margin:0 0 8px 0;"><strong>Attending Doctor:</strong> ${escapeHtml(data.doctorName || "Transplant Specialist")}</p>
+        <p style="margin:0;"><strong>Location:</strong> SPMC Kidney Transplant Clinic, OPD Building</p>
+      </div>
+      <p>Please arrive 15 minutes before your scheduled time. Bring your previous lab results and PhilHealth identification.</p>
+      <a href="https://ktp-beryl.vercel.app/me/calendar" class="btn">View Appointment in Patient Portal</a>
+    `;
+    const text2 = `SPMC Kidney Transplant Appointment Reminder
+Patient: ${patientName} (${hrn})
+Date: ${data.appointmentDate} at ${data.time}
+Doctor: ${data.doctorName}
+Location: SPMC Kidney Transplant Clinic`;
+    return { subject: subject2, html: baseTemplate("Clinic Appointment Notice", banner, body2), text: text2 };
+  }
+  if (templateName === "OverdueLabAlert") {
+    const subject2 = `Action Required: Scheduled Lab Workup Due for ${patientName} (${hrn})`;
+    const banner = `PATIENT: ${escapeHtml(patientName)} | HRN: ${escapeHtml(hrn)} | ALERT: Due Lab Service`;
+    const body2 = `
+      <p>Dear <strong>${escapeHtml(patientName)}</strong>,</p>
+      <p>Our records show a scheduled laboratory workup has reached its due date without recorded results:</p>
+      <div style="background-color:#fbe1e8; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #ae3c30;">
+        <p style="margin:0 0 8px 0; color:#ae3c30;"><strong>Laboratory Requirement:</strong> ${escapeHtml(data.labTitle || "Periodic Blood Chemistry")}</p>
+        <p style="margin:0; color:#2a301e;"><strong>Target Due Date:</strong> ${escapeHtml(data.dueDate || todayDate())}</p>
+      </div>
+      <p>Routine lab monitoring is critical to protect your graft function. Please complete your blood draw and upload your results or submit them to the transplant coordinator.</p>
+      <a href="https://ktp-beryl.vercel.app/me/labs" class="btn">Upload Results to Portal</a>
+    `;
+    const text2 = `SPMC Kidney Transplant Lab Workup Alert
+Patient: ${patientName} (${hrn})
+Requirement: ${data.labTitle}
+Due Date: ${data.dueDate}`;
+    return { subject: subject2, html: baseTemplate("Overdue Lab Workup Alert", banner, body2), text: text2 };
+  }
+  if (templateName === "WeeklyClinicalDigest") {
+    const subject2 = `Weekly Kidney Transplant Clinical Digest: ${data.date || todayDate()}`;
+    const banner = `CLINICAL DIGEST | SPMC TRANSPLANT SERVICE | CENSUS SUMMARY`;
+    const body2 = `
+      <p>Dear <strong>${escapeHtml(data.doctorName || "Transplant Team")}</strong>,</p>
+      <p>Here is the weekly active patient census and workup status summary:</p>
+      <div style="background-color:#f3f4ec; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #cbd0bb;">
+        <p style="margin:0 0 8px 0;"><strong>Active Transplant Patients:</strong> <span class="highlight">${data.activeCount || 0}</span></p>
+        <p style="margin:0 0 8px 0;"><strong>Pending Lab Workups:</strong> ${data.pendingLabs || 0}</p>
+        <p style="margin:0 0 8px 0;"><strong>Upcoming Clinic Visits (7 Days):</strong> ${data.upcomingVisits || 0}</p>
+        <p style="margin:0;"><strong>Patients in Pre-Transplant Evaluation:</strong> ${data.evalCount || 0}</p>
+      </div>
+      <a href="https://ktp-beryl.vercel.app/dashboard" class="btn">Open Transplant Dashboard</a>
+    `;
+    const text2 = `Weekly Transplant Digest
+Active Patients: ${data.activeCount}
+Pending Labs: ${data.pendingLabs}
+Upcoming Visits: ${data.upcomingVisits}`;
+    return { subject: subject2, html: baseTemplate("Weekly Clinical Digest", banner, body2), text: text2 };
+  }
+  const subject = `KTP Notification System Test (${data.testId || "Ping"})`;
+  const body = `
+    <p>This is a test notification confirming email delivery connectivity for the SPMC Kidney Transplant Program.</p>
+    <p>Timestamp: <strong>${(/* @__PURE__ */ new Date()).toISOString()}</strong></p>
+    <p>Status: All automated clinical dispatch pipelines operational.</p>
+  `;
+  return { subject, html: baseTemplate("Notification System Test", "", body), text: "KTP Email Test OK" };
+}
+async function sendEmail({
+  to,
+  subject,
+  html,
+  text: text2,
+  templateName,
+  patientId
+}) {
+  const apiKey = process.env.RESEND_API_KEY;
+  let status = "mock";
+  let errorMessage = null;
+  if (apiKey) {
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: process.env.EMAIL_FROM || "KTP Notifications <notifications@spmcdvo.net>",
+          to: [to],
+          subject,
+          html,
+          text: text2
+        })
+      });
+      if (res.ok) {
+        status = "sent";
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        status = "failed";
+        errorMessage = errorData.message || `HTTP ${res.status}`;
+      }
+    } catch (err) {
+      status = "failed";
+      errorMessage = err.message || "Network dispatch failure";
+    }
+  } else {
+    status = "mock";
+  }
+  const db = getBatchClient();
+  let logId = 0;
+  if (db) {
+    try {
+      const [row] = await db`
+        INSERT INTO "ktp"."emailLogs" ("recipientEmail", "subject", "templateName", "status", "errorMessage", "patientId")
+        VALUES (${to}, ${subject}, ${templateName}, ${status}, ${errorMessage}, ${patientId || null})
+        RETURNING id
+      `;
+      logId = Number(row?.id || 0);
+    } catch (e) {
+      console.error("[Email Log Insert Failed PG]", e);
+    }
+  } else {
+    try {
+      const sqlite = getSqliteDb();
+      const res = sqlite.prepare(
+        "INSERT INTO emailLogs (recipientEmail, subject, templateName, status, errorMessage, patientId) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(to, subject, templateName, status, errorMessage, patientId || null);
+      logId = Number(res.lastInsertRowid);
+    } catch (e) {
+      console.error("[Email Log Insert Failed SQLite]", e);
+    }
+  }
+  return { id: logId, status };
+}
+async function getAutomationConfig() {
+  const db = getBatchClient();
+  try {
+    if (db) {
+      const rows = await db`SELECT value FROM "ktp"."appSettings" WHERE key = 'email_automation_config' LIMIT 1`;
+      if (rows.length && rows[0].value) return JSON.parse(rows[0].value);
+    } else {
+      const sqlite = getSqliteDb();
+      const row = sqlite.prepare("SELECT value FROM appSettings WHERE key = 'email_automation_config'").get();
+      if (row?.value) return JSON.parse(row.value);
+    }
+  } catch (e) {
+  }
+  return DEFAULT_AUTOMATION_CONFIG;
+}
+async function updateAutomationConfig(config) {
+  const jsonStr = JSON.stringify(config);
+  const db = getBatchClient();
+  try {
+    if (db) {
+      await db`
+        INSERT INTO "ktp"."appSettings" (key, value)
+        VALUES ('email_automation_config', ${jsonStr})
+        ON CONFLICT (key) DO UPDATE SET value = ${jsonStr}, "updatedAt" = now()
+      `;
+    } else {
+      const sqlite = getSqliteDb();
+      sqlite.prepare("INSERT INTO appSettings (key, value) VALUES ('email_automation_config', ?) ON CONFLICT(key) DO UPDATE SET value = ?").run(jsonStr, jsonStr);
+    }
+    return true;
+  } catch (e) {
+    console.error("[Update Email Config Error]", e);
+    return false;
+  }
+}
+async function runEmailAutomationSweep() {
+  const config = await getAutomationConfig();
+  if (!config.masterEnabled) {
+    return { created: 0, sent: 0, failed: 0, skipped: 0 };
+  }
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+  const today = todayDate();
+  const db = getBatchClient();
+  const apptTrigger = config.triggers.find((t2) => t2.key === "appointment_reminder");
+  if (apptTrigger && apptTrigger.enabled) {
+    try {
+      let appointments2 = [];
+      if (db) {
+        appointments2 = await db`
+          SELECT a.id, a."patientId", a.title, a.kind, a."startsAt", a.location, p."firstName", p."lastName", p."accountEmail", p."hrn"
+          FROM "ktp"."appointments" a
+          JOIN "ktp"."patients" p ON p.id = a."patientId"
+          WHERE a."cancelledAt" IS NULL
+            AND a."startsAt"::date >= ${today}::date
+            AND a."startsAt"::date <= (${today}::date + interval '2 days')
+        `;
+      } else {
+        const sqlite = getSqliteDb();
+        appointments2 = sqlite.prepare(`
+          SELECT a.id, a.patientId, a.title, a.kind, a.startsAt, a.location, p.firstName, p.lastName, p.accountEmail, p.hrn
+          FROM appointments a
+          JOIN patients p ON p.id = a.patientId
+          WHERE a.cancelledAt IS NULL
+            AND substr(a.startsAt, 1, 10) >= ?
+            AND substr(a.startsAt, 1, 10) <= date(?, '+2 days')
+        `).all(today, today);
+      }
+      for (const appt of appointments2) {
+        if (!appt.accountEmail || !appt.accountEmail.includes("@")) {
+          skipped++;
+          continue;
+        }
+        const patientName = `${appt.firstName} ${appt.lastName}`;
+        const appointmentDate = (appt.startsAt || "").slice(0, 10);
+        const { subject, html, text: text2 } = renderEmailTemplate("AppointmentNotice", {
+          patientName,
+          hrn: appt.hrn,
+          appointmentDate,
+          doctorName: appt.location || "SPMC Nephrology Clinic",
+          kind: appt.kind
+        });
+        const res = await sendEmail({
+          to: appt.accountEmail,
+          subject,
+          html,
+          text: text2,
+          templateName: "AppointmentNotice",
+          patientId: appt.patientId
+        });
+        if (res.status === "failed") failed++;
+        else sent++;
+      }
+    } catch (err) {
+      console.error("[Sweep Appointment Error]", err);
+    }
+  }
+  config.lastRunAt = (/* @__PURE__ */ new Date()).toISOString();
+  config.lastRunStats = { sent, failed, skipped };
+  await updateAutomationConfig(config);
+  return { created: sent + failed, sent, failed, skipped };
+}
+async function listEmailLogs({
+  status,
+  search,
+  limit = 50,
+  offset = 0
+}) {
+  const db = getBatchClient();
+  if (db) {
+    let rows2 = [];
+    if (status && status !== "all") {
+      rows2 = await db`
+        SELECT l.*, p."firstName", p."lastName", p."hrn"
+        FROM "ktp"."emailLogs" l
+        LEFT JOIN "ktp"."patients" p ON p.id = l."patientId"
+        WHERE l.status = ${status}
+        ORDER BY l.id DESC LIMIT ${limit} OFFSET ${offset}
+      `;
+    } else {
+      rows2 = await db`
+        SELECT l.*, p."firstName", p."lastName", p."hrn"
+        FROM "ktp"."emailLogs" l
+        LEFT JOIN "ktp"."patients" p ON p.id = l."patientId"
+        ORDER BY l.id DESC LIMIT ${limit} OFFSET ${offset}
+      `;
+    }
+    return rows2.map((r) => ({
+      id: Number(r.id),
+      recipientEmail: r.recipientEmail,
+      subject: r.subject,
+      templateName: r.templateName,
+      status: r.status,
+      errorMessage: r.errorMessage,
+      patientId: r.patientId ? Number(r.patientId) : null,
+      patientName: r.firstName ? `${r.firstName} ${r.lastName}` : null,
+      patientHrn: r.hrn || null,
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : (/* @__PURE__ */ new Date()).toISOString()
+    }));
+  }
+  const sqlite = getSqliteDb();
+  let query4 = `
+    SELECT l.*, p.firstName, p.lastName, p.hrn
+    FROM emailLogs l
+    LEFT JOIN patients p ON p.id = l.patientId
+  `;
+  const params = [];
+  if (status && status !== "all") {
+    query4 += " WHERE l.status = ?";
+    params.push(status);
+  }
+  query4 += " ORDER BY l.id DESC LIMIT ? OFFSET ?";
+  params.push(limit, offset);
+  const rows = sqlite.prepare(query4).all(...params);
+  return rows.map((r) => ({
+    id: Number(r.id),
+    recipientEmail: r.recipientEmail,
+    subject: r.subject,
+    templateName: r.templateName,
+    status: r.status,
+    errorMessage: r.errorMessage,
+    patientId: r.patientId ? Number(r.patientId) : null,
+    patientName: r.firstName ? `${r.firstName} ${r.lastName}` : null,
+    patientHrn: r.hrn || null,
+    createdAt: r.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+  }));
+}
+
+// server/routers/automations.ts
+var automationsRouter = router({
+  getConfig: adminProcedure.query(async () => {
+    return getAutomationConfig();
+  }),
+  updateConfig: adminProcedure.input(
+    z9.object({
+      masterEnabled: z9.boolean(),
+      dispatchTimeManila: z9.string().regex(/^\d{2}:\d{2}$/),
+      triggers: z9.array(
+        z9.object({
+          key: z9.enum(["appointment_reminder", "overdue_lab", "weekly_digest"]),
+          label: z9.string(),
+          description: z9.string(),
+          enabled: z9.boolean(),
+          leadDays: z9.number().int().min(1).max(30)
+        })
+      )
+    })
+  ).mutation(async ({ input }) => {
+    const current = await getAutomationConfig();
+    const updated = {
+      ...current,
+      masterEnabled: input.masterEnabled,
+      dispatchTimeManila: input.dispatchTimeManila,
+      triggers: input.triggers
+    };
+    const ok = await updateAutomationConfig(updated);
+    return { success: ok };
+  }),
+  runManualSweep: adminProcedure.mutation(async () => {
+    const stats = await runEmailAutomationSweep();
+    return { success: true, stats };
+  }),
+  listLogs: adminProcedure.input(
+    z9.object({
+      status: z9.string().optional(),
+      search: z9.string().optional(),
+      limit: z9.number().int().min(1).max(100).default(50),
+      offset: z9.number().int().min(0).default(0)
+    })
+  ).query(async ({ input }) => {
+    const items = await listEmailLogs(input);
+    return { items };
+  }),
+  sendTestEmail: adminProcedure.input(
+    z9.object({
+      to: z9.string().email(),
+      templateName: z9.enum([
+        "AppointmentNotice",
+        "OverdueLabAlert",
+        "WeeklyClinicalDigest",
+        "TestNotice"
+      ])
+    })
+  ).mutation(async ({ input }) => {
+    const { subject, html, text: text2 } = renderEmailTemplate(input.templateName, {
+      patientName: "Sample Test Patient",
+      hrn: "KTP-2026-TEST",
+      appointmentDate: "2026-10-08",
+      time: "10:00 AM",
+      doctorName: "Dr. Nephrologist",
+      labTitle: "Serum Creatinine and Electrolytes",
+      dueDate: "2026-10-04",
+      activeCount: 42,
+      pendingLabs: 8,
+      upcomingVisits: 14,
+      evalCount: 12
+    });
+    const res = await sendEmail({
+      to: input.to,
+      subject,
+      html,
+      text: text2,
+      templateName: input.templateName
+    });
+    return { success: res.status !== "failed", status: res.status, id: res.id };
+  }),
+  renderPreview: adminProcedure.input(
+    z9.object({
+      templateName: z9.enum([
+        "AppointmentNotice",
+        "OverdueLabAlert",
+        "WeeklyClinicalDigest",
+        "TestNotice"
+      ]),
+      sampleData: z9.record(z9.string(), z9.any()).optional()
+    })
+  ).query(async ({ input }) => {
+    const data = input.sampleData || {
+      patientName: "Juan Dela Cruz",
+      hrn: "KTP-2026-0001",
+      appointmentDate: "2026-10-06",
+      time: "09:30 AM",
+      doctorName: "Dr. Maria Santos",
+      labTitle: "Complete Blood Count and Creatinine",
+      dueDate: "2026-10-03",
+      activeCount: 38,
+      pendingLabs: 6,
+      upcomingVisits: 11,
+      evalCount: 9
+    };
+    const { subject, html, text: text2 } = renderEmailTemplate(input.templateName, data);
+    return { subject, html, text: text2 };
   })
 });
 
@@ -3310,7 +3945,8 @@ var appRouter = router({
   dashboard: dashboardRouter,
   notifications: notificationsRouter,
   patientPortal: patientPortalRouter,
-  messages: messagesRouter
+  messages: messagesRouter,
+  automations: automationsRouter
 });
 
 // server/_core/context.ts

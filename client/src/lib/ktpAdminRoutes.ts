@@ -3,5 +3,6 @@ export const ADMIN_HREFS = {
   patients: "/patients",
   calendar: "/calendar",
   messages: "/messages",
+  automations: "/automations",
   settings: "/settings",
 } as const;

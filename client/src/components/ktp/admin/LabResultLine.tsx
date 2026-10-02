@@ -1,14 +1,97 @@
 import { useState } from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
+import { ClayButton, StatusChip, type ChipStatus } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
-import { dateKey } from "@shared/ktp";
+import { LAB_PHASE_LABEL } from "@shared/ktp";
 import type { ClinicalLabResult } from "../../../../../server/dbClinical";
+import { fmtDate } from "./format";
 
-/**
- * One saved lab result: value, flag, date, and a control to remove it.
- * A removal needs a reason. The server keeps the removed value with that reason.
+/*
+ * Lab result pieces of the Labs table (DESIGN.md Screens 5). Numbers use the data face with the
+ * unit in ink-muted. A flag is a status chip: an icon and a word, never a colour alone.
  */
-export function LabResultLine({
+
+const FLAG_CHIP: Record<string, ChipStatus> = {
+  Low: "lab-low",
+  High: "lab-high",
+  Normal: "lab-normal",
+};
+
+/** Value, unit, and flag of one result. */
+export function ResultValue({ result }: { result: ClinicalLabResult }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="type-data font-semibold text-ink">{result.value}</span>
+      {result.unit && (
+        <span className="type-caption text-ink-muted">{result.unit}</span>
+      )}
+      {result.flag && (
+        <StatusChip status={FLAG_CHIP[result.flag]} srContext="Lab flag:" />
+      )}
+    </span>
+  );
+}
+
+/** Line through the numeric results, oldest to newest. Hidden from screen readers: the list below has each value. */
+function Sparkline({ results }: { results: ClinicalLabResult[] }) {
+  const points = [...results]
+    .reverse()
+    .map(result => Number(result.value))
+    .filter(Number.isFinite);
+  if (points.length < 2) return null;
+  const low = Math.min(...points);
+  const span = Math.max(...points) - low || 1;
+  const x = (index: number) => 6 + (index * 148) / (points.length - 1);
+  const y = (value: number) => 34 - ((value - low) / span) * 28;
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 160 40"
+      className="h-10 w-40 rounded-sm bg-surface-2"
+    >
+      <polyline
+        fill="none"
+        stroke="var(--series-2)"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={points
+          .map((value, index) => `${x(index)},${y(value)}`)
+          .join(" ")}
+      />
+      <circle
+        cx={x(points.length - 1)}
+        cy={y(points[points.length - 1])}
+        r="3"
+        fill="var(--series-1)"
+      />
+    </svg>
+  );
+}
+
+/** All results of one test, newest first, with a trend line and a control to remove each result. */
+export function LabHistory({
+  patientId,
+  results,
+}: {
+  patientId: number;
+  results: ClinicalLabResult[];
+}) {
+  if (results.length === 0)
+    return <p className="type-body-sm text-ink-muted">No results saved.</p>;
+  return (
+    <div className="min-w-0 space-y-3">
+      <Sparkline results={results} />
+      <ul className="divide-y divide-hairline">
+        {results.map(result => (
+          <HistoryLine key={result.id} patientId={patientId} result={result} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function HistoryLine({
   patientId,
   result,
 }: {
@@ -26,47 +109,37 @@ export function LabResultLine({
         utils.dashboard.initial.invalidate(),
         utils.patients.activityLogs.invalidate({ patientId }),
       ]),
-    onError: cause => setError(cause.message || "Could not remove the result"),
+    onError: cause => setError(cause.message || "Could not remove the result."),
   });
-  const label = `${result.testName}, ${dateKey(result.serviceDate)}`;
+  const label = `${result.testName}, ${fmtDate(result.serviceDate)}`;
 
   return (
-    <div className="mt-0.5 text-[11px]">
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="font-semibold text-olive">Result:</span>
-        <span className="font-mono text-ink">
-          {result.value} {result.unit}
-        </span>
-        {result.flag && (
-          <span
-            className={`rounded px-1 text-[10px] font-bold ${
-              result.flag === "Normal"
-                ? "bg-olive-tint text-olive"
-                : "bg-brick/10 text-brick"
-            }`}
-          >
-            {result.flag}
+    <li className="py-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="type-data text-ink-muted">
+            {fmtDate(result.serviceDate)}
           </span>
-        )}
-        {result.serviceDate && (
-          <span className="text-[10px] text-ink-muted">
-            ({dateKey(result.serviceDate)})
+          <ResultValue result={result} />
+          <span className="type-caption text-ink-muted">
+            {result.phase ? LAB_PHASE_LABEL[result.phase] : "Tracker"}
           </span>
-        )}
+        </div>
         {!removing && (
-          <button
-            type="button"
-            onClick={() => setRemoving(true)}
+          <ClayButton
+            variant="destructive"
+            size="sm"
+            icon={<Trash2 strokeWidth={1.75} />}
             aria-label={`Remove result: ${label}`}
-            className="clay-focus inline-flex items-center gap-0.5 rounded px-1 text-[10px] font-semibold text-brick hover:bg-brick/10"
+            onClick={() => setRemoving(true)}
           >
-            <Trash2 className="size-3" /> Remove
-          </button>
+            Remove
+          </ClayButton>
         )}
       </div>
       {removing && (
         <form
-          className="mt-1 flex flex-wrap items-center gap-1.5"
+          className="mt-2 flex flex-wrap items-end gap-3"
           onSubmit={event => {
             event.preventDefault();
             setError("");
@@ -78,42 +151,45 @@ export function LabResultLine({
             });
           }}
         >
-          <input
-            value={reason}
-            onChange={event => setReason(event.target.value)}
-            aria-label={`Reason for removal: ${label}`}
-            placeholder="Reason for removal"
-            minLength={3}
-            maxLength={500}
-            required
-            autoFocus
-            className="h-7 min-w-0 flex-1 rounded border border-line-strong/30 bg-surface-1 px-2 text-xs text-ink placeholder:text-ink-muted/50"
-          />
-          <button
-            type="submit"
-            disabled={remove.isPending}
-            className="clay-focus inline-flex h-7 items-center gap-1 rounded bg-brick px-2 text-xs font-semibold text-ground disabled:opacity-50"
-          >
-            {remove.isPending && <Loader2 className="size-3 animate-spin" />}
-            Remove result
-          </button>
-          <button
+          <label className="flex min-w-0 flex-1 basis-56 flex-col gap-1 type-field-label">
+            Reason for removal
+            <input
+              value={reason}
+              onChange={event => setReason(event.target.value)}
+              aria-label={`Reason for removal: ${label}`}
+              minLength={3}
+              maxLength={500}
+              required
+              autoFocus
+              className="clay-sunken clay-focus h-11 w-full min-w-0 rounded-sm border-[1.5px] border-line-strong px-3 type-body font-normal"
+            />
+          </label>
+          <ClayButton
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => {
               setRemoving(false);
               setError("");
             }}
-            className="clay-focus h-7 rounded border border-line px-2 text-xs text-ink-muted hover:text-ink"
           >
             Cancel
-          </button>
+          </ClayButton>
+          <ClayButton
+            type="submit"
+            variant="destructive"
+            size="sm"
+            loading={remove.isPending}
+          >
+            Remove result
+          </ClayButton>
         </form>
       )}
       {error && (
-        <p role="alert" className="text-overdue">
+        <p role="alert" className="mt-1 type-body-sm text-overdue">
           {error}
         </p>
       )}
-    </div>
+    </li>
   );
 }

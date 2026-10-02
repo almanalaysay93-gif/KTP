@@ -433,6 +433,47 @@ The profile is the logo with this patient at its center: the center cell is the 
 -----------------------------------
 ```
 
+### 5. Labs workspace (patient profile, Labs tab, admin view)
+
+The Labs tab is a work surface for one job: put lab values in, then see them.
+Eye path: the open section, the first row with no result, the New result field.
+
+```
+1440 ---------------------------------------------------------------------------
+| headline: Labs and work-up              [Add results] [Fill from lab file]   |
+| data: Checklist: 12 of 69 done [bar]            [S pill] All items | Pending |
+| +--[L2] SECTION card---------------------------------------------------------+
+| | (>) title: Milestones and clearances                  0 of 14 done [bar]   |
+| +----------------------------------------------------------------------------+
+| +--[L2] SECTION card (open)--------------------------------------------------+
+| | (v) title: Phase 1                                    4 of 47 done [bar]   |
+| | [F] label row:      Test            Latest result          New result      |
+| | [F] sub-heading: Complete blood count                                      |
+| | (o) Hemoglobin          121 g/L [Normal] 12 Jul 2026     [S field]   (>)   |
+| |     Normal: 120 - 160 g/L                                                  |
+| | ( ) Platelets           No result                        [S field]   (>)   |
+| | [F] sub-heading: Kidney function                                           |
+| | ...                                                                        |
+| | [L2 sticky bar] 3 new values in Phase 1, not saved   [Clear] [Review+save] |
+| +----------------------------------------------------------------------------+
+| +--[L2] SECTION card---------------------------------------------------------+
+| | (>) title: Other lab results                                   6 results   |
+| +----------------------------------------------------------------------------+
+--------------------------------------------------------------------------------
+```
+
+Rules:
+
+- **Sections.** One clay card (level 2) for each work-up phase, one for the items with no phase, one for the lab results that no checklist row shows. The section header is one button with `aria-expanded`. The section that matches the stage of the patient starts open.
+- **Rows are flat** (Flat Data Rule): hairline dividers, no clay. Row minimum height 52. The tests of one laboratory panel share a sub-heading (label style on `--sunken` at 50%).
+- **One row, one test.** A panel never has a row. A result shows only on the row of the same test and the same phase.
+- **Row anatomy.** Status toggle (44, `aria-pressed`), name (body-sm 700) with the normal reference (caption), latest result (value in data 600, unit in caption ink-muted, lab flag chip, date in data ink-muted), New result field (sunken, h 44), details control (44, `aria-expanded`).
+- **Details.** The details region holds the checklist status form and all results of the test: a trend line (series-2 on surface-2, last point series-1, `aria-hidden`), then one line for each result with a Remove control. A removal needs a reason.
+- **Unsaved values.** A row with a typed value has a peach-tint fill. The section shows a sticky bar (surface-2, level 2) with the count, Clear, and the one primary action of the region: Review and save.
+- **One result dialog.** `LabResultsDialog` (on `ClayDialog`) saves all lab results: the values from the table, values typed in the dialog, and values read from a lab file. It shows each value, the phase, the result date, and the nurse approval. All values save together, or none.
+- **Under 768.** A row stacks: toggle, name, details control on line 1, then the latest result, then the field at full width. No horizontal page scroll at 320.
+- **Motion (subtle).** Section body and the sticky bar fade in with y 4 to 8 px in 180 ms. The chevron rotates in 150 ms. A progress bar fills with `scaleX`. Reduced motion: no transforms.
+
 ## Motion
 
 Library: framer-motion 12. Root wraps in `<MotionConfig reducedMotion="user">`. Animate only `transform` and `opacity`; shadow changes cross-fade a pseudo-layer.

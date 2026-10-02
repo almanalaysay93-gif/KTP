@@ -1,5 +1,4 @@
-import { cn } from "@/lib/utils";
-import { ClayInput } from "@/components/clay";
+import { ClayInput, StatusChip } from "@/components/clay";
 
 export interface NurseApprovalCardProps {
   requireApproval: boolean;
@@ -11,6 +10,14 @@ export interface NurseApprovalCardProps {
   canEnterLabs: boolean;
 }
 
+/*
+ * Nurse approval before a result is saved. Sizes follow DESIGN.md: 14 px text and larger, and each
+ * checkbox row is a 44 px target. The status is a chip with an icon and a word.
+ */
+const CHECK_ROW =
+  "flex min-h-11 cursor-pointer items-center gap-3 type-body-sm";
+const CHECKBOX = "clay-focus size-5 shrink-0 rounded-xs accent-(--sage-deep)";
+
 export function NurseApprovalCard({
   requireApproval,
   setRequireApproval,
@@ -21,83 +28,59 @@ export function NurseApprovalCard({
   canEnterLabs,
 }: NurseApprovalCardProps) {
   return (
-    <div className="rounded-sm border border-line-strong/30 bg-ground-elevated p-3 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="type-body-sm font-bold text-ink">Nurse approval option</p>
-          <p className="text-xs text-ink-muted">
-            Require attending nurse verification before results can be saved.
-          </p>
-        </div>
-        <label className="clay-focus inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-ink">
-          <input
-            type="checkbox"
-            checked={requireApproval}
-            onChange={e => {
-              setRequireApproval(e.target.checked);
-              if (!e.target.checked) setNurseApproved(false);
-            }}
-            className="size-4 rounded border-line-strong text-olive focus:ring-olive"
-          />
-          <span>Require nurse approval</span>
-        </label>
-      </div>
+    <fieldset className="min-w-0 rounded-sm border border-hairline bg-ground p-3 sm:p-4">
+      <legend className="px-1 type-field-label">Nurse approval</legend>
+      <label className={CHECK_ROW}>
+        <input
+          type="checkbox"
+          checked={requireApproval}
+          onChange={event => {
+            setRequireApproval(event.target.checked);
+            if (!event.target.checked) setNurseApproved(false);
+          }}
+          className={CHECKBOX}
+        />
+        <span>Require nurse approval before the save</span>
+      </label>
 
       {requireApproval && (
-        <div
-          className={cn(
-            "rounded-sm border p-3 transition-colors",
-            nurseApproved
-              ? "border-olive/50 bg-olive-tint/20"
-              : "border-line-strong/30 bg-ground"
-          )}
-        >
-          <label className="flex items-start gap-3 cursor-pointer select-none">
+        <>
+          <label className={CHECK_ROW}>
             <input
               type="checkbox"
               name="nurseApproved"
               checked={nurseApproved}
-              onChange={e => setNurseApproved(e.target.checked)}
-              className="mt-0.5 size-4 rounded border-line-strong text-olive focus:ring-olive"
+              onChange={event => setNurseApproved(event.target.checked)}
+              className={CHECKBOX}
             />
-            <div className="space-y-1">
-              <span className="font-bold text-ink text-xs flex items-center gap-2">
-                <span>Attending nurse has reviewed and approved results</span>
-                {nurseApproved ? (
-                  <span className="rounded bg-olive/15 px-1.5 py-0.5 text-[10px] font-semibold text-olive">
-                    Approved
-                  </span>
-                ) : (
-                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                    Approval required
-                  </span>
-                )}
-              </span>
-              <p className="text-xs text-ink-muted">
-                {canEnterLabs
-                  ? "Nurse must verify all auto-filled or typed lab values against the original laboratory sheet before saving."
-                  : "Nurse must verify and approve this clinical record before saving."}
-              </p>
-            </div>
+            <span className="font-bold">
+              The attending nurse checked and approved these results
+            </span>
           </label>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-8">
+            <StatusChip
+              status={nurseApproved ? "done" : "due-soon"}
+              label={nurseApproved ? "Approved" : "Approval required"}
+              srContext="Nurse approval:"
+            />
+            <p className="type-caption text-ink-muted">
+              {canEnterLabs
+                ? "Check each value against the laboratory sheet."
+                : "Check this record before the save."}
+            </p>
+          </div>
           {nurseApproved && (
-            <div className="mt-2.5 pt-2.5 border-t border-line">
-              <ClayInput
-                name="approvedByNurse"
-                label="Approving Nurse Name or License (optional)"
-                placeholder="e.g., RN Dela Cruz"
-                value={approvingNurse}
-                onChange={e => setApprovingNurse(e.target.value)}
-              />
-            </div>
+            <ClayInput
+              name="approvedByNurse"
+              label="Approving nurse name or license (optional)"
+              maxLength={200}
+              value={approvingNurse}
+              onChange={event => setApprovingNurse(event.target.value)}
+              containerClassName="mt-3"
+            />
           )}
-        </div>
+        </>
       )}
-      {requireApproval && !nurseApproved && (
-        <p className="text-xs font-medium text-amber-700">
-          Save disabled until attending nurse review and approval is checked.
-        </p>
-      )}
-    </div>
+    </fieldset>
   );
 }

@@ -16,6 +16,7 @@ const PatientsPage = lazyWithRetry(() => import("./pages/PatientsPage"), "Patien
 const PatientEnrollPage = lazyWithRetry(() => import("./pages/PatientEnrollPage"), "PatientEnrollPage")
 const PatientDetailPage = lazyWithRetry(() => import("./pages/PatientDetailPage"), "PatientDetailPage")
 const SettingsPage = lazyWithRetry(() => import("./pages/Settings"), "Settings")
+const AdminAutomationsPage = lazyWithRetry(() => import("./pages/AdminAutomationsPage"), "AdminAutomationsPage")
 const AdminCalendarPage = lazyWithRetry(() => import("./pages/AdminCalendarPage"), "AdminCalendarPage")
 const AdminMessagesPage = lazyWithRetry(() => import("./pages/AdminMessagesPage"), "AdminMessagesPage")
 
@@ -131,6 +132,11 @@ function Router() {
         <Route path="/messages">
           <Protected>
             <AdminMessagesPage />
+          </Protected>
+        </Route>
+        <Route path="/automations">
+          <Protected>
+            <AdminAutomationsPage />
           </Protected>
         </Route>
         <Route path="/notifications">

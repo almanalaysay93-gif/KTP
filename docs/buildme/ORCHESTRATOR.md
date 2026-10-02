@@ -98,3 +98,48 @@ Preview routes render without auth or tRPC. They are enabled when `import.meta.e
 - U9 done: performance and accessibility report in `docs/buildme/gates/perf-a11y.md`, verdict PASS. All contrast ratios exceed 4.5:1 WCAG AA, 44 px touch targets verified, reduced motion compliance proven.
 - U10 done: final snapshot captured in `docs/buildme/snapshots/snap-final/` with 10 viewport screenshots, `bindings.md`, `design.md`, and `delta.md`.
 - Next: Phase A2 foundation and patient access implementation per specification.
+
+## Run 2: Labs workspace (2026-10-02)
+
+Design Read: admin Labs workspace (grouped table plus result forms) for transplant coordinators and nurses, in the KTP clay language, React 19 + Tailwind 4 + Framer Motion, subtle motion.
+
+Grill Me answers:
+
+- Scope: Labs tab table, Encode lab form, Auto-transcribe form, Edit patient > Labs.
+- Problems: too many clicks to add a result, list too long, no history or trend, text and controls too small.
+- Layout: grouped table. Sections per phase, lab panels as sub-headings, one row per test, value entry in the row.
+- Motion: subtle.
+
+Contract: `DESIGN.md` is unchanged and binding. The Labs screen spec is in `DESIGN.md`, "Screens 5".
+
+Findings in the Labs tab before this run (each one breaks `DESIGN.md`):
+
+- F1: text at 10 px and 11 px. The minimum for admin table cells is 14 px.
+- F2: controls 28 px high. The minimum target is 44 px.
+- F3: uppercase column labels. The contract uses sentence case.
+- F4: dates as `2026-07-12`. The contract uses `12 Jul 2026` in the data font.
+- F5: lab flags as coloured text. The contract uses a status chip with an icon and a word.
+- F6: about 70 rows in one flat list.
+- F7: the two result dialogs use `backdrop-filter` and do not trap focus. The contract forbids `backdrop-filter` and requires `ClayDialog`.
+- F8: the nurse approval in the two result dialogs is not saved on the server.
+- F9: the Auto-transcribe dialog saves results one at a time, so an error leaves a partial save.
+
+Work units (one writer, main tree: a second session writes other files in this tree at the same time):
+
+| Unit | Agent role | Output | Status |
+|---|---|---|---|
+| L1 Server batch save | 2 frontend-architect | `clinical.addLabResults`: one transaction, nurse approval saved | done |
+| L2 Copy | 9 content-voice | labels and messages in the Labs components, checked with the `VOICE.md` grep gate | done |
+| L3 Labs table | 2 frontend-architect, 3 taste | `AdminLabsChecklist.tsx`, `ChecklistItemRow.tsx`, `LabResultLine.tsx`, `labCatalogMeta.ts` | done |
+| L4 Result dialog | 2 frontend-architect, 4 ui-ux | `LabResultsDialog.tsx` replaces the Encode and Auto-transcribe dialogs | done |
+| L5 Motion | 5 motion | section reveal, chevron, progress bar, all transform and opacity only | done |
+| L6 Edit patient > Labs | 2 frontend-architect | lab inputs grouped by panel in `ServiceRecordEditor.tsx` | done |
+| L7 Gates | 7 anti-slop, 8 bug-hunter, 10 perf-a11y | `docs/buildme/gates/labs-*.md` | see Log |
+| L8 Snapshot | 12 token-snapshotter | `docs/buildme/snapshots/snap-labs-001/` | see Log |
+
+Not run, with reason:
+
+- Agent 11 (references): the user named no reference site.
+- Agent 1 (design context): `PRODUCT.md` and `DESIGN.md` exist and stay binding.
+- Agent 6 (llms.txt) and Agent 13 (post-launch monitor): the app is private, signed-in, and `noindex`.
+- Design Arena: the user chose a layout.

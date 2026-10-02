@@ -3,6 +3,7 @@ import { ArrowLeft, Filter, FlaskConical } from "lucide-react";
 import { useLocation } from "wouter";
 import { ClayCard, ClayButton, StatusChip } from "@/components/clay";
 import { PATIENT_TABS, PatientShell, type PatientTabId } from "@/components/ktp/patient";
+import { PatientLabUploadCard } from "@/components/ktp/patient/PatientLabUploadCard";
 import { PageTransition } from "@/components/motion";
 import { trpc } from "@/lib/trpc";
 import { dateKey } from "@shared/ktp";
@@ -50,6 +51,8 @@ export default function PatientLabsPage() {
               <p className="type-body-sm text-ink-muted">Blood chemistry, tacrolimus levels, and trends</p>
             </div>
           </header>
+
+          <PatientLabUploadCard onSuccess={() => clinicalQuery.refetch()} />
 
           {/* Test Filter */}
           {testNames.length > 1 && (

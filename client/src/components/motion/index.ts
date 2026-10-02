@@ -19,6 +19,10 @@ export type { OrganGridBackdropProps } from "./OrganGridBackdrop";
 export { SharedPill, SharedCellBar, PILL_IDS, SHARED_PILL_HOST } from "./SharedPill";
 export type { SharedPillProps, SharedCellBarProps, PillId } from "./SharedPill";
 export { BreathingRing, MotionStepper, SheenSkeleton, MotionProgressRing } from "./Ambient";
+export { StatusPulse } from "./StatusPulse";
+export type { StatusPulseProps, StatusPulseTone } from "./StatusPulse";
+export { UploadProgress } from "./UploadProgress";
+export type { UploadProgressProps, UploadPhase } from "./UploadProgress";
 export { useChartMotion } from "./chartMotion";
 export type { ChartMotion, ChartLineMotion } from "./chartMotion";
 export {

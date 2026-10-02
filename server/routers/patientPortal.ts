@@ -87,4 +87,57 @@ export const patientPortalRouter = router({
       });
       return updated;
     }),
+
+  parseLabDocument: patientProcedure
+    .input(
+      z.object({
+        fileName: z.string().min(1).max(255).optional(),
+        base64: z.string().min(1),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const buffer = Buffer.from(input.base64, "base64");
+      const { parseLabBuffer } = await import("../labOcrBridge");
+      return parseLabBuffer(buffer, input.fileName || "document.pdf");
+    }),
+
+  submitPatientLab: patientProcedure
+    .input(
+      z.object({
+        serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        note: z.string().trim().max(1000).optional(),
+        items: z.array(
+          z.object({
+            labTestId: z.number().int().positive(),
+            value: z.string().trim().min(1).max(100),
+          })
+        ),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const res = await clinical.recordResult(
+        {
+          patientId: ctx.patientId,
+          serviceRecordId: 0,
+          serviceDate: input.serviceDate,
+          label: "Patient self-uploaded lab report",
+          nurseApproved: false,
+          approvedByNurse: "Pending Verification",
+          note: input.note ? `[Patient Upload] ${input.note}` : "[Patient Upload] Pending clinical verification",
+          results: input.items,
+        } as any,
+        ctx.user?.id ?? 0
+      );
+
+      await db.logActivity(
+        ctx.user?.id ?? 0,
+        ctx.patientId,
+        "PATIENT_UPLOAD_LAB",
+        { serviceDate: input.serviceDate, testCount: input.items.length },
+        ctx.req.ip,
+        ctx.req.headers["user-agent"]
+      );
+
+      return { success: true, recordId: res?.id };
+    }),
 });

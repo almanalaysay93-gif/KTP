@@ -33,6 +33,12 @@ export const clinicalRouter = router({
   addLabResult: adminProcedure.input(patient.extend({
     phase: z.enum(LAB_PHASES), serviceDate: pastDate, labTestId: id, value: z.string().trim().min(1).max(100),
   })).mutation(({ input, ctx }) => clinical.addLabResult(input, ctx.user.id)),
+  addLabResults: adminProcedure.input(patient.extend({
+    phase: z.enum(LAB_PHASES), serviceDate: pastDate,
+    nurseApproved: z.boolean().optional(), approvedByNurse: z.string().trim().max(200).optional(),
+    results: z.array(z.object({ labTestId: id, value: z.string().trim().min(1).max(100) })).min(1).max(100),
+  }).refine(input => new Set(input.results.map(row => row.labTestId)).size === input.results.length, "Each lab test may occur once"))
+    .mutation(({ input, ctx }) => clinical.addLabResults(input, ctx.user.id)),
   updateService: adminProcedure.input(patient.extend({
     id, reason: z.string().trim().min(3).max(500),
     label: z.string().trim().min(1).max(200).optional(), dueDate: date.optional(), serviceDate: pastDate.optional(),

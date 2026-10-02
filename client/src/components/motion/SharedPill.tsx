@@ -12,6 +12,10 @@ export const PILL_IDS = {
   tabbar: "tabbar-pill",
   /** Selected tray cell bar, morphing between cells and into the triage panel header. */
   triage: "triage",
+  /** Email automation control tabs. */
+  emailTab: "email-tab-pill",
+  /** Patient upload & transcribe tabs. */
+  uploadTab: "upload-tab-pill",
 } as const;
 
 export type PillId = (typeof PILL_IDS)[keyof typeof PILL_IDS] | (string & {});

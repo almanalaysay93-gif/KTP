@@ -163,6 +163,29 @@ describe("clinical persisted workflows", () => {
     expect(saved.labResults.map(r => [r.phase, r.labTestId]).sort()).toEqual([["Phase1", second.id], ["Phase2", first.id]].sort());
     expect(getSqliteDb().prepare("SELECT count(*) AS n FROM activityLog WHERE patientId=? AND action='clinical.lab.add'").get(patientId)).toMatchObject({ n: 4 });
   });
+  it("saves several lab results together with the nurse approval, and saves none when one is invalid", async () => {
+    const [first, second, third] = (await admin.get({ patientId })).labTests;
+    await expect(admin.addLabResults({ patientId, phase: "Phase1", serviceDate: "2026-09-02", results: [{ labTestId: first.id, value: "9" }, { labTestId: 999999, value: "1" }] })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(admin.addLabResults({ patientId, phase: "Phase1", serviceDate: "2026-09-02", results: [{ labTestId: first.id, value: "9" }, { labTestId: first.id, value: "8" }] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.addLabResults({ patientId, phase: "Phase1", serviceDate: "2026-09-02", results: [] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    let saved = await admin.get({ patientId });
+    expect(saved.labResults).toHaveLength(0);
+    expect(saved.services).toHaveLength(0);
+    expect(saved.checklist.filter(i => i.status === "Done")).toHaveLength(0);
+    const batch = await admin.addLabResults({ patientId, phase: "Phase1", serviceDate: "2026-09-02", nurseApproved: true, approvedByNurse: "RN Dela Cruz",
+      results: [{ labTestId: first.id, value: "9" }, { labTestId: second.id, value: "4" }] });
+    expect(batch.ids).toHaveLength(2);
+    await admin.addLabResults({ patientId, phase: "Phase1", serviceDate: "2026-09-02", nurseApproved: true, approvedByNurse: "RN Dela Cruz", results: [{ labTestId: third.id, value: "250" }] });
+    await expect(admin.addLabResults({ patientId, phase: "Phase1", serviceDate: "2026-09-02", results: [{ labTestId: second.id, value: "5" }] })).rejects.toThrow(`${second.name} already has a result`);
+    saved = await admin.get({ patientId });
+    expect(saved.services).toHaveLength(1);
+    expect(saved.services[0]).toMatchObject({ id: batch.serviceRecordId, phase: "Phase1", note: "[Approved by Nurse: RN Dela Cruz]" });
+    expect(saved.labResults.map(r => r.value).sort()).toEqual(["250", "4", "9"]);
+    expect(saved.checklist.filter(i => i.status === "Done").map(i => i.name).sort()).toEqual([first.name, second.name, third.name].sort());
+    const logs = getSqliteDb().prepare("SELECT details FROM activityLog WHERE patientId=? AND action='clinical.lab.add'").all(patientId) as { details: string }[];
+    expect(logs).toHaveLength(3);
+    expect(JSON.parse(logs[0].details)).toMatchObject({ nurseApproved: true, approvedByNurse: "RN Dela Cruz", phase: "Phase1" });
+  });
   it("persists appointment timezone and scopes cancellation to patient", async () => {
     const { id } = await admin.addAppointment({ patientId, title: "Fixture visit", kind: "FollowUp", startsAt: "2026-10-05T09:00:00+08:00" });
     expect((await admin.get({ patientId })).appointments[0].startsAt).toBe("2026-10-05T01:00:00.000Z");

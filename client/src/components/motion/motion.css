@@ -56,6 +56,22 @@
 /* Shared cell bar replaces the built-in bar so it can morph between cells. */
 .clay-cell:has(> [data-shared-bar]) > [data-slot="cell-bar"] { display: none; }
 
+/* Status pill pulse: active dispatch or pending retry */
+.motion-status-pulse {
+  animation: motion-status-pulse 2s var(--motion-ease-out) infinite;
+}
+
+.motion-status-pill-pulse {
+  box-shadow: 0 0 0 2px currentColor;
+  animation: motion-pill-pulse 2s var(--motion-ease-out) infinite;
+}
+
+/* Upload scan shimmer */
+.motion-scan-shimmer {
+  background-size: 200% 100%;
+  animation: motion-scan-shimmer 1.8s linear infinite;
+}
+
 @keyframes motion-breathe {
   from { transform: scale(1); opacity: 0.6; }
   to { transform: scale(1.15); opacity: 0; }
@@ -73,12 +89,29 @@
   60% { opacity: 1; transform: scale(1.15); }
   100% { opacity: 1; transform: scale(1); }
 }
+@keyframes motion-status-pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  70% { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+@keyframes motion-pill-pulse {
+  0% { transform: scale(1); opacity: 0.5; }
+  70% { transform: scale(1.04, 1.15); opacity: 0; }
+  100% { transform: scale(1.04, 1.15); opacity: 0; }
+}
+@keyframes motion-scan-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 
 /* Reduced motion is never waived: loops and transforms off, content rendered complete. */
 @media (prefers-reduced-motion: reduce) {
   .motion-breathe,
+  .motion-status-pulse,
+  .motion-status-pill-pulse,
   [data-motion-stepper] li[aria-current="step"] > span:first-child::after { display: none; }
   [data-motion-stepper] li > span:last-child,
-  .motion-chart-point { animation: none !important; transform: none !important; opacity: 1 !important; }
+  .motion-chart-point,
+  .motion-scan-shimmer { animation: none !important; transform: none !important; opacity: 1 !important; }
   .motion-chart-band { animation: motion-fade-in 150ms linear both; }
 }
