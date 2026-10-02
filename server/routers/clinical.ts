@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import * as clinical from "../dbClinical";
+import { saveZBenefit } from "../dbZBenefit";
 import { parseLabBuffer } from "../labOcrBridge";
 import { LAB_PHASES, todayDate } from "../../shared/ktp";
 
@@ -19,6 +20,13 @@ export const clinicalRouter = router({
   get: adminProcedure.input(patient).query(({ input }) => clinical.getClinical(input.patientId)),
   listAppointments: adminProcedure.query(() => clinical.listAllAppointments()),
   zBenefit: adminProcedure.query(() => clinical.listZBenefit()),
+  saveZBenefit: adminProcedure.input(patient.extend({
+    entries: z.array(z.object({
+      serviceType: z.enum(["Meds", "Laboratory", "Tacro", "XrayUsd"]),
+      doneDate: pastDate.optional(), nextDue: date.optional(), claimDue: date.nullable().optional(), claimFiled: pastDate.optional(),
+    })).min(1).max(4),
+  }).refine(input => new Set(input.entries.map(entry => entry.serviceType)).size === input.entries.length, "Each service type may occur once"))
+    .mutation(({ input, ctx }) => saveZBenefit(input, ctx.user.id)),
   addService: adminProcedure.input(patient.extend({
     serviceType: z.enum(["Meds", "Laboratory", "Tacro", "XrayUsd"]),
     label: z.string().trim().min(1).max(200), dueDate: date, note,

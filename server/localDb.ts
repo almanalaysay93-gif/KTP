@@ -1,5 +1,6 @@
 import { syncCatalog } from "./clinicalCatalog";
 import { SEED_DOCTORS, SEED_PATIENTS } from "./seedPatients";
+import { seedClinicalDataSqlite } from "./seedClinicalData";
 import type Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
@@ -357,5 +358,7 @@ function initSchemaAndSeed(db: Database.Database) {
       );
     }
   }
+
+  seedClinicalDataSqlite(db);
 }
 

@@ -109,7 +109,7 @@ export async function listClinicalDashboard() {
 /** Z Benefit follow-up of each active recipient: doctors and, for each service type, the dates that the claim needs. */
 export async function listZBenefit() {
   return execute(function* () {
-    const recipients = yield query(`SELECT p.id, p.hrn, p."firstName", p."lastName", p.suffix, p.stage, n.name AS nephrologist, f.name AS fellow
+    const recipients = yield query(`SELECT p.id, p.hrn, p."firstName", p."lastName", p.suffix, p.stage, p."nephrologistId", p."fellowId", n.name AS nephrologist, f.name AS fellow
       FROM patients p LEFT JOIN doctors n ON n.id = p."nephrologistId" LEFT JOIN doctors f ON f.id = p."fellowId"
       WHERE p.status = 'Active' AND p."patientType" = 'Recipient' ORDER BY p."lastName", p."firstName", p.id`);
     const services = yield query(`SELECT s."patientId", s."serviceType", s.status, s."dueDate", s."serviceDate", s."claimDeadline", s."claimFiledDate"
@@ -119,6 +119,7 @@ export async function listZBenefit() {
       patientId: Number(row.id), hrn: String(row.hrn), firstName: String(row.firstName), lastName: String(row.lastName),
       suffix: (row.suffix ?? null) as string | null, stage: String(row.stage),
       nephrologist: (row.nephrologist ?? null) as string | null, fellow: (row.fellow ?? null) as string | null,
+      nephrologistId: row.nephrologistId == null ? null : Number(row.nephrologistId), fellowId: row.fellowId == null ? null : Number(row.fellowId),
       services: summarizeZBenefit(services.filter(service => Number(service.patientId) === Number(row.id)).map(service => ({
         serviceType: String(service.serviceType), status: String(service.status), dueDate: dateOnly(service.dueDate),
         serviceDate: dateOnly(service.serviceDate), claimDeadline: dateOnly(service.claimDeadline), claimFiledDate: dateOnly(service.claimFiledDate),

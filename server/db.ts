@@ -29,6 +29,7 @@ import { FULL_ACCESS_EMAILS, roleForEmail } from "./adminAccess";
 import { BASELINE_SQL } from "./baselineSql";
 import { getSqliteDb } from "./localDb";
 import { SEED_DOCTORS, SEED_PATIENTS } from "./seedPatients";
+import { seedClinicalDataPg } from "./seedClinicalData";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 export type PgDb = PgDatabase<PgQueryResultHKT, any>;
@@ -82,6 +83,7 @@ async function ensureSchema(client: ReturnType<typeof postgres>) {
           "status" = EXCLUDED."status";
       `;
     }
+    await seedClinicalDataPg(client);
   } catch (error) {
     console.error("[Database] Auto-migration check failed:", error);
     _schemaEnsured = false;

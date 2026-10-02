@@ -219,6 +219,50 @@ describe("clinical persisted workflows", () => {
     await expect(clinicalRouter.createCaller(ctx("patient@example.invalid")).zBenefit()).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect([zDueState("2026-10-01", "2026-10-02"), zDueState("2026-10-02", "2026-10-02"), zDueState("2026-10-09", "2026-10-02"), zDueState("2026-10-10", "2026-10-02")]).toEqual(["overdue", "soon", "soon", "later"]);
   });
+  it("saves the Z Benefit dates that a nurse transcribes into the service records", async () => {
+    const z = async () => (await admin.zBenefit()).find(row => row.patientId === patientId)!.services;
+    // First transcription: nothing exists yet.
+    await admin.saveZBenefit({ patientId, entries: [
+      { serviceType: "Meds", doneDate: "2026-08-02", nextDue: "2026-09-02", claimDue: "2026-10-01" },
+      { serviceType: "Laboratory", doneDate: "2026-08-05", nextDue: "2026-09-05" },
+      { serviceType: "Tacro", nextDue: "2026-09-10" },
+    ] });
+    expect(await z()).toEqual({
+      Meds: { firstDate: "2026-08-02", lastDate: "2026-08-02", nextDue: "2026-09-02", claimDue: "2026-10-01" },
+      Laboratory: { firstDate: "2026-08-05", lastDate: "2026-08-05", nextDue: "2026-09-05", claimDue: null },
+      Tacro: { firstDate: null, lastDate: null, nextDue: "2026-09-10", claimDue: null },
+      XrayUsd: { firstDate: null, lastDate: null, nextDue: null, claimDue: null },
+    });
+    let services = (await admin.get({ patientId })).services;
+    expect(services).toHaveLength(5);
+    // A later laboratory date is a new result: the planned record is completed. The next due date makes a new planned record.
+    await admin.saveZBenefit({ patientId, entries: [{ serviceType: "Laboratory", doneDate: "2026-09-06", nextDue: "2026-10-06", claimDue: "2026-11-05" }] });
+    services = (await admin.get({ patientId })).services;
+    expect(services.filter(s => s.serviceType === "Laboratory").map(s => [s.status, s.dueDate, s.serviceDate, s.claimDeadline]).sort()).toEqual([
+      ["Done", "2026-08-05", "2026-08-05", null], ["Done", "2026-09-05", "2026-09-06", "2026-11-05"], ["Planned", "2026-10-06", null, null],
+    ]);
+    expect((await z()).Laboratory).toEqual({ firstDate: "2026-08-05", lastDate: "2026-09-06", nextDue: "2026-10-06", claimDue: "2026-11-05" });
+    // An earlier date corrects the newest record. The medicines date corrects the first claim. The next due date moves the planned record.
+    await admin.saveZBenefit({ patientId, entries: [{ serviceType: "Laboratory", doneDate: "2026-09-04" }, { serviceType: "Meds", doneDate: "2026-08-01", nextDue: "2026-09-03" }] });
+    services = (await admin.get({ patientId })).services;
+    expect(services).toHaveLength(6);
+    expect(await z()).toMatchObject({ Laboratory: { lastDate: "2026-09-04" }, Meds: { firstDate: "2026-08-01", nextDue: "2026-09-03", claimDue: "2026-10-01" } });
+    // A filed claim leaves the list of due claims. A claim due date can be removed.
+    await admin.saveZBenefit({ patientId, entries: [{ serviceType: "Meds", claimFiled: "2026-08-20" }, { serviceType: "Laboratory", claimDue: null }] });
+    expect(await z()).toMatchObject({ Meds: { claimDue: null }, Laboratory: { claimDue: null } });
+    expect(services.find(s => s.serviceType === "Meds" && s.status === "Done")).toBeTruthy();
+    // Refused saves change nothing.
+    const before = JSON.stringify((await admin.get({ patientId })).services);
+    await expect(admin.saveZBenefit({ patientId, entries: [{ serviceType: "XrayUsd", claimDue: "2026-12-01" }] })).rejects.toThrow("X-ray and USD: enter the date of the service before the claim dates.");
+    await expect(admin.saveZBenefit({ patientId, entries: [{ serviceType: "Tacro", doneDate: "2026-09-12", claimDue: "2026-09-01" }] })).rejects.toThrow("the claim due date cannot be before the service date");
+    await expect(admin.saveZBenefit({ patientId, entries: [{ serviceType: "Tacro", doneDate: "2999-01-01" }] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.saveZBenefit({ patientId, entries: [{ serviceType: "Meds", nextDue: "2026-09-03" }] })).rejects.toThrow("No change to save");
+    await expect(admin.saveZBenefit({ patientId: otherId, entries: [{ serviceType: "Meds", nextDue: "2026-09-03" }] })).rejects.toThrow("for a recipient");
+    expect(JSON.stringify((await admin.get({ patientId })).services)).toBe(before);
+    const db = getSqliteDb();
+    expect(db.prepare("SELECT count(*) AS n FROM activityLog WHERE patientId=? AND action='clinical.zbenefit.update'").get(patientId)).toMatchObject({ n: 4 });
+    expect((db.prepare("SELECT count(*) AS n FROM recordRevisions WHERE reason='Z Benefit record'").get() as { n: number }).n).toBeGreaterThanOrEqual(6);
+  });
   it("persists appointment timezone and scopes cancellation to patient", async () => {
     const { id } = await admin.addAppointment({ patientId, title: "Fixture visit", kind: "FollowUp", startsAt: "2026-10-05T09:00:00+08:00" });
     expect((await admin.get({ patientId })).appointments[0].startsAt).toBe("2026-10-05T01:00:00.000Z");

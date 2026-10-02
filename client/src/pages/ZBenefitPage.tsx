@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { Pencil, Search } from "lucide-react";
 import { Link } from "wouter";
 import { AdminShell, AdminToaster } from "@/components/ktp/admin";
 import { fmtDate } from "@/components/ktp/admin/format";
+import { ZBenefitDialog, Z_TYPES, type ZBenefitRow } from "@/components/ktp/admin/ZBenefitDialog";
 import { ClayButton, ClayCard, StatusChip } from "@/components/clay";
 import { MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
 import { ADMIN_HREFS } from "@/lib/ktpAdminRoutes";
@@ -14,21 +15,12 @@ import { zDueState } from "@shared/zBenefit";
 /*
  * PhilHealth Z Benefit follow-up. One row for each active recipient, with the dates that the
  * Z Benefit claim needs for medicines, laboratory, tacrolimus test, and X-ray and ultrasound.
- * The values come from the service records of the Tracker. This page shows them and changes none.
+ * The values come from the service records of the Tracker. Record dates opens the form where the
+ * nurse transcribes them.
  */
 
-const TYPES: { type: ServiceType; done: string; next: string; claim: string }[] = [
-  { type: "Meds", done: "Date of first claim (meds)", next: "Due date of next meds claim", claim: "Meds" },
-  { type: "Laboratory", done: "Date of laboratory taken", next: "Due date of next laboratory", claim: "Laboratory" },
-  { type: "Tacro", done: "Date of tacro test", next: "Due date of next tacro test", claim: "Tacro test" },
-  { type: "XrayUsd", done: "Date of X-ray and USD", next: "Due date of next X-ray and USD", claim: "X-ray and USD" },
-];
-const GROUP: Record<ServiceType, string> = {
-  Meds: "Medicines",
-  Laboratory: "Laboratory",
-  Tacro: "Tacrolimus test",
-  XrayUsd: "X-ray and USD",
-};
+const TYPES = Z_TYPES;
+const GROUP = Object.fromEntries(Z_TYPES.map(({ type, group }) => [type, group])) as Record<ServiceType, string>;
 
 /** A date that is done. */
 function Done({ date }: { date: string | null }) {
@@ -55,6 +47,7 @@ function Due({ date, today }: { date: string | null; today: string }) {
 export default function ZBenefitPage() {
   const [search, setSearch] = useState("");
   const [postOnly, setPostOnly] = useState(true);
+  const [editing, setEditing] = useState<ZBenefitRow | null>(null);
   const query = trpc.clinical.zBenefit.useQuery();
   const today = todayDate();
 
@@ -89,8 +82,8 @@ export default function ZBenefitPage() {
                 <header className="pt-3 lg:pt-8">
                   <h1 className="type-display text-ink">Z Benefit</h1>
                   <p className="mt-1 max-w-[68ch] type-body-sm text-ink-muted">
-                    Dates for the PhilHealth Z Benefit claim of each recipient. Record a service or a claim in the
-                    Tracker of the patient: this list shows the result.
+                    Dates for the PhilHealth Z Benefit claim of each recipient. Use Record dates to enter the dates
+                    of a patient. The Tracker of the patient shows the same records.
                   </p>
                 </header>
 
@@ -208,6 +201,16 @@ export default function ZBenefitPage() {
                                       {name(row)}
                                     </Link>
                                     <span className="block type-data text-ink-muted">{row.hrn}</span>
+                                    <ClayButton
+                                      variant="secondary"
+                                      size="sm"
+                                      icon={<Pencil strokeWidth={1.75} />}
+                                      aria-label={`Record dates: ${name(row)}`}
+                                      onClick={() => setEditing(row)}
+                                      className="mt-2"
+                                    >
+                                      Record dates
+                                    </ClayButton>
                                   </th>
                                   <td className="px-3 py-3 type-body-sm whitespace-nowrap">{row.nephrologist ?? <span className="text-ink-muted">Not set</span>}</td>
                                   <td className="px-3 py-3 type-body-sm whitespace-nowrap">{row.fellow ?? <span className="text-ink-muted">Not set</span>}</td>
@@ -243,6 +246,16 @@ export default function ZBenefitPage() {
                                 {name(row)}
                               </Link>
                               <p className="type-data text-ink-muted">{row.hrn}</p>
+                              <ClayButton
+                                variant="secondary"
+                                size="sm"
+                                icon={<Pencil strokeWidth={1.75} />}
+                                aria-label={`Record dates: ${name(row)}`}
+                                onClick={() => setEditing(row)}
+                                className="mt-2"
+                              >
+                                Record dates
+                              </ClayButton>
                               <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 type-body-sm">
                                 <dt className="text-ink-muted">Nephrologist</dt>
                                 <dd>{row.nephrologist ?? "Not set"}</dd>
@@ -266,6 +279,7 @@ export default function ZBenefitPage() {
                     </>
                   )
                 )}
+                <ZBenefitDialog row={editing} onClose={() => setEditing(null)} />
               </main>
             </PageTransition>
           </AdminShell>

@@ -11,6 +11,7 @@ vi.mock("./db", () => ({
 }));
 import { checkImportRows, commitImportRows } from "./dbPatientImport";
 import { listZBenefit } from "./dbClinical";
+import { saveZBenefit } from "./dbZBenefit";
 import { addLabResult, addService, recordResult, getClinical, addAppointment, setChecklist, setChecklistMany, updateService } from "./dbClinical";
 beforeAll(async () => {
   state.pg = new PGlite();
@@ -82,6 +83,11 @@ describe("clinical PostgreSQL transactions", () => {
     // The Z Benefit list reads recipients, doctors, and service dates through PostgreSQL.
     const zRows = await listZBenefit();
     expect(zRows.map(row => row.hrn)).toEqual(["PG-TEST", "PG-IMPORT-1"]);
+    await saveZBenefit({ patientId: 1, entries: [{ serviceType: "XrayUsd", doneDate: "2026-09-10", nextDue: "2026-12-10", claimDue: "2026-11-09" }, { serviceType: "Tacro", nextDue: "2026-10-15" }] }, 1);
+    await saveZBenefit({ patientId: 1, entries: [{ serviceType: "XrayUsd", doneDate: "2026-09-09", claimFiled: "2026-09-20" }] }, 1);
+    const zAfter = (await listZBenefit())[0].services;
+    expect(zAfter.XrayUsd).toEqual({ firstDate: "2026-09-09", lastDate: "2026-09-09", nextDue: "2026-12-10", claimDue: null });
+    expect(zAfter.Tacro).toMatchObject({ nextDue: "2026-10-15" });
     expect(zRows[0].services.Laboratory).toEqual({ firstDate: "2026-09-02", lastDate: "2026-09-04", nextDue: "2026-09-01", claimDue: "2026-10-01" });
     // Two patients with no Gmail account do not collide on the unique e-mail index. An older database drops NOT NULL with this statement.
     await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" SET NOT NULL`);
