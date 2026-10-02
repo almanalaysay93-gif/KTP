@@ -592,8 +592,7 @@ function* syncCatalog() {
     return;
   }
   const panels = items.filter((item) => item.active && CHECKLIST_SPLITS[item.name]);
-  if (panels.length === 0) return;
-  yield query('UPDATE "checklistCatalog" SET "sortOrder" = "sortOrder" * 10');
+  if (panels.length > 0) yield query('UPDATE "checklistCatalog" SET "sortOrder" = "sortOrder" * 10');
   for (const panel of panels) {
     for (const [index2, name] of CHECKLIST_SPLITS[panel.name].entries()) {
       let [item] = yield query('SELECT id FROM "checklistCatalog" WHERE name = ? AND phase = ? AND active = true', name, panel.phase);
@@ -604,8 +603,11 @@ function* syncCatalog() {
     }
     yield query('UPDATE "checklistCatalog" SET active = false WHERE id = ?', panel.id);
   }
+  for (const row2 of ADDED_ITEMS) {
+    if (!items.some((item) => item.name === row2[0] && item.category === row2[1])) yield insertItem(row2);
+  }
 }
-var LAB_CATALOG, CHECKLIST_SPLITS, PANEL_CATALOG, CHECKLIST_CATALOG, query, flag;
+var LAB_CATALOG, CHECKLIST_SPLITS, PANEL_CATALOG, ADDED_ITEMS, CHECKLIST_CATALOG, query, flag;
 var init_clinicalCatalog = __esm({
   "server/clinicalCatalog.ts"() {
     "use strict";
@@ -715,9 +717,141 @@ var init_clinicalCatalog = __esm({
       ["Urology", "Clearance", null, "Both", 1, 78],
       ["OB-Gyn with Pap smear or mammogram", "Clearance", null, "Both", 1, 79]
     ];
-    CHECKLIST_CATALOG = PANEL_CATALOG.flatMap(([name, category, phase, appliesTo, asIndicated, sort]) => CHECKLIST_SPLITS[name] ? CHECKLIST_SPLITS[name].map((test, index2) => [test, category, phase, appliesTo, asIndicated, sort * 10 + index2 + 1]) : [[name, category, phase, appliesTo, asIndicated, sort * 10]]);
+    ADDED_ITEMS = [
+      // Between "Donor advocate" (750) and "Gastroenterology or hepatology" (760).
+      ["Ethics committee", "Clearance", null, "Both", 0, 755]
+    ];
+    CHECKLIST_CATALOG = PANEL_CATALOG.flatMap(([name, category, phase, appliesTo, asIndicated, sort]) => CHECKLIST_SPLITS[name] ? CHECKLIST_SPLITS[name].map((test, index2) => [test, category, phase, appliesTo, asIndicated, sort * 10 + index2 + 1]) : [[name, category, phase, appliesTo, asIndicated, sort * 10]]).concat(ADDED_ITEMS).sort((a, b) => a[5] - b[5]);
     query = (sql4, ...args) => ({ sql: sql4, args });
     flag = (value2) => value2 ? "true" : "false";
+  }
+});
+
+// server/seedPatients.ts
+var SEED_DOCTORS, SEED_PATIENTS;
+var init_seedPatients = __esm({
+  "server/seedPatients.ts"() {
+    "use strict";
+    SEED_DOCTORS = [
+      { name: "Dr. Maria Santos", role: "Nephrologist" },
+      { name: "Dr. Roberto Cruz", role: "Nephrologist" },
+      { name: "Dr. Juan Reyes", role: "Fellow" },
+      { name: "Dr. Ana Lim", role: "Fellow" }
+    ];
+    SEED_PATIENTS = [
+      {
+        hrn: "KTP-2026-0001",
+        patientType: "Recipient",
+        firstName: "Alai",
+        lastName: "Patient",
+        sex: "F",
+        birthDate: "1988-03-14",
+        contactNumber: "0917-555-0101",
+        accountEmail: "alai12152201@gmail.com",
+        stage: "PostKT",
+        status: "Active",
+        riskCategory: "StandardLow",
+        surgeryDate: "2026-01-15",
+        nephrologistName: "Dr. Maria Santos",
+        fellowName: "Dr. Juan Reyes"
+      },
+      {
+        hrn: "KTP-2026-0002",
+        patientType: "Recipient",
+        firstName: "Nestor",
+        lastName: "Abellera",
+        sex: "M",
+        birthDate: "1965-08-30",
+        contactNumber: "0917-555-0102",
+        accountEmail: "nestor.abellera.ktp@gmail.com",
+        stage: "Phase1",
+        status: "Active",
+        riskCategory: "StandardLow",
+        surgeryDate: null,
+        nephrologistName: "Dr. Roberto Cruz",
+        fellowName: "Dr. Ana Lim"
+      },
+      {
+        hrn: "KTP-2026-0003",
+        patientType: "Recipient",
+        firstName: "Marilou",
+        lastName: "Bautista",
+        sex: "F",
+        birthDate: "1982-11-20",
+        contactNumber: "0917-555-0103",
+        accountEmail: "marilou.bautista.ktp@gmail.com",
+        stage: "Phase2",
+        status: "Active",
+        riskCategory: "StandardLow",
+        surgeryDate: null,
+        nephrologistName: "Dr. Maria Santos",
+        fellowName: "Dr. Juan Reyes"
+      },
+      {
+        hrn: "KTP-2026-0004",
+        patientType: "Recipient",
+        firstName: "Maricar",
+        lastName: "Gallardo",
+        sex: "F",
+        birthDate: "1992-04-03",
+        contactNumber: "0917-555-0104",
+        accountEmail: "maricar.gallardo.ktp@gmail.com",
+        stage: "Clearances",
+        status: "Active",
+        riskCategory: "StandardLow",
+        surgeryDate: null,
+        nephrologistName: "Dr. Maria Santos",
+        fellowName: "Dr. Ana Lim"
+      },
+      {
+        hrn: "KTP-2026-0005",
+        patientType: "Recipient",
+        firstName: "Bernardo",
+        lastName: "Ilagan",
+        sex: "M",
+        birthDate: "1979-07-21",
+        contactNumber: "0917-555-0105",
+        accountEmail: "bernardo.ilagan.ktp@gmail.com",
+        stage: "PhilHealthZ",
+        status: "Active",
+        riskCategory: "High",
+        surgeryDate: null,
+        nephrologistName: "Dr. Roberto Cruz",
+        fellowName: "Dr. Juan Reyes"
+      },
+      {
+        hrn: "KTP-2026-0006",
+        patientType: "Recipient",
+        firstName: "Charito",
+        lastName: "Esguerra",
+        sex: "F",
+        birthDate: "1970-02-11",
+        contactNumber: "0917-555-0106",
+        accountEmail: "charito.esguerra.ktp@gmail.com",
+        stage: "Phase3",
+        status: "Active",
+        riskCategory: "StandardLow",
+        surgeryDate: null,
+        nephrologistName: "Dr. Roberto Cruz",
+        fellowName: "Dr. Ana Lim"
+      },
+      {
+        hrn: "KTP-2026-0007",
+        patientType: "Recipient",
+        firstName: "Eduardo",
+        lastName: "Ramos",
+        sex: "M",
+        birthDate: "1985-05-12",
+        contactNumber: "0917-555-0107",
+        accountEmail: "eduardo.ramos.ktp@gmail.com",
+        stage: "Orientation",
+        status: "Active",
+        riskCategory: "StandardLow",
+        surgeryDate: null,
+        nephrologistName: "Dr. Maria Santos",
+        fellowName: "Dr. Juan Reyes"
+      }
+    ];
   }
 });
 
@@ -1007,10 +1141,9 @@ function initSchemaAndSeed(db) {
   const docCount = db.prepare("SELECT count(*) as count FROM doctors").get();
   if (docCount.count === 0) {
     const insertDoc = db.prepare("INSERT INTO doctors (name, role, active) VALUES (?, ?, 1)");
-    insertDoc.run("Dr. Maria Santos", "Nephrologist");
-    insertDoc.run("Dr. Roberto Cruz", "Nephrologist");
-    insertDoc.run("Dr. Juan Reyes", "Fellow");
-    insertDoc.run("Dr. Ana Lim", "Fellow");
+    for (const doc of SEED_DOCTORS) {
+      insertDoc.run(doc.name, doc.role);
+    }
   }
   db.transaction(() => {
     const sync = syncCatalog();
@@ -1021,15 +1154,39 @@ function initSchemaAndSeed(db) {
       step = sync.next(rows2);
     }
   })();
-  const existingPatient = db.prepare("SELECT * FROM patients WHERE lower(accountEmail) = 'alai12152201@gmail.com'").get();
-  if (!existingPatient) {
-    db.prepare(`
-      INSERT INTO patients (
-        hrn, patientType, firstName, lastName, accountEmail, stage, status, surgeryDate, consentVersion, consentAcceptedAt
-      ) VALUES (
-        'KTP-2026-0001', 'Recipient', 'Alai', 'Patient', 'alai12152201@gmail.com', 'PostKT', 'Active', '2026-01-15', 1, CURRENT_TIMESTAMP
-      )
-    `).run();
+  const insertPatient = db.prepare(`
+    INSERT INTO patients (
+      hrn, patientType, firstName, lastName, sex, birthDate, contactNumber,
+      accountEmail, stage, status, riskCategory, surgeryDate, nephrologistId, fellowId,
+      consentVersion, consentAcceptedAt
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?,
+      1, CURRENT_TIMESTAMP
+    )
+  `);
+  for (const p of SEED_PATIENTS) {
+    const existing = db.prepare("SELECT id FROM patients WHERE hrn = ?").get(p.hrn);
+    if (!existing) {
+      const nephro = db.prepare("SELECT id FROM doctors WHERE name = ?").get(p.nephrologistName);
+      const fellow = db.prepare("SELECT id FROM doctors WHERE name = ?").get(p.fellowName);
+      insertPatient.run(
+        p.hrn,
+        p.patientType,
+        p.firstName,
+        p.lastName,
+        p.sex,
+        p.birthDate,
+        p.contactNumber,
+        p.accountEmail,
+        p.stage,
+        p.status,
+        p.riskCategory,
+        p.surgeryDate,
+        nephro?.id ?? null,
+        fellow?.id ?? null
+      );
+    }
   }
 }
 var require2, __filename, __dirname, _sqliteDb;
@@ -1037,6 +1194,7 @@ var init_localDb = __esm({
   "server/localDb.ts"() {
     "use strict";
     init_clinicalCatalog();
+    init_seedPatients();
     require2 = createRequire(import.meta.url);
     __filename = fileURLToPath(import.meta.url);
     __dirname = path.dirname(__filename);
@@ -1312,13 +1470,31 @@ async function ensureSchema(client) {
     }
     await client`ALTER TABLE "ktp"."serviceRecords" ADD COLUMN IF NOT EXISTS "phase" varchar(16)`;
     await client`ALTER TABLE "ktp"."patients" ALTER COLUMN "accountEmail" DROP NOT NULL`;
-    await client`
-      INSERT INTO "ktp"."patients" (
-        "hrn", "patientType", "firstName", "lastName", "accountEmail", "stage", "status", "surgeryDate", "consentVersion", "consentAcceptedAt"
-      ) VALUES (
-        'KTP-2026-0001', 'Recipient', 'Alai', 'Patient', 'alai12152201@gmail.com', 'PostKT', 'Active', '2026-01-15'::date, 1, now()
-      ) ON CONFLICT ("hrn") DO UPDATE SET "accountEmail" = 'alai12152201@gmail.com', "status" = 'Active';
-    `;
+    for (const doc of SEED_DOCTORS) {
+      await client`
+        INSERT INTO "ktp"."doctors" ("name", "role", "active")
+        SELECT ${doc.name}, ${doc.role}, true
+        WHERE NOT EXISTS (SELECT 1 FROM "ktp"."doctors" WHERE "name" = ${doc.name});
+      `;
+    }
+    for (const p of SEED_PATIENTS) {
+      await client`
+        INSERT INTO "ktp"."patients" (
+          "hrn", "patientType", "firstName", "lastName", "sex", "birthDate", "contactNumber",
+          "accountEmail", "stage", "status", "riskCategory", "surgeryDate", "nephrologistId", "fellowId",
+          "consentVersion", "consentAcceptedAt"
+        ) VALUES (
+          ${p.hrn}, ${p.patientType}, ${p.firstName}, ${p.lastName}, ${p.sex}, CAST(${p.birthDate} AS date), ${p.contactNumber},
+          ${p.accountEmail}, ${p.stage}, ${p.status}, ${p.riskCategory}, CAST(${p.surgeryDate} AS date),
+          (SELECT "id" FROM "ktp"."doctors" WHERE "name" = ${p.nephrologistName} LIMIT 1),
+          (SELECT "id" FROM "ktp"."doctors" WHERE "name" = ${p.fellowName} LIMIT 1),
+          1, now()
+        ) ON CONFLICT ("hrn") DO UPDATE SET
+          "accountEmail" = EXCLUDED."accountEmail",
+          "stage" = EXCLUDED."stage",
+          "status" = EXCLUDED."status";
+      `;
+    }
   } catch (error) {
     console.error("[Database] Auto-migration check failed:", error);
     _schemaEnsured = false;
@@ -1554,6 +1730,7 @@ var init_db = __esm({
     init_adminAccess();
     init_baselineSql();
     init_localDb();
+    init_seedPatients();
     init_dbPatients();
     _db = null;
     _batchPg = null;

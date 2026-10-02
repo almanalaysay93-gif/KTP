@@ -1,4 +1,5 @@
 import { syncCatalog } from "./clinicalCatalog";
+import { SEED_DOCTORS, SEED_PATIENTS } from "./seedPatients";
 import type Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
@@ -316,10 +317,9 @@ function initSchemaAndSeed(db: Database.Database) {
   const docCount = db.prepare("SELECT count(*) as count FROM doctors").get() as { count: number };
   if (docCount.count === 0) {
     const insertDoc = db.prepare("INSERT INTO doctors (name, role, active) VALUES (?, ?, 1)");
-    insertDoc.run("Dr. Maria Santos", "Nephrologist");
-    insertDoc.run("Dr. Roberto Cruz", "Nephrologist");
-    insertDoc.run("Dr. Juan Reyes", "Fellow");
-    insertDoc.run("Dr. Ana Lim", "Fellow");
+    for (const doc of SEED_DOCTORS) {
+      insertDoc.run(doc.name, doc.role);
+    }
   }
 
   // Seed the lab test and checklist catalogs, or bring older catalogs to the current lists.
@@ -333,16 +333,29 @@ function initSchemaAndSeed(db: Database.Database) {
     }
   })();
 
-  // Seed default patient for alai12152201@gmail.com if not exists
-  const existingPatient = db.prepare("SELECT * FROM patients WHERE lower(accountEmail) = 'alai12152201@gmail.com'").get();
-  if (!existingPatient) {
-    db.prepare(`
-      INSERT INTO patients (
-        hrn, patientType, firstName, lastName, accountEmail, stage, status, surgeryDate, consentVersion, consentAcceptedAt
-      ) VALUES (
-        'KTP-2026-0001', 'Recipient', 'Alai', 'Patient', 'alai12152201@gmail.com', 'PostKT', 'Active', '2026-01-15', 1, CURRENT_TIMESTAMP
-      )
-    `).run();
+  // Seed default patients (one per phase and post-KT)
+  const insertPatient = db.prepare(`
+    INSERT INTO patients (
+      hrn, patientType, firstName, lastName, sex, birthDate, contactNumber,
+      accountEmail, stage, status, riskCategory, surgeryDate, nephrologistId, fellowId,
+      consentVersion, consentAcceptedAt
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?,
+      1, CURRENT_TIMESTAMP
+    )
+  `);
+  for (const p of SEED_PATIENTS) {
+    const existing = db.prepare("SELECT id FROM patients WHERE hrn = ?").get(p.hrn);
+    if (!existing) {
+      const nephro = db.prepare("SELECT id FROM doctors WHERE name = ?").get(p.nephrologistName) as { id: number } | undefined;
+      const fellow = db.prepare("SELECT id FROM doctors WHERE name = ?").get(p.fellowName) as { id: number } | undefined;
+      insertPatient.run(
+        p.hrn, p.patientType, p.firstName, p.lastName, p.sex, p.birthDate, p.contactNumber,
+        p.accountEmail, p.stage, p.status, p.riskCategory, p.surgeryDate,
+        nephro?.id ?? null, fellow?.id ?? null
+      );
+    }
   }
 }
 

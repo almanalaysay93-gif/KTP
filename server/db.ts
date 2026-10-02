@@ -28,6 +28,7 @@ import {
 import { FULL_ACCESS_EMAILS, roleForEmail } from "./adminAccess";
 import { BASELINE_SQL } from "./baselineSql";
 import { getSqliteDb } from "./localDb";
+import { SEED_DOCTORS, SEED_PATIENTS } from "./seedPatients";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 export type PgDb = PgDatabase<PgQueryResultHKT, any>;
@@ -53,13 +54,34 @@ async function ensureSchema(client: ReturnType<typeof postgres>) {
     await client`ALTER TABLE "ktp"."serviceRecords" ADD COLUMN IF NOT EXISTS "phase" varchar(16)`;
     // A patient with no Gmail account is allowed: that patient has no portal access.
     await client`ALTER TABLE "ktp"."patients" ALTER COLUMN "accountEmail" DROP NOT NULL`;
-    await client`
-      INSERT INTO "ktp"."patients" (
-        "hrn", "patientType", "firstName", "lastName", "accountEmail", "stage", "status", "surgeryDate", "consentVersion", "consentAcceptedAt"
-      ) VALUES (
-        'KTP-2026-0001', 'Recipient', 'Alai', 'Patient', 'alai12152201@gmail.com', 'PostKT', 'Active', '2026-01-15'::date, 1, now()
-      ) ON CONFLICT ("hrn") DO UPDATE SET "accountEmail" = 'alai12152201@gmail.com', "status" = 'Active';
-    `;
+    // Seed default doctors if missing
+    for (const doc of SEED_DOCTORS) {
+      await client`
+        INSERT INTO "ktp"."doctors" ("name", "role", "active")
+        SELECT ${doc.name}, ${doc.role}, true
+        WHERE NOT EXISTS (SELECT 1 FROM "ktp"."doctors" WHERE "name" = ${doc.name});
+      `;
+    }
+
+    // Seed default patients (one per phase and post-KT)
+    for (const p of SEED_PATIENTS) {
+      await client`
+        INSERT INTO "ktp"."patients" (
+          "hrn", "patientType", "firstName", "lastName", "sex", "birthDate", "contactNumber",
+          "accountEmail", "stage", "status", "riskCategory", "surgeryDate", "nephrologistId", "fellowId",
+          "consentVersion", "consentAcceptedAt"
+        ) VALUES (
+          ${p.hrn}, ${p.patientType}, ${p.firstName}, ${p.lastName}, ${p.sex}, CAST(${p.birthDate} AS date), ${p.contactNumber},
+          ${p.accountEmail}, ${p.stage}, ${p.status}, ${p.riskCategory}, CAST(${p.surgeryDate} AS date),
+          (SELECT "id" FROM "ktp"."doctors" WHERE "name" = ${p.nephrologistName} LIMIT 1),
+          (SELECT "id" FROM "ktp"."doctors" WHERE "name" = ${p.fellowName} LIMIT 1),
+          1, now()
+        ) ON CONFLICT ("hrn") DO UPDATE SET
+          "accountEmail" = EXCLUDED."accountEmail",
+          "stage" = EXCLUDED."stage",
+          "status" = EXCLUDED."status";
+      `;
+    }
   } catch (error) {
     console.error("[Database] Auto-migration check failed:", error);
     _schemaEnsured = false;
