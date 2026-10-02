@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import * as clinical from "../dbClinical";
+import { parseLabBuffer } from "../labOcrBridge";
 import { todayDate } from "../../shared/ktp";
 
 const id = z.number().int().positive().safe();
@@ -36,4 +37,16 @@ export const clinicalRouter = router({
   })).mutation(({ input, ctx }) => clinical.addAppointment(input, ctx.user.id)),
   cancelAppointment: adminProcedure.input(patient.extend({ id })).mutation(({ input, ctx }) => clinical.cancelAppointment(input, ctx.user.id)),
   fileClaim: adminProcedure.input(patient.extend({ id, claimFiledDate: pastDate })).mutation(({ input, ctx }) => clinical.fileClaim(input, ctx.user.id)),
+  parseLabDocument: adminProcedure
+    .input(
+      z.object({
+        base64: z.string().min(10),
+        fileName: z.string().max(255).default("document.pdf"),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const cleanBase64 = input.base64.replace(/^data:[^;]+;base64,/, "");
+      const buffer = Buffer.from(cleanBase64, "base64");
+      return parseLabBuffer(buffer, input.fileName);
+    }),
 });

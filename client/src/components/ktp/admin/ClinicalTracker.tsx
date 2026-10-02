@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileUp, Loader2 } from "lucide-react";
 import { ClayButton, ClayCard, ClayInput } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
 import { dateKey, suggestNextDueDate, todayDate } from "@shared/ktp";
@@ -153,9 +154,77 @@ function ServiceCard({
 }) {
   const result = trpc.clinical.recordResult.useMutation();
   const claim = trpc.clinical.fileClaim.useMutation();
+  const parseLab = trpc.clinical.parseLabDocument.useMutation();
   const [open, setOpen] = useState(false);
+  const [serviceDate, setServiceDate] = useState(todayDate());
+  const [labValues, setLabValues] = useState<Record<number, string>>({});
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrMessage, setOcrMessage] = useState<string | null>(null);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+
   const canEnterLabs =
     service.serviceType === "Laboratory" || service.serviceType === "Tacro";
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+
+    if (file.size > 15 * 1024 * 1024) {
+      setOcrError("File too large. Maximum size is 15 MB.");
+      return;
+    }
+
+    setOcrLoading(true);
+    setOcrError(null);
+    setOcrMessage(null);
+
+    try {
+      const reader = new FileReader();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      });
+
+      const res = await parseLab.mutateAsync({
+        base64,
+        fileName: file.name,
+      });
+
+      if (!res.success || res.error) {
+        setOcrError(res.error || "Unable to extract lab values from document.");
+        return;
+      }
+
+      if (res.extractedCount === 0) {
+        setOcrMessage("Document parsed, but no matching catalog lab tests were identified.");
+        return;
+      }
+
+      const nextValues: Record<number, string> = {};
+      for (const t of res.tests) {
+        nextValues[t.labTestId] = t.value;
+      }
+      setLabValues(prev => ({ ...prev, ...nextValues }));
+
+      if (res.detectedDate && res.detectedDate <= todayDate()) {
+        setServiceDate(res.detectedDate);
+      }
+
+      setOcrMessage(
+        `Extracted ${res.extractedCount} lab ${
+          res.extractedCount === 1 ? "value" : "values"
+        }${res.detectedDate ? ` (${res.detectedDate})` : ""}. Auto-filled below.`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to parse document";
+      setOcrError(msg);
+    } finally {
+      setOcrLoading(false);
+    }
+  };
+
   return (
     <ClayCard className="min-w-0 space-y-3 p-5">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -194,8 +263,8 @@ function ServiceCard({
             <ClinicalForm
               patientId={patientId}
               label="Save result"
-              submit={form =>
-                result.mutateAsync({
+              submit={async form => {
+                await result.mutateAsync({
                   patientId,
                   serviceRecordId: service.id,
                   serviceDate: field(form, "serviceDate"),
@@ -209,15 +278,55 @@ function ServiceCard({
                           value: field(form, `lab-${test.id}`),
                         }))
                     : [],
-                })
-              }
+                });
+                setLabValues({});
+                setOcrMessage(null);
+                setOcrError(null);
+              }}
             >
+              {canEnterLabs && (
+                <div className="rounded-sm border border-line-strong/30 bg-ground-elevated p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="type-body-sm font-bold text-ink">Auto-fill from lab document</p>
+                      <p className="text-xs text-ink-muted">Upload digital PDF or photo of laboratory result.</p>
+                    </div>
+                    <label className="clay-focus inline-flex cursor-pointer items-center gap-2 rounded-sm border border-line-strong bg-ground px-3 py-2 text-xs font-semibold text-ink shadow-sm transition hover:bg-ground-elevated disabled:opacity-50">
+                      {ocrLoading ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}
+                      <span>{ocrLoading ? "Scanning document..." : "Upload lab report"}</span>
+                      <input
+                        type="file"
+                        accept=".pdf,.png,.jpg,.jpeg"
+                        className="sr-only"
+                        disabled={ocrLoading}
+                        onChange={handleFileUpload}
+                      />
+                    </label>
+                  </div>
+                  {ocrLoading && (
+                    <p className="mt-2 text-xs text-ink-muted animate-pulse">
+                      Processing document with OCR engine...
+                    </p>
+                  )}
+                  {ocrMessage && (
+                    <div className="mt-2 rounded bg-olive-tint/60 px-2.5 py-1.5 text-xs font-medium text-olive">
+                      {ocrMessage}
+                    </div>
+                  )}
+                  {ocrError && (
+                    <div className="mt-2 rounded bg-overdue-tint/60 px-2.5 py-1.5 text-xs font-medium text-overdue">
+                      {ocrError}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <ClayInput
                   name="serviceDate"
                   label="Service date"
                   type="date"
-                  defaultValue={todayDate()}
+                  value={serviceDate}
+                  onChange={e => setServiceDate(e.target.value)}
                   max={todayDate()}
                   required
                 />
@@ -244,6 +353,13 @@ function ServiceCard({
                         inputMode="decimal"
                         min="0"
                         step="any"
+                        value={labValues[test.id] ?? ""}
+                        onChange={e =>
+                          setLabValues(prev => ({
+                            ...prev,
+                            [test.id]: e.target.value,
+                          }))
+                        }
                       />
                     ))}
                   </div>

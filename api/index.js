@@ -1970,12 +1970,12 @@ var t = initTRPC.context().create({
 });
 var router = t.router;
 var SLOW_PROCEDURE_MS = 1e3;
-var timing = t.middleware(async ({ path: path2, type, next }) => {
+var timing = t.middleware(async ({ path: path3, type, next }) => {
   const started = Date.now();
   const result = await next();
   const ms = Date.now() - started;
   if (ms > SLOW_PROCEDURE_MS) {
-    console.warn(`[tRPC] slow ${type} ${path2} ${ms}ms ok=${result.ok}`);
+    console.warn(`[tRPC] slow ${type} ${path3} ${ms}ms ok=${result.ok}`);
   }
   return result;
 });
@@ -2320,6 +2320,53 @@ function ensureCatalog() {
   });
 }
 
+// server/labOcrBridge.ts
+import { execFile } from "child_process";
+import fs2 from "fs";
+import os from "os";
+import path2 from "path";
+import { promisify } from "util";
+var execFileAsync = promisify(execFile);
+var PARSER_SCRIPT = path2.resolve(process.cwd(), "scripts", "parse_lab_ocr.py");
+async function parseLabFile(filePath) {
+  try {
+    const pythonExe = process.platform === "win32" ? "python" : "python3";
+    const { stdout, stderr } = await execFileAsync(pythonExe, [PARSER_SCRIPT, filePath], {
+      timeout: 3e4,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    if (stderr && stderr.includes("Traceback")) {
+      console.error("[Lab OCR Python Error]", stderr);
+    }
+    const parsed = JSON.parse(stdout);
+    return parsed;
+  } catch (err) {
+    console.error("[Lab OCR Execution Failed]", err);
+    return {
+      success: false,
+      detectedDate: null,
+      tests: [],
+      extractedCount: 0,
+      error: err.message || "Failed to execute Python OCR engine"
+    };
+  }
+}
+async function parseLabBuffer(buffer, fileName) {
+  const ext = path2.extname(fileName) || ".pdf";
+  const tempPath = path2.join(os.tmpdir(), `ktp-ocr-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+  try {
+    await fs2.promises.writeFile(tempPath, buffer);
+    return await parseLabFile(tempPath);
+  } finally {
+    try {
+      if (fs2.existsSync(tempPath)) {
+        await fs2.promises.unlink(tempPath);
+      }
+    } catch {
+    }
+  }
+}
+
 // server/routers/clinical.ts
 init_ktp();
 var id = z.number().int().positive().safe();
@@ -2360,7 +2407,17 @@ var clinicalRouter = router({
     note
   })).mutation(({ input, ctx }) => addAppointment(input, ctx.user.id)),
   cancelAppointment: adminProcedure.input(patient2.extend({ id })).mutation(({ input, ctx }) => cancelAppointment(input, ctx.user.id)),
-  fileClaim: adminProcedure.input(patient2.extend({ id, claimFiledDate: pastDate })).mutation(({ input, ctx }) => fileClaim(input, ctx.user.id))
+  fileClaim: adminProcedure.input(patient2.extend({ id, claimFiledDate: pastDate })).mutation(({ input, ctx }) => fileClaim(input, ctx.user.id)),
+  parseLabDocument: adminProcedure.input(
+    z.object({
+      base64: z.string().min(10),
+      fileName: z.string().max(255).default("document.pdf")
+    })
+  ).mutation(async ({ input }) => {
+    const cleanBase64 = input.base64.replace(/^data:[^;]+;base64,/, "");
+    const buffer = Buffer.from(cleanBase64, "base64");
+    return parseLabBuffer(buffer, input.fileName);
+  })
 });
 
 // server/_core/systemRouter.ts
