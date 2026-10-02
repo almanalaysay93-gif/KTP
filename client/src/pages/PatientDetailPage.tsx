@@ -74,7 +74,8 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
   const today = todayDate();
   const [tab, setTab] = useState<string>(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
-    return ["tracker", "labs", "checklist", "appointments", "history"].includes(requested ?? "") ? requested! : "tracker";
+    if (requested === "checklist") return "labs";
+    return ["tracker", "labs", "appointments", "history"].includes(requested ?? "") ? requested! : "tracker";
   });
 
   const query = trpc.patients.getById.useQuery(
@@ -201,14 +202,13 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
               <ClayTabsList className="h-auto w-full flex-wrap overflow-visible rounded-2xl sm:w-fit">
                 <ClayTabsTrigger value="tracker">Tracker</ClayTabsTrigger>
                 <ClayTabsTrigger value="labs">Labs</ClayTabsTrigger>
-                <ClayTabsTrigger value="checklist">Checklist</ClayTabsTrigger>
                 <ClayTabsTrigger value="appointments">
                   Appointments
                 </ClayTabsTrigger>
                 <ClayTabsTrigger value="history">History</ClayTabsTrigger>
               </ClayTabsList>
 
-              {["tracker", "labs", "checklist", "appointments"].map(value => (
+              {["tracker", "labs", "appointments"].map(value => (
                 <ClayTabsContent key={value} value={value} className="mt-6">
                   <div id={tab === value ? "clinical-content" : undefined} className="scroll-mt-20">
                     <PatientClinicalTabs patientId={patientId} tab={value} patient={patient} />

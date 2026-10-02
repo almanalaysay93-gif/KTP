@@ -5,8 +5,7 @@ import { trpc } from "@/lib/trpc";
 import { dateKey, todayDate } from "@shared/ktp";
 import { ClinicalForm, ClinicalSelect, field } from "./ClinicalForm";
 import { ClinicalTracker } from "./ClinicalTracker";
-import { AdminChecklist } from "./AdminChecklist";
-import { LabPhases } from "./LabPhases";
+import { AdminLabsChecklist } from "./AdminLabsChecklist";
 
 export type ClinicalData = inferRouterOutputs<AppRouter>["clinical"]["get"];
 export function PatientClinicalTabs({
@@ -30,23 +29,11 @@ export function PatientClinicalTabs({
   if (!query.data) return null;
   if (tab === "tracker")
     return <ClinicalTracker patientId={patientId} data={query.data} patient={patient} />;
-  if (tab === "labs")
-    return <LabPhases patientId={patientId} data={query.data} patient={patient} />;
-  if (tab === "checklist")
-    return <Checklist patientId={patientId} data={query.data} />;
+  if (tab === "labs" || tab === "checklist")
+    return <AdminLabsChecklist patientId={patientId} data={query.data} patient={patient} />;
   if (tab === "appointments")
     return <Appointments patientId={patientId} data={query.data} />;
   return null;
-}
-
-function Checklist({
-  patientId,
-  data,
-}: {
-  patientId: number;
-  data: ClinicalData;
-}) {
-  return <AdminChecklist patientId={patientId} checklist={data.checklist} />;
 }
 
 function Appointments({

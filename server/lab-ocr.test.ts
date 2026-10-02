@@ -64,4 +64,27 @@ describe("Python Lab OCR and PDF Parser Integration", () => {
     expect(testsMap.get("Tacrolimus trough")).toBe("7.8");
     expect(testsMap.get("BUN")).toBe("5.4");
   });
+
+  it("extracts structured lab values and date from Excel spreadsheet", async () => {
+    const xlsxPath = path.resolve(process.cwd(), "scripts", "test_sample_lab.xlsx");
+    expect(fs.existsSync(xlsxPath)).toBe(true);
+
+    const xlsxBuffer = fs.readFileSync(xlsxPath);
+    const base64 = xlsxBuffer.toString("base64");
+
+    const res = await adminCaller.clinical.parseLabDocument({
+      base64,
+      fileName: "test_sample_lab.xlsx",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.detectedDate).toBe("2026-09-24");
+    expect(res.extractedCount).toBeGreaterThanOrEqual(4);
+
+    const testsMap = new Map(res.tests.map((t) => [t.testName, t.value]));
+    expect(testsMap.get("Creatinine")).toBe("90");
+    expect(testsMap.get("Tacrolimus trough")).toBe("7.5");
+    expect(testsMap.get("BUN")).toBe("5");
+    expect(testsMap.get("Hemoglobin")).toBe("135");
+  });
 });

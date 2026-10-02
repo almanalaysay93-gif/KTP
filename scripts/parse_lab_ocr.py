@@ -31,6 +31,41 @@ CATALOG_TESTS = [
     {"id": 15, "name": "CMV PCR", "unit": "IU/mL", "patterns": [r"cmv pcr", r"cmv dna", r"cytomegalovirus pcr", r"cmv quantitative"]},
 ]
 
+def extract_text_from_excel(filepath: str) -> Tuple[str, List[str]]:
+    """Extract text from Excel workbook (.xlsx, .xls) or CSV using openpyxl or csv."""
+    lines = []
+    full_text = ""
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext == ".csv":
+        import csv
+        try:
+            with open(filepath, mode="r", encoding="utf-8-sig", errors="replace") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    row_vals = [str(c).strip() for c in row if c and str(c).strip()]
+                    if row_vals:
+                        line = "   ".join(row_vals)
+                        lines.append(line)
+                        full_text += line + "\n"
+        except Exception as e:
+            sys.stderr.write(f"[CSV Extract Error] {e}\n")
+        return full_text, lines
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(filepath, data_only=True)
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            for row in ws.iter_rows(values_only=True):
+                row_vals = [str(c).strip() for c in row if c is not None and str(c).strip() != ""]
+                if row_vals:
+                    line = "   ".join(row_vals)
+                    lines.append(line)
+                    full_text += line + "\n"
+    except Exception as e:
+        sys.stderr.write(f"[Excel Extract Error] {e}\n")
+    return full_text, lines
+
 def extract_text_from_pdf(filepath: str) -> Tuple[str, List[str]]:
     """Extract text from digital PDF using pypdf."""
     lines = []
@@ -224,7 +259,9 @@ def process_document(filepath: str) -> Dict[str, Any]:
     full_text = ""
     lines = []
 
-    if ext == ".pdf":
+    if ext in [".xlsx", ".xls", ".csv"]:
+        full_text, lines = extract_text_from_excel(filepath)
+    elif ext == ".pdf":
         full_text, lines = extract_text_from_pdf(filepath)
         if len(full_text.strip()) < 30:
             lines = extract_text_with_ocr(filepath)
