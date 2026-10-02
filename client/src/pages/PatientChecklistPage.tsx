@@ -7,18 +7,13 @@ import { PageTransition } from "@/components/motion";
 import { trpc } from "@/lib/trpc";
 import { dateKey } from "@shared/ktp";
 
-const PHASE_TITLES: Record<string, string> = {
-  Phase1: "Phase 1: General Workup",
-  Phase2: "Phase 2: Cardiopulmonary & Infections",
-  Clearances: "Clearances: Specialty Consultations",
-  Phase3: "Phase 3: Final Pre-Transplant",
-};
-
 type PhaseFilter = "all" | number;
+type CategoryFilter = "all" | "Lab" | "Imaging" | "Clearance" | "Milestone";
 
 export default function PatientChecklistPage() {
   const [, navigate] = useLocation();
   const [activePhase, setActivePhase] = useState<PhaseFilter>("all");
+  const [activeCategory, setActiveCategory] = useState<CategoryFilter>("all");
 
   useEffect(() => {
     document.title = "Checklist | KTP";
@@ -42,92 +37,117 @@ export default function PatientChecklistPage() {
       ? Math.round((doneItems.length / applicableItems.length) * 100)
       : 0;
 
-  // Group items by phase
+  // Distinct phases sorted numerically
   const phases = Array.from(
     new Set(checklist.map((item) => item.phase).filter((p): p is number => p !== null))
   ).sort((a, b) => a - b);
 
-  const filteredItems =
-    activePhase === "all"
-      ? checklist
-      : checklist.filter((item) => item.phase === activePhase);
+  // Filter items by phase and category
+  const filteredItems = checklist.filter((item) => {
+    if (activePhase !== "all" && item.phase !== activePhase) return false;
+    if (activeCategory !== "all" && item.category !== activeCategory) return false;
+    return true;
+  });
 
   return (
     <PatientShell active="checklist" onNavigate={handleNav} tabs={PATIENT_TABS}>
       <PageTransition routeKey="patient-checklist" focusHeading={false}>
-        <div className="flex flex-col gap-6">
-          <header className="flex items-center gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => navigate("/me")}
-              className="clay-focus rounded-full p-2 text-ink-muted hover:bg-surface-2"
-              aria-label="Back to Home"
-            >
-              <ArrowLeft className="size-5" />
-            </button>
-            <div>
-              <h1 className="type-display text-ink">Workup Checklist</h1>
-              <p className="type-body-sm text-ink-muted">Pre-transplant evaluation phases and clearances</p>
-            </div>
-          </header>
-
-          {/* Progress Overview Card */}
-          {!clinicalQuery.isLoading && checklist.length > 0 && (
-            <ClayCard className="p-5">
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="type-body font-medium text-ink">Overall Workup Progress</span>
-                  <span className="font-mono text-lg font-bold text-ink">{percentComplete}%</span>
-                </div>
-                {/* Progress bar track */}
-                <div className="h-3 w-full overflow-hidden rounded-full bg-surface-2">
-                  <div
-                    className="h-full rounded-full bg-olive transition-all duration-500 ease-out"
-                    style={{ width: `${percentComplete}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between type-body-sm text-ink-muted">
-                  <span>
-                    {doneItems.length} of {applicableItems.length} requirements completed
-                  </span>
-                  <span>{checklist.length - applicableItems.length} not applicable</span>
-                </div>
-              </div>
-            </ClayCard>
-          )}
-
-          {/* Phase Filter Tabs */}
-          {phases.length > 1 && (
-            <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-4">
+          {/* Compact Top Header with Integrated Progress */}
+          <header className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2.5">
               <button
                 type="button"
-                onClick={() => setActivePhase("all")}
-                className={`clay-focus rounded-full px-3 py-1 type-body-sm transition ${
-                  activePhase === "all"
-                    ? "bg-surface-1 font-medium text-ink shadow-sm"
-                    : "text-ink-muted hover:text-ink"
-                }`}
+                onClick={() => navigate("/me")}
+                className="clay-focus rounded-full p-1.5 text-ink-muted hover:bg-surface-2"
+                aria-label="Back to Home"
               >
-                All Phases ({checklist.length})
+                <ArrowLeft className="size-5" />
               </button>
-              {phases.map((phase) => {
-                const phaseItems = checklist.filter((i) => i.phase === phase);
-                const phaseDone = phaseItems.filter((i) => i.status === "Done").length;
-                return (
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-ink sm:text-2xl">
+                  Workup Checklist
+                </h1>
+                <p className="type-caption text-ink-muted">
+                  Pre-transplant evaluation requirements and clearances
+                </p>
+              </div>
+            </div>
+
+            {/* Inline Mini Progress Bar */}
+            {!clinicalQuery.isLoading && checklist.length > 0 && (
+              <div className="flex items-center gap-3 rounded-xl border border-hairline bg-surface-1 px-3.5 py-1.5 shadow-xs">
+                <div className="flex flex-col">
+                  <div className="flex items-center justify-between gap-3 text-xs text-ink-muted">
+                    <span>
+                      Done: <strong className="text-ink">{doneItems.length}</strong>/{applicableItems.length}
+                    </span>
+                    <span className="font-mono font-bold text-ink">{percentComplete}%</span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-32 overflow-hidden rounded-full bg-surface-2 sm:w-40">
+                    <div
+                      className="h-full rounded-full bg-olive transition-all duration-300"
+                      style={{ width: `${percentComplete}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </header>
+
+          {/* Phase and Category Filter Toolbar */}
+          {checklist.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-2.5">
+              {/* Phase Pills */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setActivePhase("all")}
+                  className={`clay-focus rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                    activePhase === "all"
+                      ? "bg-surface-1 text-ink shadow-xs"
+                      : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  All ({checklist.length})
+                </button>
+                {phases.map((phase) => {
+                  const phaseItems = checklist.filter((i) => i.phase === phase);
+                  const phaseDone = phaseItems.filter((i) => i.status === "Done").length;
+                  return (
+                    <button
+                      key={phase}
+                      type="button"
+                      onClick={() => setActivePhase(phase)}
+                      className={`clay-focus rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                        activePhase === phase
+                          ? "bg-surface-1 text-ink shadow-xs"
+                          : "text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      Phase {phase} ({phaseDone}/{phaseItems.length})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Category Filter Pills */}
+              <div className="flex items-center gap-1">
+                {(["all", "Lab", "Imaging", "Clearance"] as const).map((cat) => (
                   <button
-                    key={phase}
+                    key={cat}
                     type="button"
-                    onClick={() => setActivePhase(phase)}
-                    className={`clay-focus rounded-full px-3 py-1 type-body-sm transition ${
-                      activePhase === phase
-                        ? "bg-surface-1 font-medium text-ink shadow-sm"
+                    onClick={() => setActiveCategory(cat)}
+                    className={`clay-focus rounded-full px-2 py-0.5 text-[11px] font-medium transition ${
+                      activeCategory === cat
+                        ? "bg-olive-tint text-olive"
                         : "text-ink-muted hover:text-ink"
                     }`}
                   >
-                    Phase {phase} ({phaseDone}/{phaseItems.length})
+                    {cat === "all" ? "All types" : cat}
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
           )}
 
@@ -140,9 +160,8 @@ export default function PatientChecklistPage() {
 
           {/* Error State */}
           {clinicalQuery.isError && (
-            <ClayCard className="p-8 text-center text-ink">
+            <ClayCard className="p-6 text-center text-ink">
               <p className="type-headline text-brick">Failed to load checklist</p>
-              <p className="mt-2 type-body-sm text-ink-muted">Please check your connection and try again.</p>
               <div className="mt-4 flex justify-center">
                 <ClayButton onClick={() => clinicalQuery.refetch()}>Retry</ClayButton>
               </div>
@@ -156,9 +175,6 @@ export default function PatientChecklistPage() {
                 <FileText className="size-6" />
               </div>
               <p className="mt-4 type-headline text-ink">No checklist items configured</p>
-              <p className="mt-2 type-body-sm">
-                Your pre-transplant workup steps and clearances will appear here once configured by the team.
-              </p>
               <div className="mt-6 flex justify-center">
                 <ClayButton variant="secondary" onClick={() => navigate("/me")}>
                   Back to Home
@@ -167,71 +183,62 @@ export default function PatientChecklistPage() {
             </ClayCard>
           )}
 
-          {/* Checklist Items */}
+          {/* Compact Multi-Column Grid - Fits in One Screen */}
           {!clinicalQuery.isLoading && filteredItems.length > 0 && (
-            <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredItems.map((item) => {
                 const isDone = item.status === "Done";
                 const isNA = item.status === "NA";
 
                 return (
-                  <ClayCard key={item.catalogId} className="p-4 sm:p-5">
-                    <div className="flex items-start gap-3.5">
-                      <div className="mt-0.5 shrink-0">
-                        {isDone && <CheckCircle2 className="size-5 text-olive" />}
-                        {isNA && <MinusCircle className="size-5 text-ink-muted/50" />}
-                        {!isDone && !isNA && <Circle className="size-5 text-ink-muted/60" />}
-                      </div>
+                  <ClayCard
+                    key={item.catalogId}
+                    level={1}
+                    padding="none"
+                    className={`flex items-center justify-between gap-2 rounded-lg border border-hairline px-3 py-2 transition hover:bg-surface-2 ${
+                      isDone ? "bg-olive-tint/20" : isNA ? "bg-surface-2/40 opacity-70" : "bg-surface-1"
+                    }`}
+                  >
+                    {/* Left: Icon + Tag + Name */}
+                    <div className="flex min-w-0 items-center gap-2">
+                      {isDone && <CheckCircle2 className="size-4 shrink-0 text-olive" />}
+                      {isNA && <MinusCircle className="size-4 shrink-0 text-ink-muted/50" />}
+                      {!isDone && !isNA && <Circle className="size-4 shrink-0 text-ink-muted/50" />}
 
-                      <div className="flex min-w-0 flex-1 flex-col gap-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-xs text-ink-muted">
-                            [{item.category}]
-                          </span>
-                          <h2
-                            className={`type-body font-medium break-words ${
-                              isDone ? "text-ink" : isNA ? "text-ink-muted line-through" : "text-ink"
-                            }`}
-                          >
-                            {item.name}
-                          </h2>
-                          {item.asIndicated && (
-                            <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted">
-                              As Indicated
-                            </span>
-                          )}
-                        </div>
+                      <span className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[10px] text-ink-muted shrink-0">
+                        {item.category === "Clearance" ? "Clr" : item.category}
+                      </span>
 
-                        {item.doneDate && (
-                          <p className="type-caption text-olive font-medium">
-                            Completed on {dateKey(item.doneDate)}
-                          </p>
-                        )}
+                      <span
+                        className={`truncate text-xs font-medium ${
+                          isDone ? "text-ink" : isNA ? "line-through text-ink-muted" : "text-ink"
+                        }`}
+                        title={item.name}
+                      >
+                        {item.name}
+                      </span>
+                    </div>
 
-                        {item.note && (
-                          <p className="mt-1 type-body-sm text-ink-muted break-words">
-                            Note: {item.note}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="shrink-0">
-                        {isDone && (
-                          <span className="rounded-full bg-olive-tint px-2.5 py-0.5 type-caption font-medium text-olive">
-                            Done
-                          </span>
-                        )}
-                        {isNA && (
-                          <span className="rounded-full bg-surface-2 px-2.5 py-0.5 type-caption text-ink-muted">
-                            N/A
-                          </span>
-                        )}
-                        {!isDone && !isNA && (
-                          <span className="rounded-full border border-dashed border-ink-muted/40 px-2.5 py-0.5 type-caption text-ink-muted">
-                            Pending
-                          </span>
-                        )}
-                      </div>
+                    {/* Right: Status Pill */}
+                    <div className="shrink-0">
+                      {isDone && (
+                        <span
+                          className="rounded-full bg-olive-tint px-2 py-0.5 text-[10px] font-medium text-olive"
+                          title={item.doneDate ? `Done on ${dateKey(item.doneDate)}` : "Done"}
+                        >
+                          Done
+                        </span>
+                      )}
+                      {isNA && (
+                        <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] text-ink-muted">
+                          N/A
+                        </span>
+                      )}
+                      {!isDone && !isNA && (
+                        <span className="rounded-full border border-dashed border-ink-muted/40 px-2 py-0.5 text-[10px] text-ink-muted">
+                          Pending
+                        </span>
+                      )}
                     </div>
                   </ClayCard>
                 );

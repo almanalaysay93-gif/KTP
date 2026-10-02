@@ -121,9 +121,9 @@ export default function PatientLabsPage() {
             </ClayCard>
           )}
 
-          {/* Lab Results List */}
+          {/* Lab Results List - Compact Multi-Column Grid */}
           {!clinicalQuery.isLoading && filteredResults.length > 0 && (
-            <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredResults.map((result) => {
                 const flagStatus =
                   result.flag === "High"
@@ -137,29 +137,30 @@ export default function PatientLabsPage() {
                   : "Date not recorded";
 
                 return (
-                  <ClayCard key={result.id} className="p-4 sm:p-5">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <h2 className="type-headline text-ink">{result.testName}</h2>
-                          {result.flag && (
-                            <StatusChip status={flagStatus} label={result.flag} size="patient" />
-                          )}
-                        </div>
-                        <p className="type-body-sm text-ink-muted">Test date: {dateStr}</p>
-                      </div>
-
-                      <div className="flex flex-col items-start gap-1 sm:items-end">
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="font-mono text-2xl font-bold text-ink">{result.value}</span>
-                          <span className="type-body-sm text-ink-muted">{result.unit}</span>
-                        </div>
-                        {(result.lowSnapshot !== null || result.highSnapshot !== null) && (
-                          <span className="type-caption text-ink-muted">
-                            Ref range: {result.lowSnapshot ?? "0"} to {result.highSnapshot ?? "max"} {result.unit}
-                          </span>
+                  <ClayCard key={result.id} className="p-3.5">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-start justify-between gap-1.5">
+                        <h2 className="text-sm font-semibold text-ink truncate" title={result.testName}>
+                          {result.testName}
+                        </h2>
+                        {result.flag && (
+                          <StatusChip status={flagStatus} label={result.flag} size="patient" />
                         )}
                       </div>
+
+                      <div className="flex items-baseline justify-between pt-1">
+                        <div className="flex items-baseline gap-1">
+                          <span className="font-mono text-xl font-bold text-ink">{result.value}</span>
+                          <span className="text-xs text-ink-muted">{result.unit}</span>
+                        </div>
+                        <span className="text-[11px] text-ink-muted">{dateStr}</span>
+                      </div>
+
+                      {(result.lowSnapshot !== null || result.highSnapshot !== null) && (
+                        <div className="border-t border-hairline pt-1 text-[11px] text-ink-muted truncate">
+                          Ref: {result.lowSnapshot ?? "0"} - {result.highSnapshot ?? "max"} {result.unit}
+                        </div>
+                      )}
                     </div>
                   </ClayCard>
                 );
