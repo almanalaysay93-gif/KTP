@@ -221,7 +221,7 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
               {["tracker", "labs", "checklist", "appointments"].map(value => (
                 <ClayTabsContent key={value} value={value} className="mt-6">
                   <div id={tab === value ? "clinical-content" : undefined} className="scroll-mt-20">
-                    <PatientClinicalTabs patientId={patientId} tab={value} />
+                    <PatientClinicalTabs patientId={patientId} tab={value} patient={patient} />
                   </div>
                 </ClayTabsContent>
               ))}

@@ -16,6 +16,8 @@ const PatientsPage = lazyWithRetry(() => import("./pages/PatientsPage"), "Patien
 const PatientEnrollPage = lazyWithRetry(() => import("./pages/PatientEnrollPage"), "PatientEnrollPage")
 const PatientDetailPage = lazyWithRetry(() => import("./pages/PatientDetailPage"), "PatientDetailPage")
 const SettingsPage = lazyWithRetry(() => import("./pages/Settings"), "Settings")
+const AdminCalendarPage = lazyWithRetry(() => import("./pages/AdminCalendarPage"), "AdminCalendarPage")
+const AdminMessagesPage = lazyWithRetry(() => import("./pages/AdminMessagesPage"), "AdminMessagesPage")
 
 // Patient portal on-demand pages
 const PatientHome = lazyWithRetry(() => import("./pages/PatientHome"), "PatientHome")
@@ -123,12 +125,12 @@ function Router() {
         </Route>
         <Route path="/calendar">
           <Protected>
-            <Redirect to="/dashboard" />
+            <AdminCalendarPage />
           </Protected>
         </Route>
         <Route path="/messages">
           <Protected>
-            <Redirect to="/dashboard" />
+            <AdminMessagesPage />
           </Protected>
         </Route>
         <Route path="/notifications">

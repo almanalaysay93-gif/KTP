@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { motion, type Variants } from "framer-motion";
 import { CalendarDays, LayoutDashboard, LogOut, Menu, MessageSquare, Settings, Users, X, type LucideIcon } from "lucide-react";
@@ -7,6 +7,7 @@ import { ClayAvatar } from "@/components/clay";
 import { AnimatePresence, LayoutGroup, PILL_IDS, SHARED_PILL_HOST, SharedPill, SPRINGS, useMotionMode } from "@/components/motion";
 import { cn } from "@/lib/utils";
 import { useAdminToast } from "./AdminToaster";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 /*
  * Admin shell (DESIGN.md Components, Sidebar): 264 sidebar on the ground at 1280 and up, 80 icon rail
@@ -38,12 +39,51 @@ export interface AdminShellProps {
   skipTo: string;
   skipLabel: string;
   children: ReactNode;
+  /** Optional custom sign-out handler. Defaults to auth logout. */
+  onSignOut?: () => void | Promise<void>;
+  /** Optional custom user override. Defaults to auth user. */
+  user?: { name?: string | null; email?: string | null; role?: string | null } | null;
 }
 
-export function AdminShell({ current, hrefs, hideUnavailable = false, mobileTitle, mobileActions, skipTo, skipLabel, children }: AdminShellProps) {
+export function AdminShell({
+  current,
+  hrefs,
+  hideUnavailable = false,
+  mobileTitle,
+  mobileActions,
+  skipTo,
+  skipLabel,
+  children,
+  onSignOut: customSignOut,
+  user: customUser,
+}: AdminShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const toast = useAdminToast();
+  const { user: authUser, logout } = useAuth();
   const previewOnly = (label: string) => toast({ title: "Preview only", body: `${label} is not part of this preview.`, tone: "info" });
+
+  const isPreview = typeof window !== "undefined" && window.location.pathname.startsWith("/preview");
+  const effectiveUser = customUser !== undefined ? customUser : authUser;
+
+  const handleSignOut = useCallback(async () => {
+    if (customSignOut) {
+      await customSignOut();
+      return;
+    }
+    if (isPreview) {
+      previewOnly("Sign out");
+      return;
+    }
+    try {
+      await logout();
+    } catch (error) {
+      console.error("Sign out failed", error);
+    } finally {
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+    }
+  }, [customSignOut, isPreview, logout]);
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[80px_minmax(0,1fr)] xl:grid-cols-[264px_minmax(0,1fr)]">
@@ -61,7 +101,7 @@ export function AdminShell({ current, hrefs, hideUnavailable = false, mobileTitl
           <img src="/branding/ots-mark.png" alt="Organ Transplant Services" width={48} height={48} className="mx-auto size-12 rounded-sm mix-blend-multiply xl:hidden" />
         </Link>
         <NavList current={current} hrefs={hrefs} hideUnavailable={hideUnavailable} onPreviewOnly={previewOnly} variant="side" />
-        <AdminBlock onSignOut={() => previewOnly("Sign out")} variant="side" />
+        <AdminBlock onSignOut={handleSignOut} user={effectiveUser} isPreview={isPreview} variant="side" />
       </aside>
 
       {/* Phone and tablet top bar */}
@@ -85,7 +125,7 @@ export function AdminShell({ current, hrefs, hideUnavailable = false, mobileTitl
         <LayoutGroup id="drawer">
           <NavList current={current} hrefs={hrefs} hideUnavailable={hideUnavailable} onPreviewOnly={previewOnly} variant="drawer" onNavigate={() => setDrawerOpen(false)} />
         </LayoutGroup>
-        <AdminBlock onSignOut={() => previewOnly("Sign out")} variant="drawer" />
+        <AdminBlock onSignOut={handleSignOut} user={effectiveUser} isPreview={isPreview} variant="drawer" />
       </Drawer>
 
       <div className="min-w-0">{children}</div>
@@ -160,22 +200,45 @@ function NavList({
   );
 }
 
-function AdminBlock({ onSignOut, variant }: { onSignOut: () => void; variant: "side" | "drawer" }) {
+function AdminBlock({
+  onSignOut,
+  user,
+  isPreview,
+  variant,
+}: {
+  onSignOut: () => void;
+  user: { name?: string | null; email?: string | null; role?: string | null } | null | undefined;
+  isPreview: boolean;
+  variant: "side" | "drawer";
+}) {
   const rail = variant === "side";
+  const name = isPreview || !user ? "KT unit admin" : (user.name || user.email || "Admin");
+  const sublabel = isPreview || !user
+    ? "Sample account"
+    : (user.email && user.name ? user.email : (user.role === "admin" ? "Transplant coordinator" : "Staff"));
+
   return (
     <div className={cn("mt-auto flex items-center gap-3 border-t border-hairline pt-4", rail && "lg:max-xl:flex-col lg:max-xl:gap-2")}>
-      <ClayAvatar name="KT unit admin" size={40} kind="neutral" decorative />
+      <ClayAvatar name={name} size={40} kind="neutral" decorative />
       <p className={cn("min-w-0 flex-1", rail && "lg:max-xl:sr-only")}>
-        <span className="type-body-sm block font-bold text-ink">KT unit admin</span>
-        <span className="type-caption block text-ink-muted">Sample account</span>
+        <span className="type-body-sm block font-bold text-ink truncate">{name}</span>
+        <span className="type-caption block text-ink-muted truncate">{sublabel}</span>
       </p>
       <button
         type="button"
         onClick={onSignOut}
-        aria-label="Sign out, preview only"
-        className="clay-focus inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-muted transition-colors duration-(--dur-color) hover:bg-sunken/60 hover:text-ink"
+        aria-label={isPreview ? "Sign out, preview only" : "Sign out"}
+        className="clay-focus group relative inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-muted transition-colors duration-(--dur-color) hover:bg-sunken/60 hover:text-ink"
       >
         <LogOut aria-hidden className="size-5" strokeWidth={1.75} />
+        {rail ? (
+          <span
+            aria-hidden
+            className="type-label pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-xs bg-ink px-2.5 py-1.5 text-on-brick lg:max-xl:group-hover:block lg:max-xl:group-focus-visible:block"
+          >
+            {isPreview ? "Sign out, preview only" : "Sign out"}
+          </span>
+        ) : null}
       </button>
     </div>
   );

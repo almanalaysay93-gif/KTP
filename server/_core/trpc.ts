@@ -76,7 +76,10 @@ export const patientBaseProcedure = baseProcedure.use(
       throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     }
 
-    const patient = await db.getPatientByLinkedUserId(ctx.user.id);
+    let patient = await db.getPatientByLinkedUserId(ctx.user.id);
+    if (!patient && ctx.user.email) {
+      patient = await db.autoLinkPatientByEmail(ctx.user.id, ctx.user.email);
+    }
     if (!patient) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     }

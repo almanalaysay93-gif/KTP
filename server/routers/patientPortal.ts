@@ -1,6 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "../db";
+import * as clinical from "../dbClinical";
+import { acknowledgePatientMessage, listPatientMessages } from "../dbMessages";
 import { patientProcedure, router } from "../_core/trpc";
 
 export const patientPortalRouter = router({
@@ -36,6 +38,37 @@ export const patientPortalRouter = router({
       linkedRecipientName,
     };
   }),
+
+  getMyClinical: patientProcedure.query(async ({ ctx }) => {
+    return clinical.getClinical(ctx.patientId);
+  }),
+
+  respondAppointment: patientProcedure
+    .input(
+      z.object({
+        appointmentId: z.number().int().positive().safe(),
+        response: z.enum(["Confirmed", "RescheduleRequested"]),
+        responseNote: z.string().trim().max(1000).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return clinical.respondToAppointment({
+        patientId: ctx.patientId,
+        id: input.appointmentId,
+        response: input.response,
+        responseNote: input.responseNote,
+      });
+    }),
+
+  getMyMessages: patientProcedure.query(async ({ ctx }) => {
+    return listPatientMessages(ctx.patientId);
+  }),
+
+  acknowledgeMessage: patientProcedure
+    .input(z.object({ messageId: z.number().int().positive().safe() }))
+    .mutation(async ({ ctx, input }) => {
+      return acknowledgePatientMessage(ctx.patientId, input.messageId);
+    }),
 
   updateContact: patientProcedure
     .input(z.object({ contactNumber: z.string().max(32).nullable() }))

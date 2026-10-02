@@ -10,9 +10,11 @@ export type ClinicalData = inferRouterOutputs<AppRouter>["clinical"]["get"];
 export function PatientClinicalTabs({
   patientId,
   tab,
+  patient,
 }: {
   patientId: number;
   tab: string;
+  patient?: any;
 }) {
   const query = trpc.clinical.get.useQuery({ patientId });
   if (query.isLoading) return <p role="status">Loading clinical records...</p>;
@@ -25,7 +27,7 @@ export function PatientClinicalTabs({
     );
   if (!query.data) return null;
   if (tab === "tracker")
-    return <ClinicalTracker patientId={patientId} data={query.data} />;
+    return <ClinicalTracker patientId={patientId} data={query.data} patient={patient} />;
   if (tab === "labs") return <Labs data={query.data} />;
   if (tab === "checklist")
     return <Checklist patientId={patientId} data={query.data} />;

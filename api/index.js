@@ -1028,31 +1028,31 @@ async function listPatients(opts = {}) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    let query2 = "SELECT * FROM patients WHERE 1=1";
+    let query3 = "SELECT * FROM patients WHERE 1=1";
     const params = [];
     if (opts.type) {
-      query2 += " AND patientType = ?";
+      query3 += " AND patientType = ?";
       params.push(opts.type);
     }
     if (opts.stage) {
-      query2 += " AND stage = ?";
+      query3 += " AND stage = ?";
       params.push(opts.stage);
     }
     if (opts.doctorId) {
-      query2 += " AND (nephrologistId = ? OR fellowId = ?)";
+      query3 += " AND (nephrologistId = ? OR fellowId = ?)";
       params.push(opts.doctorId, opts.doctorId);
     }
     if (opts.status) {
-      query2 += " AND status = ?";
+      query3 += " AND status = ?";
       params.push(opts.status);
     }
     if (opts.search) {
       const term = `%${opts.search.toLowerCase()}%`;
-      query2 += " AND (lower(firstName) LIKE ? OR lower(lastName) LIKE ? OR lower(hrn) LIKE ?)";
+      query3 += " AND (lower(firstName) LIKE ? OR lower(lastName) LIKE ? OR lower(hrn) LIKE ?)";
       params.push(term, term, term);
     }
-    query2 += " ORDER BY lastName ASC, firstName ASC";
-    return sqlite.prepare(query2).all(...params);
+    query3 += " ORDER BY lastName ASC, firstName ASC";
+    return sqlite.prepare(query3).all(...params);
   }
   const conditions = [];
   if (opts.type) conditions.push(eq(patients.patientType, opts.type));
@@ -1148,15 +1148,15 @@ async function listDoctors(opts = {}) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    let query2 = "SELECT * FROM doctors WHERE 1=1";
+    let query3 = "SELECT * FROM doctors WHERE 1=1";
     const params = [];
-    if (activeOnly) query2 += " AND active = 1";
+    if (activeOnly) query3 += " AND active = 1";
     if (opts.role) {
-      query2 += " AND role = ?";
+      query3 += " AND role = ?";
       params.push(opts.role);
     }
-    query2 += " ORDER BY name ASC";
-    return sqlite.prepare(query2).all(...params);
+    query3 += " ORDER BY name ASC";
+    return sqlite.prepare(query3).all(...params);
   }
   const conditions = [];
   if (activeOnly) conditions.push(eq(doctors.active, true));
@@ -2014,7 +2014,10 @@ var patientBaseProcedure = baseProcedure.use(
     if (!ctx.user) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     }
-    const patient3 = await getPatientByLinkedUserId(ctx.user.id);
+    let patient3 = await getPatientByLinkedUserId(ctx.user.id);
+    if (!patient3 && ctx.user.email) {
+      patient3 = await autoLinkPatientByEmail(ctx.user.id, ctx.user.email);
+    }
     if (!patient3) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     }
@@ -2261,6 +2264,44 @@ async function fileClaim(input, actor) {
     return { id: input.id };
   });
 }
+async function respondToAppointment(input) {
+  return execute(function* () {
+    yield* patient(input.patientId);
+    const [row] = yield query(
+      'UPDATE appointments SET response = ?, "responseNote" = ?, "respondedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "cancelledAt" IS NULL RETURNING id, title',
+      input.response,
+      input.responseNote ?? null,
+      input.id,
+      input.patientId
+    );
+    if (!row) fail("Appointment missing or cancelled", "CONFLICT");
+    yield* audit(input.patientId, input.patientId, `clinical.appointment.respond.${input.response}`, row.id);
+    return { id: input.id, response: input.response };
+  });
+}
+async function listAllAppointments() {
+  return execute(function* () {
+    const rows = yield query(`
+      SELECT a.*,
+        CAST(a."startsAt" AS TEXT) AS "startsAt",
+        CAST(a."cancelledAt" AS TEXT) AS "cancelledAt",
+        CAST(a."respondedAt" AS TEXT) AS "respondedAt",
+        p.hrn, p."firstName", p."lastName", p."patientType", p.stage, p."contactNumber"
+      FROM appointments a
+      JOIN patients p ON p.id = a."patientId"
+      WHERE p.status = 'Active'
+      ORDER BY a."startsAt" ASC, a.id DESC
+    `);
+    return rows.map((r) => ({
+      ...appointment(r),
+      patientName: `${r.lastName}, ${r.firstName}`,
+      hrn: String(r.hrn),
+      patientType: String(r.patientType),
+      stage: String(r.stage),
+      contactNumber: r.contactNumber ? String(r.contactNumber) : null
+    }));
+  });
+}
 var catalogReady;
 function ensureCatalog() {
   return catalogReady ??= getBatchClient().begin(async (tx) => {
@@ -2291,6 +2332,7 @@ var pastDate = date2.refine((value) => value <= todayDate(), "Date cannot be in 
 var note = z.string().trim().max(4e3).optional();
 var clinicalRouter = router({
   get: adminProcedure.input(patient2).query(({ input }) => getClinical(input.patientId)),
+  listAppointments: adminProcedure.query(() => listAllAppointments()),
   addService: adminProcedure.input(patient2.extend({
     serviceType: z.enum(["Meds", "Laboratory", "Tacro", "XrayUsd"]),
     label: z.string().trim().min(1).max(200),
@@ -2720,13 +2762,166 @@ var notificationsRouter = router({
 
 // server/routers/patientPortal.ts
 init_db();
-import { TRPCError as TRPCError5 } from "@trpc/server";
+import { TRPCError as TRPCError6 } from "@trpc/server";
 import { z as z7 } from "zod";
+
+// server/dbMessages.ts
+init_db();
+init_localDb();
+import { TRPCError as TRPCError5 } from "@trpc/server";
+var query2 = (sql4, ...args) => ({ sql: sql4, args });
+async function execute2(make) {
+  if (!process.env.DATABASE_URL) {
+    const db = getSqliteDb();
+    return db.transaction(() => {
+      const program = make();
+      let step = program.next();
+      while (!step.done) {
+        const statement = db.prepare(step.value.sql);
+        const rows = statement.reader ? statement.all(...step.value.args) : (statement.run(...step.value.args), []);
+        step = program.next(rows);
+      }
+      return step.value;
+    }).immediate();
+  }
+  if (!await getDb()) throw new Error("Database unavailable");
+  const client = getBatchClient();
+  return await client.begin(async (transaction) => {
+    const program = make();
+    let step = program.next();
+    while (!step.done) {
+      let parameter = 0;
+      const sql4 = step.value.sql.replace(/\?/g, () => `$${++parameter}`);
+      const rows = await transaction.unsafe(sql4, step.value.args);
+      step = program.next([...rows]);
+    }
+    return step.value;
+  });
+}
+async function createBroadcastMessage(input) {
+  return execute2(function* () {
+    let patientSql = "SELECT id FROM patients WHERE status = 'Active'";
+    const patientArgs = [];
+    if (input.targetType === "Recipient") {
+      patientSql += ' AND "patientType" = ?';
+      patientArgs.push("Recipient");
+    } else if (input.targetType === "Donor") {
+      patientSql += ' AND "patientType" = ?';
+      patientArgs.push("Donor");
+    } else if (input.targetType === "Stage" && input.targetStage) {
+      patientSql += " AND stage = ?";
+      patientArgs.push(input.targetStage);
+    } else if (input.targetType === "Specific" && input.targetPatientId) {
+      patientSql += " AND id = ?";
+      patientArgs.push(input.targetPatientId);
+    }
+    const recipients = yield query2(patientSql, ...patientArgs);
+    if (!recipients.length) {
+      throw new TRPCError5({
+        code: "BAD_REQUEST",
+        message: "No active patients match the chosen broadcast target"
+      });
+    }
+    const [msg] = yield query2(
+      `INSERT INTO messages ("senderUserId", subject, body, "targetType", "targetStage", "targetPatientId")
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+      input.senderUserId,
+      input.subject,
+      input.body,
+      input.targetType,
+      input.targetStage ?? null,
+      input.targetPatientId ?? null
+    );
+    const messageId = msg.id;
+    for (const p of recipients) {
+      yield query2(
+        'INSERT INTO "messageRecipients" ("messageId", "patientId") VALUES (?, ?)',
+        messageId,
+        p.id
+      );
+      yield query2(
+        `INSERT INTO notifications ("patientId", title, message, type, "linkUrl")
+         VALUES (?, ?, ?, 'info', '/me/messages')`,
+        p.id,
+        input.subject,
+        input.body.slice(0, 150)
+      );
+    }
+    return { id: messageId, recipientCount: recipients.length };
+  });
+}
+async function listAdminMessages() {
+  return execute2(function* () {
+    const rows = yield query2(`
+      SELECT m.id, m."senderUserId", m.subject, m.body, m."targetType", m."targetStage", m."targetPatientId",
+        CAST(m."createdAt" AS TEXT) AS "createdAt",
+        (SELECT COUNT(*) FROM "messageRecipients" mr WHERE mr."messageId" = m.id) AS "recipientCount",
+        (SELECT COUNT(*) FROM "messageRecipients" mr WHERE mr."messageId" = m.id AND mr."readAt" IS NOT NULL) AS "readCount",
+        (SELECT COUNT(*) FROM "messageAcknowledgments" ma WHERE ma."messageId" = m.id) AS "acknowledgedCount"
+      FROM messages m
+      ORDER BY m.id DESC
+    `);
+    return rows.map((r) => ({
+      id: Number(r.id),
+      senderUserId: Number(r.senderUserId),
+      subject: String(r.subject),
+      body: String(r.body),
+      targetType: String(r.targetType),
+      targetStage: r.targetStage ? String(r.targetStage) : null,
+      targetPatientId: r.targetPatientId ? Number(r.targetPatientId) : null,
+      createdAt: String(r.createdAt),
+      recipientCount: Number(r.recipientCount || 0),
+      readCount: Number(r.readCount || 0),
+      acknowledgedCount: Number(r.acknowledgedCount || 0)
+    }));
+  });
+}
+async function listPatientMessages(patientId) {
+  return execute2(function* () {
+    const rows = yield query2(
+      `SELECT m.id, m.subject, m.body,
+        CAST(m."createdAt" AS TEXT) AS "createdAt",
+        CAST(mr."readAt" AS TEXT) AS "readAt",
+        CAST(ma."acknowledgedAt" AS TEXT) AS "acknowledgedAt"
+      FROM "messageRecipients" mr
+      JOIN messages m ON m.id = mr."messageId"
+      LEFT JOIN "messageAcknowledgments" ma ON ma."messageId" = m.id AND ma."patientId" = mr."patientId"
+      WHERE mr."patientId" = ?
+      ORDER BY m.id DESC`,
+      patientId
+    );
+    return rows.map((r) => ({
+      id: Number(r.id),
+      subject: String(r.subject),
+      body: String(r.body),
+      createdAt: String(r.createdAt),
+      readAt: r.readAt ? String(r.readAt) : null,
+      acknowledgedAt: r.acknowledgedAt ? String(r.acknowledgedAt) : null
+    }));
+  });
+}
+async function acknowledgePatientMessage(patientId, messageId) {
+  return execute2(function* () {
+    yield query2(
+      'UPDATE "messageRecipients" SET "readAt" = CURRENT_TIMESTAMP WHERE "messageId" = ? AND "patientId" = ? AND "readAt" IS NULL',
+      messageId,
+      patientId
+    );
+    yield query2(
+      'INSERT INTO "messageAcknowledgments" ("messageId", "patientId") VALUES (?, ?)',
+      messageId,
+      patientId
+    );
+    return { success: true };
+  });
+}
+
+// server/routers/patientPortal.ts
 var patientPortalRouter = router({
   getMyProfile: patientProcedure.query(async ({ ctx }) => {
     const patient3 = await getPatientById(ctx.patientId);
     if (!patient3) {
-      throw new TRPCError5({ code: "NOT_FOUND", message: "Patient profile not found" });
+      throw new TRPCError6({ code: "NOT_FOUND", message: "Patient profile not found" });
     }
     let nephrologist = null;
     if (patient3.nephrologistId) {
@@ -2750,6 +2945,29 @@ var patientPortalRouter = router({
       linkedRecipientName
     };
   }),
+  getMyClinical: patientProcedure.query(async ({ ctx }) => {
+    return getClinical(ctx.patientId);
+  }),
+  respondAppointment: patientProcedure.input(
+    z7.object({
+      appointmentId: z7.number().int().positive().safe(),
+      response: z7.enum(["Confirmed", "RescheduleRequested"]),
+      responseNote: z7.string().trim().max(1e3).optional()
+    })
+  ).mutation(async ({ ctx, input }) => {
+    return respondToAppointment({
+      patientId: ctx.patientId,
+      id: input.appointmentId,
+      response: input.response,
+      responseNote: input.responseNote
+    });
+  }),
+  getMyMessages: patientProcedure.query(async ({ ctx }) => {
+    return listPatientMessages(ctx.patientId);
+  }),
+  acknowledgeMessage: patientProcedure.input(z7.object({ messageId: z7.number().int().positive().safe() })).mutation(async ({ ctx, input }) => {
+    return acknowledgePatientMessage(ctx.patientId, input.messageId);
+  }),
   updateContact: patientProcedure.input(z7.object({ contactNumber: z7.string().max(32).nullable() })).mutation(async ({ ctx, input }) => {
     const updated = await updatePatient(ctx.patientId, {
       contactNumber: input.contactNumber
@@ -2761,6 +2979,32 @@ var patientPortalRouter = router({
       photoFileId: input.photoFileId
     });
     return updated;
+  })
+});
+
+// server/routers/messages.ts
+import { z as z8 } from "zod";
+var messagesRouter = router({
+  list: adminProcedure.query(async () => {
+    return listAdminMessages();
+  }),
+  create: adminProcedure.input(
+    z8.object({
+      subject: z8.string().trim().min(1, "Subject is required").max(200),
+      body: z8.string().trim().min(1, "Message content is required").max(4e3),
+      targetType: z8.enum(["All", "Recipient", "Donor", "Stage", "Specific"]),
+      targetStage: z8.string().optional(),
+      targetPatientId: z8.number().int().positive().safe().optional()
+    })
+  ).mutation(async ({ ctx, input }) => {
+    return createBroadcastMessage({
+      senderUserId: ctx.user.id,
+      subject: input.subject,
+      body: input.body,
+      targetType: input.targetType,
+      targetStage: input.targetStage,
+      targetPatientId: input.targetPatientId
+    });
   })
 });
 
@@ -2777,6 +3021,9 @@ var appRouter = router({
       let consentRequired = false;
       if (!isAdmin) {
         patient3 = await getPatientByLinkedUserId(ctx.user.id);
+        if (!patient3 && ctx.user.email) {
+          patient3 = await autoLinkPatientByEmail(ctx.user.id, ctx.user.email);
+        }
         if (patient3) {
           const userEmail = (ctx.user.email ?? "").trim().toLowerCase();
           const patientEmail = (patient3.accountEmail ?? "").trim().toLowerCase();
@@ -2830,7 +3077,8 @@ var appRouter = router({
   settings: settingsRouter,
   dashboard: dashboardRouter,
   notifications: notificationsRouter,
-  patientPortal: patientPortalRouter
+  patientPortal: patientPortalRouter,
+  messages: messagesRouter
 });
 
 // server/_core/context.ts

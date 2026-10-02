@@ -14,6 +14,7 @@ const note = z.string().trim().max(4000).optional();
 
 export const clinicalRouter = router({
   get: adminProcedure.input(patient).query(({ input }) => clinical.getClinical(input.patientId)),
+  listAppointments: adminProcedure.query(() => clinical.listAllAppointments()),
   addService: adminProcedure.input(patient.extend({
     serviceType: z.enum(["Meds", "Laboratory", "Tacro", "XrayUsd"]),
     label: z.string().trim().min(1).max(200), dueDate: date, note,

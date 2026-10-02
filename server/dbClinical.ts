@@ -192,6 +192,51 @@ export async function fileClaim(input: { patientId: number; id: number; claimFil
   });
 }
 
+export async function respondToAppointment(input: {
+  patientId: number;
+  id: number;
+  response: "Confirmed" | "RescheduleRequested";
+  responseNote?: string;
+}) {
+  return execute(function* () {
+    yield* patient(input.patientId);
+    const [row] = yield query(
+      'UPDATE appointments SET response = ?, "responseNote" = ?, "respondedAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "cancelledAt" IS NULL RETURNING id, title',
+      input.response,
+      input.responseNote ?? null,
+      input.id,
+      input.patientId
+    );
+    if (!row) fail("Appointment missing or cancelled", "CONFLICT");
+    yield* audit(input.patientId, input.patientId, `clinical.appointment.respond.${input.response}`, row.id);
+    return { id: input.id, response: input.response };
+  });
+}
+
+export async function listAllAppointments() {
+  return execute(function* () {
+    const rows = yield query(`
+      SELECT a.*,
+        CAST(a."startsAt" AS TEXT) AS "startsAt",
+        CAST(a."cancelledAt" AS TEXT) AS "cancelledAt",
+        CAST(a."respondedAt" AS TEXT) AS "respondedAt",
+        p.hrn, p."firstName", p."lastName", p."patientType", p.stage, p."contactNumber"
+      FROM appointments a
+      JOIN patients p ON p.id = a."patientId"
+      WHERE p.status = 'Active'
+      ORDER BY a."startsAt" ASC, a.id DESC
+    `);
+    return rows.map((r: any) => ({
+      ...appointment(r),
+      patientName: `${r.lastName}, ${r.firstName}`,
+      hrn: String(r.hrn),
+      patientType: String(r.patientType),
+      stage: String(r.stage),
+      contactNumber: r.contactNumber ? String(r.contactNumber) : null,
+    }));
+  });
+}
+
 let catalogReady: Promise<void> | undefined;
 function ensureCatalog(): Promise<void> {
   return catalogReady ??= getBatchClient()!.begin(async tx => {

@@ -9,6 +9,7 @@ import { settingsRouter } from "./routers/settings";
 import { dashboardRouter } from "./routers/dashboard";
 import { notificationsRouter } from "./routers/notifications";
 import { patientPortalRouter } from "./routers/patientPortal";
+import { messagesRouter } from "./routers/messages";
 import * as db from "./db";
 import { hasFullAccess } from "./adminAccess";
 import type { Patient } from "../drizzle/schema";
@@ -25,6 +26,9 @@ export const appRouter = router({
 
       if (!isAdmin) {
         patient = await db.getPatientByLinkedUserId(ctx.user.id);
+        if (!patient && ctx.user.email) {
+          patient = await db.autoLinkPatientByEmail(ctx.user.id, ctx.user.email);
+        }
         if (patient) {
           const userEmail = (ctx.user.email ?? "").trim().toLowerCase();
           const patientEmail = (patient.accountEmail ?? "").trim().toLowerCase();
@@ -90,6 +94,7 @@ export const appRouter = router({
   dashboard: dashboardRouter,
   notifications: notificationsRouter,
   patientPortal: patientPortalRouter,
+  messages: messagesRouter,
 });
 
 export type AppRouter = typeof appRouter;

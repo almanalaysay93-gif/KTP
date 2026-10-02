@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ClayButton, ClayCard, ClayInput } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
-import { dateKey, todayDate } from "@shared/ktp";
+import { dateKey, suggestNextDueDate, todayDate } from "@shared/ktp";
 import type { ClinicalData } from "./PatientClinicalTabs";
 import { ClinicalForm, ClinicalSelect, field } from "./ClinicalForm";
 
@@ -15,11 +15,31 @@ const serviceNames = {
 export function ClinicalTracker({
   patientId,
   data,
+  patient,
 }: {
   patientId: number;
   data: ClinicalData;
+  patient?: {
+    surgeryDate?: string | Date | null;
+    followupMonths?: number | null;
+    stage?: string;
+  };
 }) {
   const add = trpc.clinical.addService.useMutation();
+  const [serviceType, setServiceType] = useState<keyof typeof serviceNames>("Laboratory");
+  const [dueDate, setDueDate] = useState<string>("");
+
+  const matchingServices = data.services.filter(s => s.serviceType === serviceType);
+  const lastSlot = matchingServices[0];
+  const anchorDate = lastSlot?.dueDate ?? patient?.surgeryDate;
+
+  const suggestedDate = suggestNextDueDate(
+    serviceType,
+    patient?.surgeryDate,
+    anchorDate,
+    patient?.followupMonths ?? 1
+  );
+
   return (
     <div
       id="clinical-tracker"
@@ -32,8 +52,8 @@ export function ClinicalTracker({
           patientId={patientId}
           label="Add service"
           reset
-          submit={form =>
-            add.mutateAsync({
+          submit={async form => {
+            await add.mutateAsync({
               patientId,
               serviceType: field(
                 form,
@@ -42,18 +62,59 @@ export function ClinicalTracker({
               label: field(form, "label"),
               dueDate: field(form, "dueDate"),
               note: field(form, "note"),
-            })
-          }
+            });
+            setDueDate("");
+          }}
         >
           <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-            <ClinicalSelect name="serviceType" label="Service type">
+            <ClinicalSelect
+              name="serviceType"
+              label="Service type"
+              value={serviceType}
+              onChange={e => {
+                const newType = e.target.value as keyof typeof serviceNames;
+                setServiceType(newType);
+                const nextMatch = data.services.filter(s => s.serviceType === newType);
+                const nextAnchor = nextMatch[0]?.dueDate ?? patient?.surgeryDate;
+                const nextSuggested = suggestNextDueDate(
+                  newType,
+                  patient?.surgeryDate,
+                  nextAnchor,
+                  patient?.followupMonths ?? 1
+                );
+                if (nextSuggested) {
+                  setDueDate(nextSuggested);
+                }
+              }}
+            >
               {Object.entries(serviceNames).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
               ))}
             </ClinicalSelect>
-            <ClayInput name="dueDate" label="Due date" type="date" required />
+            <div className="flex flex-col gap-1">
+              <ClayInput
+                name="dueDate"
+                label="Due date"
+                type="date"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+                required
+              />
+              {suggestedDate && (
+                <div className="flex items-center justify-between rounded-md bg-olive-tint/60 px-2 py-0.5 text-xs text-olive">
+                  <span>Guide tier: <strong>{suggestedDate}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => setDueDate(suggestedDate)}
+                    className="clay-focus font-medium underline hover:text-ink"
+                  >
+                    Apply
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <ClayInput
             name="label"
