@@ -1,4 +1,4 @@
-import { LAB_CATALOG, CHECKLIST_CATALOG } from "./clinicalCatalog";
+import { syncCatalog } from "./clinicalCatalog";
 import type Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
@@ -300,26 +300,16 @@ function initSchemaAndSeed(db: Database.Database) {
     insertDoc.run("Dr. Ana Lim", "Fellow");
   }
 
-  // Seed lab tests if empty
-  const labCount = db.prepare("SELECT count(*) as count FROM labTests").get() as { count: number };
-  if (labCount.count === 0) {
-    const insertLab = db.prepare("INSERT INTO labTests (name, unit, sortOrder, active) VALUES (?, ?, ?, 1)");
-    for (const [name, unit, sort] of LAB_CATALOG) {
-      insertLab.run(name, unit, sort);
+  // Seed the lab test and checklist catalogs, or bring older catalogs to the current lists.
+  db.transaction(() => {
+    const sync = syncCatalog();
+    let step = sync.next();
+    while (!step.done) {
+      const statement = db.prepare(step.value.sql);
+      const rows = statement.reader ? statement.all(...step.value.args) : (statement.run(...step.value.args), []);
+      step = sync.next(rows as Record<string, any>[]);
     }
-  }
-
-  // Seed checklist catalog if empty
-  const checklistCount = db.prepare("SELECT count(*) as count FROM checklistCatalog").get() as { count: number };
-  if (checklistCount.count === 0) {
-    const insertChecklist = db.prepare(
-      "INSERT INTO checklistCatalog (name, category, phase, appliesTo, asIndicated, sortOrder, active) VALUES (?, ?, ?, ?, ?, ?, 1)"
-    );
-
-    for (const [name, cat, phase, applies, asInd, sort] of CHECKLIST_CATALOG) {
-      insertChecklist.run(name, cat, phase, applies, asInd, sort);
-    }
-  }
+  })();
 
   // Seed default patient for alai12152201@gmail.com if not exists
   const existingPatient = db.prepare("SELECT * FROM patients WHERE lower(accountEmail) = 'alai12152201@gmail.com'").get();

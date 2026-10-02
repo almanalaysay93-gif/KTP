@@ -1,4 +1,4 @@
-import { LAB_CATALOG, CHECKLIST_CATALOG } from "./clinicalCatalog";
+import { syncCatalog } from "./clinicalCatalog";
 import { TRPCError } from "@trpc/server";
 import { getBatchClient, getDb } from "./db";
 import { getSqliteDb } from "./localDb";
@@ -182,6 +182,13 @@ export async function addLabResult(input: AddLabResult, actor: number) {
     if (saved.length) fail("This test already has a result for that phase and date. Remove it first, or correct it in Edit patient.", "CONFLICT");
     const [row] = yield query('INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
       record.id, input.labTestId, input.value, test.low, test.high, labFlag(input.value, test.low, test.high));
+    // A result completes the checklist item of the same test in the same work-up phase.
+    const phaseNumber = /^Phase(\d)$/.exec(input.phase)?.[1];
+    const [item] = phaseNumber ? yield query(`SELECT id FROM "checklistCatalog" WHERE name = ? AND phase = ? AND active = true AND ("appliesTo" = 'Both' OR "appliesTo" = ?)`,
+      test.name, Number(phaseNumber), profile.patientType) : [];
+    if (item) yield query(`INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate") VALUES (?, ?, 'Done', ?)
+      ON CONFLICT ("patientId", "catalogId") DO UPDATE SET status = 'Done', "doneDate" = excluded."doneDate", "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "patientChecklist".status <> 'Done'`, input.patientId, item.id, input.serviceDate);
     yield* audit(actor, input.patientId, "clinical.lab.add", row.id, { serviceRecordId: record.id, phase: input.phase });
     return { id: row.id as number, serviceRecordId: record.id as number };
   });
@@ -359,13 +366,12 @@ let catalogReady: Promise<void> | undefined;
 function ensureCatalog(): Promise<void> {
   return catalogReady ??= getBatchClient()!.begin(async tx => {
     await tx.unsafe('LOCK TABLE "labTests", "checklistCatalog" IN SHARE ROW EXCLUSIVE MODE');
-    const [labs] = await tx.unsafe('SELECT COUNT(*) AS count FROM "labTests"');
-    if (Number(labs.count) === 0) for (const [name, unit, sort] of LAB_CATALOG) {
-      await tx.unsafe('INSERT INTO "labTests" (name, unit, "sortOrder", active) VALUES ($1,$2,$3,true)', [name, unit, sort]);
-    }
-    const [items] = await tx.unsafe('SELECT COUNT(*) AS count FROM "checklistCatalog"');
-    if (Number(items.count) === 0) for (const [name, category, phase, appliesTo, asIndicated, sort] of CHECKLIST_CATALOG) {
-      await tx.unsafe('INSERT INTO "checklistCatalog" (name, category, phase, "appliesTo", "asIndicated", "sortOrder", active) VALUES ($1,$2,$3,$4,$5,$6,true)', [name, category, phase, appliesTo, Boolean(asIndicated), sort]);
+    const sync = syncCatalog();
+    let step = sync.next();
+    while (!step.done) {
+      let parameter = 0;
+      const rows = await tx.unsafe(step.value.sql.replace(/\?/g, () => `$${++parameter}`), step.value.args as any[]);
+      step = sync.next([...rows]);
     }
   }).then(() => undefined).catch(error => { catalogReady = undefined; throw error; });
 }

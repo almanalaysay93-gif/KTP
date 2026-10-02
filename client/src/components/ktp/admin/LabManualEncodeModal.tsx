@@ -18,6 +18,9 @@ export interface LabManualEncodeModalProps {
   onClose: () => void;
   patientId: number;
   patientType?: string;
+  /** Test and phase that the form starts with, for a result added from one checklist row. */
+  initialTestId?: number;
+  initialPhase?: LabPhase;
   labTests: Array<{
     id: number;
     name: string;
@@ -32,6 +35,8 @@ export function LabManualEncodeModal({
   onClose,
   patientId,
   patientType,
+  initialTestId,
+  initialPhase,
   labTests,
 }: LabManualEncodeModalProps) {
   const utils = trpc.useUtils();
@@ -39,9 +44,9 @@ export function LabManualEncodeModal({
     patientType === "Donor" ? DONOR_STAGES : RECIPIENT_STAGES;
   const applicablePhases = LAB_PHASES.filter(phase => stages.includes(phase));
 
-  const [phase, setPhase] = useState<LabPhase>(applicablePhases[0] ?? "Phase1");
+  const [phase, setPhase] = useState<LabPhase>(initialPhase ?? applicablePhases[0] ?? "Phase1");
   const [serviceDate, setServiceDate] = useState<string>(todayDate());
-  const [labTestId, setLabTestId] = useState<number>(labTests[0]?.id ?? 1);
+  const [labTestId, setLabTestId] = useState<number>(initialTestId ?? labTests[0]?.id ?? 1);
   const [value, setValue] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [isSuccess, setIsSuccess] = useState<boolean>(false);

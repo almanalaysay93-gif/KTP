@@ -3,6 +3,7 @@ import type { ClinicalLabResult } from "../../../../../server/dbClinical";
 /**
  * Normal reference values for KTP laboratory catalog and workup checklist items.
  * Standardized to Philippine hospital and clinical nephrology guidelines.
+ * Each key is the exact name of one lab test or one checklist item.
  */
 export const LAB_NORMAL_VALUES: Record<string, string> = {
   // Catalog laboratory tests
@@ -22,17 +23,21 @@ export const LAB_NORMAL_VALUES: Record<string, string> = {
   "LDL": "< 2.60 mmol/L (< 100 mg/dL)",
   "CMV PCR": "< 137 IU/mL (Undetected)",
 
-  // Checklist workup lab requirements
-  "CBC with differential": "Hgb 120-160 g/L, WBC 4.5-11.0, Plt 150-450",
-  "Blood typing ABO and Rh": "Documented ABO and Rh typing",
-  "BT, CT, PT/INR, aPTT": "INR 0.8-1.2, aPTT 25-35s, normal coagulation",
-  "FBS and HbA1c": "FBS 3.9-5.6 mmol/L, HbA1c < 5.7%",
-  "Creatinine, BUN, uric acid": "Crea 60-115 umol/L, BUN 2.5-7.1 mmol/L, UA 200-420",
-  "SGPT, SGOT, ALP": "ALT/SGPT 0-45 U/L, AST/SGOT 0-35 U/L, ALP 30-120 U/L",
-  "Na, K, Ca, phosphorus, Mg": "Na 135-145, K 3.5-5.0, Ca 2.15-2.55, P 0.8-1.45 mmol/L",
-  "Lipid profile": "Chol < 5.2, Trig < 1.7, HDL > 1.0, LDL < 2.6 mmol/L",
-  "Albumin and total protein": "Albumin 35-50 g/L, Total Protein 60-80 g/L",
+  // Single tests of the work-up panels
+  "PT/INR": "INR 0.8 - 1.2",
+  "aPTT": "25 - 35 s",
+  "HbA1c": "< 5.7%",
+  "Uric acid": "200 - 420 umol/L",
+  "AST (SGOT)": "0 - 35 U/L",
+  "ALP": "30 - 120 U/L",
+  "Calcium": "2.15 - 2.55 mmol/L",
+  "Phosphorus": "0.8 - 1.45 mmol/L",
+  "Albumin": "35 - 50 g/L",
+  "Total protein": "60 - 80 g/L",
   "iPTH": "1.6 - 6.9 pmol/L (15 - 65 pg/mL)",
+
+  // Checklist workup lab requirements
+  "Blood typing ABO and Rh": "Documented ABO and Rh typing",
   "Hepatitis B markers": "HBsAg Non-reactive, Anti-HBs documented",
   "Anti-HCV": "Non-reactive",
   "TPPA/VDRL/RPR": "Non-reactive",
@@ -56,41 +61,37 @@ export const LAB_NORMAL_VALUES: Record<string, string> = {
   "T and B cell crossmatch": "Negative T-cell and B-cell CDC and flow crossmatch",
 
   // Phase 3 testing
-  "Repeat urinalysis and CBC": "Normal urinalysis, CBC within baseline",
+  "Repeat urinalysis": "Normal urinalysis",
+  "Repeat CBC": "CBC within baseline",
   "RT-PCR on admission day": "SARS-CoV-2 Negative",
 };
 
+const NORMAL_BY_NAME = new Map(
+  Object.entries(LAB_NORMAL_VALUES).map(([name, value]) => [
+    name.toLowerCase(),
+    value,
+  ])
+);
+
 /**
- * Retrieve the normal reference values for a given requirement or test name.
+ * Retrieve the normal reference values for a requirement or test name.
+ * The name must be the full name: a part of a name gives no value.
  */
 export function getNormalValue(name: string): string | null {
-  if (LAB_NORMAL_VALUES[name]) {
-    return LAB_NORMAL_VALUES[name];
-  }
-  const clean = name.toLowerCase().trim();
-  for (const [key, value] of Object.entries(LAB_NORMAL_VALUES)) {
-    if (key.toLowerCase().trim() === clean || clean.includes(key.toLowerCase())) {
-      return value;
-    }
-  }
-  return null;
+  return NORMAL_BY_NAME.get(name.toLowerCase().trim()) ?? null;
 }
 
 /**
- * Find the latest recorded patient lab result matching a checklist requirement.
+ * The lab results of one checklist item, newest first: results of the test
+ * with the same name, entered for the same work-up phase.
  */
-export function findLatestMatchingResult(
-  itemName: string,
+export function resultsForItem(
+  item: { name: string; phase: number | null },
   labResults: ClinicalLabResult[]
-): ClinicalLabResult | null {
-  if (!labResults || labResults.length === 0) return null;
-
-  const lower = itemName.toLowerCase();
-  for (const res of labResults) {
-    const testLower = res.testName.toLowerCase();
-    if (lower.includes(testLower) || testLower.includes(lower)) {
-      return res;
-    }
-  }
-  return null;
+): ClinicalLabResult[] {
+  if (item.phase === null) return [];
+  return labResults.filter(
+    result =>
+      result.testName === item.name && result.phase === `Phase${item.phase}`
+  );
 }

@@ -1,16 +1,21 @@
 import { useState } from "react";
 import {
   FileSpreadsheet,
+  FlaskConical,
   Plus,
   Sparkles,
 } from "lucide-react";
 import { ClayButton, ClayCard } from "@/components/clay";
+import { LAB_PHASE_LABEL, type LabPhase } from "@shared/ktp";
+import { getNormalValue, resultsForItem } from "./labCatalogMeta";
+import { LabResultLine } from "./LabResultLine";
 import type { ClinicalData } from "./PatientClinicalTabs";
 import { ChecklistItemRow } from "./ChecklistItemRow";
 import { LabManualEncodeModal } from "./LabManualEncodeModal";
 import { LabUploadTranscribeModal } from "./LabUploadTranscribeModal";
 
-type PhaseFilter = "all" | number;
+/** "results" shows the lab results that no checklist row shows, for example the results after surgery. */
+type PhaseFilter = "all" | "results" | number;
 type CategoryFilter = "all" | "Lab" | "Imaging" | "Clearance" | "Milestone";
 
 export function AdminLabsChecklist({
@@ -24,7 +29,8 @@ export function AdminLabsChecklist({
 }) {
   const [activePhase, setActivePhase] = useState<PhaseFilter>("all");
   const [activeCategory, setActiveCategory] = useState<CategoryFilter>("all");
-  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  // The result form is open when this is set. An empty object opens it with no test chosen.
+  const [encode, setEncode] = useState<{ labTestId?: number; phase?: LabPhase } | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   const checklist = data.checklist;
@@ -49,6 +55,18 @@ export function AdminLabsChecklist({
     return true;
   });
 
+  // Each lab result has one line. A result that no checklist row shows gets its own row at the end.
+  const testByName = new Map(data.labTests.map(test => [test.name, test]));
+  const shownInChecklist = new Set(
+    checklist.flatMap(item => resultsForItem(item, data.labResults).map(result => result.id))
+  );
+  const otherResults = data.labResults.filter(result => !shownInChecklist.has(result.id));
+  const showOtherResults =
+    (activePhase === "all" || activePhase === "results") &&
+    (activeCategory === "all" || activeCategory === "Lab");
+  const visibleItems = activePhase === "results" ? [] : filtered;
+  const visibleResults = showOtherResults ? otherResults : [];
+
   return (
     <div className="min-w-0 space-y-4">
       {/* Header with Title, Actions, and Progress */}
@@ -64,7 +82,7 @@ export function AdminLabsChecklist({
           <ClayButton
             type="button"
             variant="secondary"
-            onClick={() => setIsManualModalOpen(true)}
+            onClick={() => setEncode({})}
             className="inline-flex items-center gap-1.5 text-xs font-semibold"
           >
             <Plus className="size-3.5" /> Encode lab
@@ -136,6 +154,17 @@ export function AdminLabsChecklist({
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={() => setActivePhase("results")}
+              className={`clay-focus rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                activePhase === "results"
+                  ? "bg-surface-2 text-ink shadow-xs"
+                  : "text-ink-muted hover:text-ink"
+              }`}
+            >
+              Other lab results ({otherResults.length})
+            </button>
           </div>
 
           {/* Category Filter Buttons */}
@@ -159,9 +188,13 @@ export function AdminLabsChecklist({
       )}
 
       {/* Checklist Items Container */}
-      {filtered.length === 0 ? (
+      {visibleItems.length + visibleResults.length === 0 ? (
         <ClayCard className="p-6 text-center text-ink-muted">
-          <p className="type-body-sm">No checklist items match the chosen filter.</p>
+          <p className="type-body-sm">
+            {activePhase === "results"
+              ? "No other lab results. A result of a checklist test shows in the row of that test."
+              : "No checklist items match the chosen filter."}
+          </p>
         </ClayCard>
       ) : (
         <ClayCard className="divide-y divide-line overflow-hidden p-0">
@@ -175,21 +208,56 @@ export function AdminLabsChecklist({
           </div>
 
           {/* Rows */}
-          {filtered.map(item => (
-            <ChecklistItemRow
-              key={item.catalogId}
-              patientId={patientId}
-              item={item}
-              labResults={data.labResults}
-            />
+          {visibleItems.map(item => {
+            const test = item.phase !== null && item.phase <= 3 ? testByName.get(item.name) : undefined;
+            return (
+              <ChecklistItemRow
+                key={item.catalogId}
+                patientId={patientId}
+                item={item}
+                labResults={data.labResults}
+                onAddResult={
+                  test
+                    ? () => setEncode({ labTestId: test.id, phase: `Phase${item.phase}` as LabPhase })
+                    : undefined
+                }
+              />
+            );
+          })}
+          {visibleResults.map(result => (
+            <div
+              key={`result-${result.id}`}
+              className="flex flex-col gap-2 bg-ground p-2.5 sm:p-3 md:grid md:grid-cols-12 md:items-center md:gap-2"
+            >
+              <div className="flex items-center md:col-span-1">
+                <FlaskConical aria-hidden className="size-5 text-ink-muted/60" />
+              </div>
+              <div className="min-w-0 md:col-span-11">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted">
+                    Lab · {result.phase ? LAB_PHASE_LABEL[result.phase] : "Tracker"}
+                  </span>
+                  <span className="text-xs font-semibold text-ink sm:text-sm">{result.testName}</span>
+                </div>
+                {getNormalValue(result.testName) && (
+                  <p className="mt-0.5 text-[11px] text-ink-muted">
+                    <span className="font-semibold text-ink">Normal:</span> {getNormalValue(result.testName)}
+                  </p>
+                )}
+                <LabResultLine patientId={patientId} result={result} />
+              </div>
+            </div>
           ))}
         </ClayCard>
       )}
 
       {/* Modals */}
       <LabManualEncodeModal
-        open={isManualModalOpen}
-        onClose={() => setIsManualModalOpen(false)}
+        key={JSON.stringify(encode)}
+        open={encode !== null}
+        onClose={() => setEncode(null)}
+        initialTestId={encode?.labTestId}
+        initialPhase={encode?.phase}
         patientId={patientId}
         patientType={patient?.patientType}
         labTests={data.labTests}

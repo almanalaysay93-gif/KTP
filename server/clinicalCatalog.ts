@@ -15,8 +15,38 @@ export const LAB_CATALOG = [
       ["HDL", "mmol/L", 13],
       ["LDL", "mmol/L", 14],
       ["CMV PCR", "IU/mL", 15],
+      // Tests of the work-up panels. New tests go at the end: the lab document parser uses the IDs of the first 15.
+      ["Bleeding time", "min", 16],
+      ["Clotting time", "min", 17],
+      ["PT/INR", "INR", 18],
+      ["aPTT", "s", 19],
+      ["HbA1c", "%", 20],
+      ["Uric acid", "umol/L", 21],
+      ["AST (SGOT)", "U/L", 22],
+      ["ALP", "U/L", 23],
+      ["Calcium", "mmol/L", 24],
+      ["Phosphorus", "mmol/L", 25],
+      ["Magnesium", "mmol/L", 26],
+      ["Albumin", "g/L", 27],
+      ["Total protein", "g/L", 28],
+      ["iPTH", "pmol/L", 29],
     ] as const;
-export const CHECKLIST_CATALOG: [string, string, number | null, string, number, number][] = [
+
+type ChecklistRow = [name: string, category: string, phase: number | null, appliesTo: string, asIndicated: number, sortOrder: number];
+/** Panels of the first catalog and the single tests that replace each one. Each test is one checklist item. */
+export const CHECKLIST_SPLITS: Record<string, string[]> = {
+  "CBC with differential": ["Hemoglobin", "WBC", "Platelets"],
+  "BT, CT, PT/INR, aPTT": ["Bleeding time", "Clotting time", "PT/INR", "aPTT"],
+  "FBS and HbA1c": ["FBS", "HbA1c"],
+  "Creatinine, BUN, uric acid": ["Creatinine", "BUN", "Uric acid"],
+  "SGPT, SGOT, ALP": ["ALT (SGPT)", "AST (SGOT)", "ALP"],
+  "Na, K, Ca, phosphorus, Mg": ["Sodium", "Potassium", "Calcium", "Phosphorus", "Magnesium"],
+  "Lipid profile": ["Total cholesterol", "Triglycerides", "HDL", "LDL"],
+  "Albumin and total protein": ["Albumin", "Total protein"],
+  "Repeat urinalysis and CBC": ["Repeat urinalysis", "Repeat CBC"],
+};
+// The first catalog, with panels. CHECKLIST_CATALOG below is this list with each panel split into its tests.
+const PANEL_CATALOG: ChecklistRow[] = [
       // Milestones
       ["Pre-transplant orientation", "Milestone", null, "Both", 0, 1],
       ["Initial nephrology assessment", "Milestone", null, "Both", 0, 2],
@@ -84,3 +114,47 @@ export const CHECKLIST_CATALOG: [string, string, number | null, string, number, 
       ["Urology", "Clearance", null, "Both", 1, 78],
       ["OB-Gyn with Pap smear or mammogram", "Clearance", null, "Both", 1, 79],
     ];
+/** Sort order of the split catalog: ten times the first order, plus the position of a test in its panel. */
+export const CHECKLIST_CATALOG: ChecklistRow[] = PANEL_CATALOG.flatMap(([name, category, phase, appliesTo, asIndicated, sort]): ChecklistRow[] =>
+  CHECKLIST_SPLITS[name]
+    ? CHECKLIST_SPLITS[name].map((test, index) => [test, category, phase, appliesTo, asIndicated, sort * 10 + index + 1])
+    : [[name, category, phase, appliesTo, asIndicated, sort * 10]]);
+
+type Row = Record<string, any>;
+type Query = { sql: string; args: unknown[] };
+const query = (sql: string, ...args: unknown[]): Query => ({ sql, args });
+const flag = (value: unknown) => (value ? "true" : "false");
+
+/**
+ * Brings the catalogs of a database to the current lists. An empty database gets the full lists.
+ * A database with the first catalog gets the added lab tests, and each active panel is replaced
+ * by its tests: the patient progress of the panel is copied to each test, then the panel is set
+ * inactive. A second run changes nothing. PostgreSQL and SQLite run the same statements.
+ */
+export function* syncCatalog(): Generator<Query, void, Row[]> {
+  const tests = new Set((yield query('SELECT name FROM "labTests"')).map(row => row.name));
+  for (const [name, unit, sort] of LAB_CATALOG) {
+    if (!tests.has(name)) yield query('INSERT INTO "labTests" (name, unit, "sortOrder", active) VALUES (?, ?, ?, true)', name, unit, sort);
+  }
+  const insertItem = (row: ChecklistRow) => query(
+    `INSERT INTO "checklistCatalog" (name, category, phase, "appliesTo", "asIndicated", "sortOrder", active) VALUES (?, ?, ?, ?, ${flag(row[4])}, ?, true) RETURNING id`,
+    row[0], row[1], row[2], row[3], row[5]);
+  const items = yield query('SELECT * FROM "checklistCatalog"');
+  if (items.length === 0) {
+    for (const row of CHECKLIST_CATALOG) yield insertItem(row);
+    return;
+  }
+  const panels = items.filter(item => item.active && CHECKLIST_SPLITS[item.name]);
+  if (panels.length === 0) return;
+  yield query('UPDATE "checklistCatalog" SET "sortOrder" = "sortOrder" * 10');
+  for (const panel of panels) {
+    for (const [index, name] of CHECKLIST_SPLITS[panel.name].entries()) {
+      let [item] = yield query('SELECT id FROM "checklistCatalog" WHERE name = ? AND phase = ? AND active = true', name, panel.phase);
+      if (!item) [item] = yield insertItem([name, panel.category, panel.phase, panel.appliesTo, panel.asIndicated ? 1 : 0, panel.sortOrder * 10 + index + 1]);
+      yield query(`INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate", note)
+        SELECT "patientId", ?, status, "doneDate", note FROM "patientChecklist" WHERE "catalogId" = ?
+        ON CONFLICT ("patientId", "catalogId") DO NOTHING`, item.id, panel.id);
+    }
+    yield query('UPDATE "checklistCatalog" SET active = false WHERE id = ?', panel.id);
+  }
+}

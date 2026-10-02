@@ -22,7 +22,7 @@ afterAll(async () => { delete process.env.DATABASE_URL; await state.pg.close(); 
 describe("clinical PostgreSQL transactions", () => {
   it("seeds catalogs once and saves results and checklist through real PostgreSQL syntax", async () => {
     const initial = await getClinical(1);
-    expect(initial.labTests).toHaveLength(15);
+    expect(initial.labTests).toHaveLength(29);
     expect(initial.checklist.length).toBeGreaterThan(30);
     const { id } = await addService({ patientId: 1, serviceType: "Laboratory", label: "Fixture", dueDate: "2026-09-01" }, 1);
     await recordResult({ patientId: 1, serviceRecordId: id, serviceDate: "2026-09-02", results: [{ labTestId: initial.labTests[0].id, value: "5" }] }, 1);
@@ -33,7 +33,7 @@ describe("clinical PostgreSQL transactions", () => {
     expect(saved.services[0].serviceDate).toBe("2026-09-02");
     expect(saved.checklist[0].status).toBe("Done");
     expect(saved.appointments[0].startsAt).toBe("2026-10-05T01:00:00.000Z");
-    expect(saved.labTests).toHaveLength(15);
+    expect(saved.labTests).toHaveLength(29);
   });
   it("rolls back entire PostgreSQL result on invalid lab reference", async () => {
     const { id } = await addService({ patientId: 1, serviceType: "Laboratory", label: "Rollback", dueDate: "2026-09-01" }, 1);

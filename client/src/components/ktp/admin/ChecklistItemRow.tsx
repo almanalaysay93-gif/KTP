@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, Circle, Loader2, MinusCircle, Save } from "lucide-react";
+import { Check, CheckCircle2, Circle, Loader2, MinusCircle, Plus, Save } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { dateKey, todayDate } from "@shared/ktp";
 import type {
   ClinicalChecklist,
   ClinicalLabResult,
 } from "../../../../../server/dbClinical";
-import { findLatestMatchingResult, getNormalValue } from "./labCatalogMeta";
+import { getNormalValue, resultsForItem } from "./labCatalogMeta";
+import { LabResultLine } from "./LabResultLine";
 
 export function ChecklistItemRow({
   patientId,
   item,
   labResults,
+  onAddResult,
 }: {
   patientId: number;
   item: ClinicalChecklist;
   labResults: ClinicalLabResult[];
+  /** Opens the result form for this item. Set only for an item that is a lab test with a value. */
+  onAddResult?: () => void;
 }) {
   const utils = trpc.useUtils();
   const mutation = trpc.clinical.setChecklist.useMutation({
@@ -43,7 +47,7 @@ export function ChecklistItemRow({
     (note || "") !== (item.note || "");
 
   const normalRef = getNormalValue(item.name);
-  const latestResult = findLatestMatchingResult(item.name, labResults);
+  const results = resultsForItem(item, labResults);
 
   const handleQuickToggle = async () => {
     const nextStatus = item.status === "Done" ? "Pending" : "Done";
@@ -161,30 +165,19 @@ export function ChecklistItemRow({
           </p>
         )}
 
-        {/* Latest Patient Lab Result Display */}
-        {latestResult && (
-          <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px]">
-            <span className="font-semibold text-olive">Latest:</span>
-            <span className="font-mono text-ink">
-              {latestResult.value} {latestResult.unit}
-            </span>
-            {latestResult.flag && (
-              <span
-                className={`rounded px-1 py-0.2 text-[10px] font-bold ${
-                  latestResult.flag === "Normal"
-                    ? "bg-olive-tint text-olive"
-                    : "bg-brick/10 text-brick"
-                }`}
-              >
-                {latestResult.flag}
-              </span>
-            )}
-            {latestResult.serviceDate && (
-              <span className="text-[10px] text-ink-muted">
-                ({dateKey(latestResult.serviceDate)})
-              </span>
-            )}
-          </div>
+        {/* Lab results of this test in this phase, one line each */}
+        {results.map(result => (
+          <LabResultLine key={result.id} patientId={patientId} result={result} />
+        ))}
+        {onAddResult && (
+          <button
+            type="button"
+            onClick={onAddResult}
+            aria-label={`Add result: ${item.name}`}
+            className="clay-focus mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11px] font-semibold text-olive hover:bg-olive-tint"
+          >
+            <Plus className="size-3" /> Add result
+          </button>
         )}
 
         {error && <p className="text-[11px] text-overdue">{error}</p>}
