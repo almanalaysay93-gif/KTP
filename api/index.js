@@ -2660,7 +2660,7 @@ var clinicalRouter = router({
   }).refine((input) => new Set(input.results.map((row) => row.labTestId)).size === input.results.length, "Each lab test may occur once")).mutation(({ input, ctx }) => addLabResults(input, ctx.user.id)),
   updateService: adminProcedure.input(patient2.extend({
     id,
-    reason: z.string().trim().min(3).max(500),
+    reason: z.string().trim().min(1).max(500).default("Correction"),
     label: z.string().trim().min(1).max(200).optional(),
     dueDate: date2.optional(),
     serviceDate: pastDate.optional(),

@@ -5,7 +5,7 @@ import {
   type ReactNode,
   type SelectHTMLAttributes,
 } from "react";
-import { ClayButton } from "@/components/clay";
+import { ClayButton, type ClayButtonVariant } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
 
 export function ClinicalSelect({
@@ -41,6 +41,7 @@ export function ClinicalForm({
   label = "Save",
   reset = false,
   disabled = false,
+  variant = "primary",
 }: {
   patientId: number;
   submit: (data: FormData) => Promise<unknown>;
@@ -48,6 +49,8 @@ export function ClinicalForm({
   label?: string;
   reset?: boolean;
   disabled?: boolean;
+  /** Secondary where the region already has its one primary action. */
+  variant?: ClayButtonVariant;
 }) {
   const utils = trpc.useUtils();
   const lock = useRef(false);
@@ -103,6 +106,7 @@ export function ClinicalForm({
       )}
       <ClayButton
         type="submit"
+        variant={variant}
         loading={pending}
         disabled={disabled || pending}
         className="self-start"

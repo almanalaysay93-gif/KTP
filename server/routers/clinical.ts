@@ -40,7 +40,7 @@ export const clinicalRouter = router({
   }).refine(input => new Set(input.results.map(row => row.labTestId)).size === input.results.length, "Each lab test may occur once"))
     .mutation(({ input, ctx }) => clinical.addLabResults(input, ctx.user.id)),
   updateService: adminProcedure.input(patient.extend({
-    id, reason: z.string().trim().min(3).max(500),
+    id, reason: z.string().trim().min(1).max(500).default("Correction"),
     label: z.string().trim().min(1).max(200).optional(), dueDate: date.optional(), serviceDate: pastDate.optional(),
     claimDeadline: date.nullable().optional(), claimFiledDate: pastDate.nullable().optional(),
     note: z.string().trim().max(4000).nullable().optional(),

@@ -209,7 +209,13 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
               </ClayTabsList>
 
               {["tracker", "labs", "appointments"].map(value => (
-                <ClayTabsContent key={value} value={value} className="mt-6">
+                <ClayTabsContent
+                  key={value}
+                  value={value}
+                  // Labs stays mounted: lab values that are typed and not saved survive a tab change.
+                  forceMount={value === "labs" ? true : undefined}
+                  className="mt-6 data-[state=inactive]:hidden"
+                >
                   <div id={tab === value ? "clinical-content" : undefined} className="scroll-mt-20">
                     <PatientClinicalTabs patientId={patientId} tab={value} patient={patient} />
                   </div>

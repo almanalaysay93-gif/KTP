@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { ClayButton, StatusChip, type ChipStatus } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
@@ -77,16 +77,31 @@ export function LabHistory({
   patientId: number;
   results: ClinicalLabResult[];
 }) {
-  if (results.length === 0)
-    return <p className="type-body-sm text-ink-muted">No results saved.</p>;
+  // The list takes focus after a removal: the line that had focus is gone.
+  const region = useRef<HTMLDivElement>(null);
   return (
-    <div className="min-w-0 space-y-3">
-      <Sparkline results={results} />
-      <ul className="divide-y divide-hairline">
-        {results.map(result => (
-          <HistoryLine key={result.id} patientId={patientId} result={result} />
-        ))}
-      </ul>
+    <div
+      ref={region}
+      tabIndex={-1}
+      className="clay-focus min-w-0 space-y-3 rounded-sm"
+    >
+      {results.length === 0 ? (
+        <p className="type-body-sm text-ink-muted">No results saved.</p>
+      ) : (
+        <>
+          <Sparkline results={results} />
+          <ul className="divide-y divide-hairline">
+            {results.map(result => (
+              <HistoryLine
+                key={result.id}
+                patientId={patientId}
+                result={result}
+                onRemoved={() => region.current?.focus()}
+              />
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
@@ -94,24 +109,35 @@ export function LabHistory({
 function HistoryLine({
   patientId,
   result,
+  onRemoved,
 }: {
   patientId: number;
   result: ClinicalLabResult;
+  onRemoved: () => void;
 }) {
   const utils = trpc.useUtils();
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const cancelled = useRef(false);
   const [removing, setRemoving] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const remove = trpc.clinical.updateService.useMutation({
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: async () => {
+      onRemoved();
+      await Promise.all([
         utils.clinical.get.invalidate({ patientId }),
         utils.dashboard.initial.invalidate(),
         utils.patients.activityLogs.invalidate({ patientId }),
-      ]),
+      ]);
+    },
     onError: cause => setError(cause.message || "Could not remove the result."),
   });
   const label = `${result.testName}, ${fmtDate(result.serviceDate)}`;
+  // Cancel gives focus back to the Remove control.
+  useEffect(() => {
+    if (!removing && cancelled.current) removeButton.current?.focus();
+    cancelled.current = false;
+  }, [removing]);
 
   return (
     <li className="py-2">
@@ -127,6 +153,7 @@ function HistoryLine({
         </div>
         {!removing && (
           <ClayButton
+            ref={removeButton}
             variant="destructive"
             size="sm"
             icon={<Trash2 strokeWidth={1.75} />}
@@ -143,6 +170,10 @@ function HistoryLine({
           onSubmit={event => {
             event.preventDefault();
             setError("");
+            if (reason.trim().length < 3) {
+              setError("Give a reason of 3 characters or more.");
+              return;
+            }
             remove.mutate({
               patientId,
               id: result.serviceRecordId,
@@ -169,6 +200,7 @@ function HistoryLine({
             variant="ghost"
             size="sm"
             onClick={() => {
+              cancelled.current = true;
               setRemoving(false);
               setError("");
             }}

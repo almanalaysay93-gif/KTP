@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { FileUp, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { FileUp, Plus, Trash2 } from "lucide-react";
 import { ClayButton, ClayInput } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
 import {
@@ -13,6 +13,7 @@ import {
 import { LAB_FIELD } from "./ChecklistItemRow";
 import { ClayDialog } from "./ClayDialog";
 import { ClinicalSelect } from "./ClinicalForm";
+import { fmtDate } from "./format";
 import { getNormalValue, groupEntries } from "./labCatalogMeta";
 import { NurseApprovalCard } from "./NurseApprovalCard";
 import type { ClinicalData } from "./PatientClinicalTabs";
@@ -41,6 +42,7 @@ export function LabResultsDialog({
   patientId,
   patientType,
   labTests,
+  fallbackFocus,
 }: {
   /** Null: the dialog is closed. */
   start: LabDialogStart | null;
@@ -50,9 +52,12 @@ export function LabResultsDialog({
   patientId: number;
   patientType?: string;
   labTests: ClinicalData["labTests"];
+  /** Gets focus on close when the control that opened the dialog is gone. */
+  fallbackFocus?: RefObject<HTMLElement | null>;
 }) {
   return (
     <ClayDialog
+      fallbackFocus={fallbackFocus}
       open={start !== null}
       onOpenChange={open => {
         if (!open) onClose();
@@ -92,6 +97,17 @@ function DialogBody({
 }) {
   const utils = trpc.useUtils();
   const fileInput = useRef<HTMLInputElement>(null);
+  const values = useRef<HTMLFieldSetElement>(null);
+  const [pick, setPick] = useState("");
+  // Test whose value field takes focus after it is added.
+  const [focusTest, setFocusTest] = useState<number | null>(null);
+  useEffect(() => {
+    if (focusTest === null) return;
+    values.current
+      ?.querySelector<HTMLInputElement>(`input[data-test="${focusTest}"]`)
+      ?.focus();
+    setFocusTest(null);
+  }, [focusTest]);
   const stages: readonly string[] =
     patientType === "Donor" ? DONOR_STAGES : RECIPIENT_STAGES;
   const phases = LAB_PHASES.filter(phase => stages.includes(phase));
@@ -134,17 +150,19 @@ function DialogBody({
         setError(parsed.error || "Could not read lab values from the file.");
         return;
       }
-      if (parsed.tests.length === 0) {
+      // The parser can return a test that is not in the active catalog. Such a value cannot be saved.
+      const tests = parsed.tests.filter(test => testById.has(test.labTestId));
+      if (tests.length === 0) {
         setFileNote(`${file.name}: no lab test of the catalog was found.`);
         return;
       }
       setRows(current => {
         const next = current.filter(
-          row => !parsed.tests.some(test => test.labTestId === row.labTestId)
+          row => !tests.some(test => test.labTestId === row.labTestId)
         );
         return [
           ...next,
-          ...parsed.tests.map(test => ({
+          ...tests.map(test => ({
             labTestId: test.labTestId,
             value: test.value,
           })),
@@ -156,7 +174,7 @@ function DialogBody({
       setRequireApproval(true);
       setNurseApproved(false);
       setFileNote(
-        `${file.name}: ${parsed.tests.length} ${parsed.tests.length === 1 ? "value" : "values"} filled${parsed.detectedDate ? `, dated ${parsed.detectedDate}` : ""}. Check each value before you save.`
+        `${file.name}: ${tests.length} ${tests.length === 1 ? "value" : "values"} filled${parsed.detectedDate ? `, dated ${fmtDate(parsed.detectedDate)}` : ""}. Check each value before you save.`
       );
     } catch (cause) {
       setError(
@@ -222,9 +240,7 @@ function DialogBody({
         ref={fileInput}
         type="file"
         accept=".pdf,.xlsx,.xls,.csv,image/*"
-        className="sr-only"
-        tabIndex={-1}
-        aria-label="Lab file"
+        hidden
         onChange={event => {
           const file = event.target.files?.[0];
           event.target.value = "";
@@ -241,16 +257,19 @@ function DialogBody({
       aria-busy={save.isPending}
     >
       {start.upload && fileControl}
-      {fileNote && (
-        <p
-          role="status"
-          className="rounded-sm bg-info-bg px-3 py-2 type-body-sm text-info"
-        >
-          {fileNote}
-        </p>
-      )}
+      {/* Always mounted: a screen reader announces the text when it changes. */}
+      <p
+        role="status"
+        className={
+          fileNote
+            ? "rounded-sm bg-info-bg px-3 py-2 type-body-sm text-info"
+            : "sr-only"
+        }
+      >
+        {fileNote}
+      </p>
 
-      <fieldset className="min-w-0">
+      <fieldset ref={values} className="min-w-0">
         <legend className="mb-2 type-field-label">Values</legend>
         {rows.length === 0 ? (
           <p className="type-body-sm text-ink-muted">
@@ -268,7 +287,7 @@ function DialogBody({
                   key={row.labTestId}
                   className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2"
                 >
-                  <div className="min-w-0 flex-1 basis-40">
+                  <div className="min-w-0 flex-1 basis-full sm:basis-40">
                     <p className="type-body-sm font-bold break-words">
                       {test.name}
                     </p>
@@ -290,6 +309,7 @@ function DialogBody({
                           )
                         )
                       }
+                      data-test={test.id}
                       inputMode="decimal"
                       maxLength={100}
                       aria-label={`Value: ${test.name}${test.unit ? `, ${test.unit}` : ""}`}
@@ -304,11 +324,13 @@ function DialogBody({
                     variant="ghost"
                     size="sm"
                     aria-label={`Remove from this save: ${test.name}`}
-                    onClick={() =>
+                    onClick={() => {
                       setRows(current =>
                         current.filter(item => item.labTestId !== row.labTestId)
-                      )
-                    }
+                      );
+                      // The row is gone. The test list takes focus.
+                      values.current?.querySelector("select")?.focus();
+                    }}
                     className="w-11 px-0"
                   >
                     <Trash2 aria-hidden strokeWidth={1.75} />
@@ -319,31 +341,40 @@ function DialogBody({
           </ul>
         )}
         {unused.length > 0 && (
-          <div className="mt-3">
-            <ClinicalSelect
-              label="Add a test"
-              value=""
-              onChange={event => {
-                const id = Number(event.target.value);
-                if (id)
-                  setRows(current => [
-                    ...current,
-                    { labTestId: id, value: "" },
-                  ]);
+          <div className="mt-3 flex min-w-0 items-end gap-3">
+            <div className="min-w-0 flex-1">
+              <ClinicalSelect
+                label="Add a test"
+                value={pick}
+                onChange={event => setPick(event.target.value)}
+              >
+                <option value="">Choose a test</option>
+                {groupEntries(unused).map(({ group, entries }) => (
+                  <optgroup key={group} label={group}>
+                    {entries.map(test => (
+                      <option key={test.id} value={test.id}>
+                        {test.name}
+                        {test.unit ? ` (${test.unit})` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </ClinicalSelect>
+            </div>
+            <ClayButton
+              type="button"
+              variant="secondary"
+              icon={<Plus strokeWidth={1.75} />}
+              disabled={!pick}
+              onClick={() => {
+                const id = Number(pick);
+                setRows(current => [...current, { labTestId: id, value: "" }]);
+                setPick("");
+                setFocusTest(id);
               }}
             >
-              <option value="">Choose a test</option>
-              {groupEntries(unused).map(({ group, entries }) => (
-                <optgroup key={group} label={group}>
-                  {entries.map(test => (
-                    <option key={test.id} value={test.id}>
-                      {test.name}
-                      {test.unit ? ` (${test.unit})` : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </ClinicalSelect>
+              Add
+            </ClayButton>
           </div>
         )}
       </fieldset>

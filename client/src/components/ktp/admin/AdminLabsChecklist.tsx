@@ -1,14 +1,13 @@
-import { useId, useState, type ReactNode } from "react";
+import { useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronRight, FileUp, FlaskConical, Plus } from "lucide-react";
-import { ClayButton, ClayCard } from "@/components/clay";
+import { FileUp, Plus } from "lucide-react";
+import { ClayButton } from "@/components/clay";
 import { cn } from "@/lib/utils";
-import { LAB_PHASE_LABEL, type LabPhase } from "@shared/ktp";
+import type { LabPhase } from "@shared/ktp";
 import type { ClinicalData } from "./PatientClinicalTabs";
-import { ChecklistItemRow, LAB_ROW_GRID } from "./ChecklistItemRow";
-import { fmtDate } from "./format";
-import { getNormalValue, groupEntries, resultsForItem } from "./labCatalogMeta";
-import { LabHistory, ResultValue } from "./LabResultLine";
+import { ChecklistItemRow } from "./ChecklistItemRow";
+import { groupEntries, resultsForItem } from "./labCatalogMeta";
+import { OtherResultRow, Progress, Section } from "./LabsSection";
 import { LabResultsDialog, type LabDialogStart } from "./LabResultsDialog";
 
 /*
@@ -19,7 +18,6 @@ import { LabResultsDialog, type LabDialogStart } from "./LabResultsDialog";
  */
 
 type Item = ClinicalData["checklist"][number];
-type Result = ClinicalData["labResults"][number];
 type Drafts = Record<number, string>;
 
 const count = (items: Item[]) =>
@@ -42,7 +40,10 @@ export function AdminLabsChecklist({
 }) {
   const stage = patient?.stage ?? "";
   const afterSurgery = stage.startsWith("Post");
-  const [pendingOnly, setPendingOnly] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  // Items that were pending when the filter was set. A row stays in view after the user completes it.
+  const [pendingIds, setPendingIds] = useState<Set<number> | null>(null);
+  const pendingOnly = pendingIds !== null;
   // The section that matches the stage of the patient starts open.
   const [openKeys, setOpenKeys] = useState<Set<string>>(
     () =>
@@ -98,8 +99,8 @@ export function AdminLabsChecklist({
   const general = checklist.filter(item => item.phase === null);
 
   const renderItems = (items: Item[], phase?: LabPhase) => {
-    const visible = pendingOnly
-      ? items.filter(item => item.status === "Pending")
+    const visible = pendingIds
+      ? items.filter(item => pendingIds.has(item.catalogId))
       : items;
     if (visible.length === 0)
       return (
@@ -144,7 +145,9 @@ export function AdminLabsChecklist({
     <div className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="type-headline">Labs and work-up</h2>
+          <h2 ref={heading} tabIndex={-1} className="clay-focus type-headline">
+            Labs and work-up
+          </h2>
           <p className="mt-1 type-body-sm text-ink-muted">
             Each test has one row. Type new values in a phase, then review and
             save them together.
@@ -180,7 +183,7 @@ export function AdminLabsChecklist({
         <div
           role="group"
           aria-label="Show"
-          className="clay-sunken inline-flex gap-1 rounded-full p-1"
+          className="clay-sunken inline-flex gap-2 rounded-full p-1"
         >
           {[
             { label: "All items", value: false },
@@ -190,7 +193,17 @@ export function AdminLabsChecklist({
               key={option.label}
               type="button"
               aria-pressed={pendingOnly === option.value}
-              onClick={() => setPendingOnly(option.value)}
+              onClick={() =>
+                setPendingIds(
+                  option.value
+                    ? new Set(
+                        checklist
+                          .filter(item => item.status === "Pending")
+                          .map(item => item.catalogId)
+                      )
+                    : null
+                )
+              }
               className={cn(
                 "clay-focus-inset min-h-11 cursor-pointer rounded-full px-4 type-button transition-colors duration-(--dur-color)",
                 pendingOnly === option.value
@@ -230,18 +243,28 @@ export function AdminLabsChecklist({
             open={openKeys.has(section.key)}
             onToggle={() => toggle(section.key)}
             summary={
-              <Progress
-                done={count(section.items)}
-                total={applicableCount(section.items)}
-              />
+              <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-1">
+                {typed.length > 0 && (
+                  <span className="rounded-full bg-peach-tint px-2.5 py-1 type-label text-ink">
+                    <span className="type-data font-semibold">
+                      {typed.length}
+                    </span>{" "}
+                    not saved
+                  </span>
+                )}
+                <Progress
+                  done={count(section.items)}
+                  total={applicableCount(section.items)}
+                />
+              </span>
             }
-            columns
+            columns={section.items.some(item => testByName.has(item.name))}
             footer={
               typed.length > 0 && (
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                  transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
                   className="clay-2 sticky bottom-3 z-10 mx-3 mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface-2 px-4 py-3"
                 >
                   <p role="status" className="type-body-sm">
@@ -318,181 +341,8 @@ export function AdminLabsChecklist({
         patientId={patientId}
         patientType={patient?.patientType}
         labTests={data.labTests}
+        fallbackFocus={heading}
       />
     </div>
-  );
-}
-
-function Progress({
-  done,
-  total,
-  label,
-  wide = false,
-}: {
-  done: number;
-  total: number;
-  label?: string;
-  wide?: boolean;
-}) {
-  return (
-    <span className="inline-flex items-center gap-3">
-      <span className="type-data whitespace-nowrap text-ink-muted">
-        {label ? `${label}: ` : ""}
-        <span className="font-semibold text-ink">{done}</span> of {total} done
-      </span>
-      <span
-        aria-hidden
-        className={cn(
-          "clay-sunken h-2 overflow-hidden rounded-full max-sm:hidden",
-          wide ? "w-40" : "w-24"
-        )}
-      >
-        <span
-          className={cn(
-            "block h-full origin-left rounded-full transition-transform duration-500 ease-(--ease-out-soft) motion-reduce:transition-none",
-            total > 0 && done === total ? "bg-done" : "bg-sage-deep"
-          )}
-          style={{ transform: `scaleX(${total > 0 ? done / total : 0})` }}
-        />
-      </span>
-    </span>
-  );
-}
-
-function Section({
-  title,
-  open,
-  onToggle,
-  summary,
-  columns = false,
-  footer,
-  children,
-}: {
-  title: string;
-  open: boolean;
-  onToggle: () => void;
-  summary: ReactNode;
-  /** Shows the column labels of the result rows. */
-  columns?: boolean;
-  footer?: ReactNode;
-  children: ReactNode;
-}) {
-  const bodyId = useId();
-  return (
-    <ClayCard padding="none" className="min-w-0">
-      <h3>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={onToggle}
-          className="clay-focus-inset flex min-h-14 w-full cursor-pointer flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-[inherit] px-4 py-3 text-left sm:px-5"
-        >
-          <span className="flex items-center gap-2">
-            <ChevronRight
-              aria-hidden
-              strokeWidth={1.75}
-              className={cn(
-                "size-5 text-ink-muted transition-transform duration-150 motion-reduce:transition-none",
-                open && "rotate-90"
-              )}
-            />
-            <span className="type-title text-ink">{title}</span>
-          </span>
-          {summary}
-        </button>
-      </h3>
-      {open && (
-        <motion.div
-          id={bodyId}
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-        >
-          {columns && (
-            <div
-              aria-hidden
-              className={cn(
-                "hidden border-t-[1.5px] border-line-strong px-4 py-2 type-label text-ink-muted",
-                LAB_ROW_GRID
-              )}
-            >
-              <span />
-              <span>Test</span>
-              <span>Latest result</span>
-              <span>New result</span>
-              <span />
-            </div>
-          )}
-          {children}
-          {footer}
-        </motion.div>
-      )}
-    </ClayCard>
-  );
-}
-
-function OtherResultRow({
-  patientId,
-  name,
-  results,
-}: {
-  patientId: number;
-  name: string;
-  results: Result[];
-}) {
-  const detailsId = useId();
-  const [open, setOpen] = useState(false);
-  const latest = results[0];
-  const normal = getNormalValue(name);
-  return (
-    <li className="min-w-0">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:px-4">
-        <span className="inline-flex size-11 shrink-0 items-center justify-center text-line-strong">
-          <FlaskConical aria-hidden strokeWidth={1.75} className="size-6" />
-        </span>
-        <div className="min-w-0 flex-1 basis-48">
-          <p className="type-body-sm font-bold break-words text-ink">{name}</p>
-          {normal && (
-            <p className="type-caption text-ink-muted">Normal: {normal}</p>
-          )}
-        </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-md:order-last max-md:basis-full max-md:pl-14">
-          <ResultValue result={latest} />
-          <span className="type-data text-ink-muted">
-            {fmtDate(latest.serviceDate)}
-          </span>
-          <span className="type-caption text-ink-muted">
-            {latest.phase ? LAB_PHASE_LABEL[latest.phase] : "Tracker"}
-            {results.length > 1 ? `, ${results.length} results` : ""}
-          </span>
-        </div>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={detailsId}
-          aria-label={`All results: ${name}`}
-          onClick={() => setOpen(value => !value)}
-          className="clay-focus inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-muted transition-colors duration-(--dur-color) hover:bg-sunken/60 hover:text-ink"
-        >
-          <ChevronRight
-            aria-hidden
-            strokeWidth={1.75}
-            className={cn(
-              "size-5 transition-transform duration-150 motion-reduce:transition-none",
-              open && "rotate-90"
-            )}
-          />
-        </button>
-      </div>
-      {open && (
-        <div
-          id={detailsId}
-          className="border-t border-hairline bg-ground/60 px-4 py-4 sm:px-6"
-        >
-          <LabHistory patientId={patientId} results={results} />
-        </div>
-      )}
-    </li>
   );
 }

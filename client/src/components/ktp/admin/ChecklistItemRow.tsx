@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ChevronRight, Circle, CircleCheck, CircleMinus } from "lucide-react";
 import { ClayInput, StatusChip } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
@@ -8,7 +8,7 @@ import type {
   ClinicalChecklist,
   ClinicalLabResult,
 } from "../../../../../server/dbClinical";
-import { ClinicalForm, ClinicalSelect, field } from "./ClinicalForm";
+import { ClinicalForm, ClinicalSelect } from "./ClinicalForm";
 import { fmtDate } from "./format";
 import { getNormalValue } from "./labCatalogMeta";
 import { LabHistory, ResultValue } from "./LabResultLine";
@@ -25,6 +25,11 @@ export const LAB_ROW_GRID =
 
 export const LAB_FIELD =
   "clay-sunken clay-focus h-11 w-full min-w-0 rounded-sm border-[1.5px] border-line-strong px-3 type-data text-ink placeholder:text-ink-muted";
+
+/** Keeps a focused control clear of the sticky bar of unsaved values. */
+const CLEAR_OF_BAR = "scroll-mb-28";
+
+type Status = ClinicalChecklist["status"];
 
 export function ChecklistItemRow({
   patientId,
@@ -51,15 +56,28 @@ export function ChecklistItemRow({
   const detailsId = useId();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
-  const save = trpc.clinical.setChecklist.useMutation({
-    onSuccess: () =>
-      Promise.all([
-        utils.clinical.get.invalidate({ patientId }),
-        utils.dashboard.initial.invalidate(),
-        utils.patients.activityLogs.invalidate({ patientId }),
-      ]),
+  const refresh = () =>
+    Promise.all([
+      utils.clinical.get.invalidate({ patientId }),
+      utils.dashboard.initial.invalidate(),
+      utils.patients.activityLogs.invalidate({ patientId }),
+    ]);
+  // The toggle shows its error in the row. The details form shows its own error.
+  const toggle = trpc.clinical.setChecklist.useMutation({
+    onSuccess: refresh,
     onError: cause => setError(cause.message || "Could not save the status."),
   });
+  const save = trpc.clinical.setChecklist.useMutation();
+
+  // Details form fields. A server change of the status or date replaces them. A typed note stays.
+  const [status, setStatus] = useState<Status>(item.status);
+  const [doneDate, setDoneDate] = useState(dateKey(item.doneDate));
+  const [note, setNote] = useState(item.note ?? "");
+  useEffect(() => {
+    setStatus(item.status);
+    setDoneDate(dateKey(item.doneDate));
+  }, [item.status, item.doneDate]);
+  useEffect(() => setNote(item.note ?? ""), [item.note]);
 
   const done = item.status === "Done";
   const notApplicable = item.status === "NA";
@@ -68,7 +86,7 @@ export function ChecklistItemRow({
   const StatusIcon = done ? CircleCheck : notApplicable ? CircleMinus : Circle;
 
   return (
-    <li className={cn("min-w-0", draft && "bg-peach-tint/50")}>
+    <li className={cn("min-w-0", draft && "bg-peach-tint")}>
       <div
         className={cn(
           "flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:px-4",
@@ -78,11 +96,12 @@ export function ChecklistItemRow({
         <button
           type="button"
           aria-pressed={done}
-          aria-label={`${done ? "Mark pending" : "Mark done today"}: ${item.name}`}
-          disabled={save.isPending}
+          aria-label={`Done: ${item.name}`}
+          aria-disabled={toggle.isPending}
           onClick={() => {
+            if (toggle.isPending) return;
             setError("");
-            save.mutate({
+            toggle.mutate({
               patientId,
               catalogId: item.catalogId,
               status: done ? "Pending" : "Done",
@@ -90,7 +109,10 @@ export function ChecklistItemRow({
               note: item.note ?? undefined,
             });
           }}
-          className="clay-focus inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-(--dur-color) hover:bg-sunken/60 disabled:cursor-progress"
+          className={cn(
+            "clay-focus inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-(--dur-color) hover:bg-sunken/60 aria-disabled:cursor-progress",
+            CLEAR_OF_BAR
+          )}
         >
           <StatusIcon
             aria-hidden
@@ -116,25 +138,18 @@ export function ChecklistItemRow({
           )}
         </div>
 
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={detailsId}
-          aria-label={`Details: ${item.name}`}
-          onClick={() => setOpen(value => !value)}
-          className="clay-focus inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-muted transition-colors duration-(--dur-color) hover:bg-sunken/60 hover:text-ink md:order-last"
-        >
-          <ChevronRight
-            aria-hidden
-            strokeWidth={1.75}
-            className={cn(
-              "size-5 transition-transform duration-150 motion-reduce:transition-none",
-              open && "rotate-90"
-            )}
-          />
-        </button>
-
-        <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-3 gap-y-1 pl-14 md:basis-auto md:pl-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-md:order-2 max-md:basis-full max-md:pl-14">
+          {notApplicable && (
+            <span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-superseded-bg px-2.5 type-label text-superseded">
+              <CircleMinus
+                aria-hidden
+                strokeWidth={1.75}
+                className="size-3.5"
+              />
+              <span className="sr-only">Checklist status: </span>
+              Not applicable
+            </span>
+          )}
           {latest ? (
             <>
               <ResultValue result={latest} />
@@ -149,20 +164,18 @@ export function ChecklistItemRow({
                 {fmtDate(item.doneDate)}
               </span>
             </>
-          ) : notApplicable ? (
+          ) : notApplicable ? null : unit === undefined ? (
             <StatusChip
-              status="superseded"
-              label="Not applicable"
+              status="planned"
+              label="Pending"
               srContext="Checklist status:"
             />
           ) : (
-            <span className="type-body-sm text-ink-muted">
-              {unit === undefined ? "Pending" : "No result"}
-            </span>
+            <span className="type-body-sm text-ink-muted">No result</span>
           )}
         </div>
 
-        <div className="basis-full pl-14 md:basis-auto md:pl-0">
+        <div className="max-md:order-3 max-md:basis-full max-md:pl-14">
           {onDraft && (
             <input
               value={draft}
@@ -171,10 +184,32 @@ export function ChecklistItemRow({
               maxLength={100}
               aria-label={`New result: ${item.name}${unit ? `, ${unit}` : ""}`}
               placeholder={unit || "Value"}
-              className={LAB_FIELD}
+              className={cn(LAB_FIELD, CLEAR_OF_BAR)}
             />
           )}
         </div>
+
+        {/* Last in the DOM so the tab order at 768 px and wider follows the columns. Under 768 it sits beside the name. */}
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={detailsId}
+          aria-label={`Details: ${item.name}`}
+          onClick={() => setOpen(value => !value)}
+          className={cn(
+            "clay-focus inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-muted transition-colors duration-(--dur-color) hover:bg-sunken/60 hover:text-ink max-md:order-1",
+            CLEAR_OF_BAR
+          )}
+        >
+          <ChevronRight
+            aria-hidden
+            strokeWidth={1.75}
+            className={cn(
+              "size-5 transition-transform duration-150 motion-reduce:transition-none",
+              open && "rotate-90"
+            )}
+          />
+        </button>
       </div>
 
       {error && (
@@ -186,7 +221,7 @@ export function ChecklistItemRow({
       {open && (
         <div
           id={detailsId}
-          className="grid min-w-0 gap-6 border-t border-hairline bg-ground/60 px-4 py-4 sm:px-6 lg:grid-cols-2"
+          className="grid min-w-0 gap-6 border-t border-hairline bg-ground px-4 py-4 sm:px-6 lg:grid-cols-2"
         >
           <section
             aria-label={`Checklist status: ${item.name}`}
@@ -196,49 +231,42 @@ export function ChecklistItemRow({
             <ClinicalForm
               patientId={patientId}
               label="Save status"
-              submit={form => {
-                const status = field(
-                  form,
-                  "status"
-                ) as ClinicalChecklist["status"];
+              variant="secondary"
+              submit={() => {
+                setError("");
                 return save.mutateAsync({
                   patientId,
                   catalogId: item.catalogId,
                   status,
                   doneDate:
-                    status === "Done"
-                      ? field(form, "doneDate") || todayDate()
-                      : undefined,
-                  note: field(form, "note"),
+                    status === "Done" ? doneDate || todayDate() : undefined,
+                  note: note.trim(),
                 });
               }}
             >
-              <div
-                key={`${item.status}-${item.doneDate}-${item.note}`}
-                className="grid min-w-0 gap-4 sm:grid-cols-2"
-              >
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 <ClinicalSelect
-                  name="status"
                   label="Status"
-                  defaultValue={item.status}
+                  value={status}
+                  onChange={event => setStatus(event.target.value as Status)}
                 >
                   <option value="Pending">Pending</option>
                   <option value="Done">Done</option>
                   <option value="NA">Not applicable</option>
                 </ClinicalSelect>
                 <ClayInput
-                  name="doneDate"
                   label="Completion date"
                   hint="For a Done item. Empty means today."
                   type="date"
                   max={todayDate()}
-                  defaultValue={dateKey(item.doneDate)}
+                  value={doneDate}
+                  onChange={event => setDoneDate(event.target.value)}
                 />
                 <ClayInput
-                  name="note"
                   label="Note (optional)"
                   maxLength={2000}
-                  defaultValue={item.note ?? ""}
+                  value={note}
+                  onChange={event => setNote(event.target.value)}
                   containerClassName="sm:col-span-2"
                 />
               </div>

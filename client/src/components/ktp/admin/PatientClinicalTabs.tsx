@@ -19,7 +19,8 @@ export function PatientClinicalTabs({
 }) {
   const query = trpc.clinical.get.useQuery({ patientId });
   if (query.isLoading) return <p role="status">Loading clinical records...</p>;
-  if (query.isError)
+  // A failed refetch keeps the loaded records on screen: typed values and open forms stay.
+  if (query.isError && !query.data)
     return (
       <ClayCard className="p-5">
         <p role="alert">Could not load clinical records.</p>

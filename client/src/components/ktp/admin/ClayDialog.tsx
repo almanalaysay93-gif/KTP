@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode, type RefObject } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { motion, type Variants } from "framer-motion";
 import { X } from "lucide-react";
@@ -20,6 +20,8 @@ export interface ClayDialogProps {
   /** Buttons row. The first focusable field gets focus on open (Radix default). */
   footer?: ReactNode;
   className?: string;
+  /** Gets focus on close when the control that opened the dialog is gone. */
+  fallbackFocus?: RefObject<HTMLElement | null>;
 }
 
 const FULL: Variants = {
@@ -38,7 +40,12 @@ const SCRIM_FULL: Variants = {
   exit: { opacity: 0, transition: { duration: 0.12 } },
 };
 
-export function ClayDialog({ open, onOpenChange, title, description, children, footer, className }: ClayDialogProps) {
+export function ClayDialog({ open, onOpenChange, title, description, children, footer, className, fallbackFocus }: ClayDialogProps) {
+  // The dialog has no Radix trigger, so it keeps the control that had focus when it opened.
+  const opener = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current && typeof document !== "undefined") opener.current = document.activeElement as HTMLElement | null;
+  wasOpen.current = open;
   const mode = useMotionMode();
   const panel = mode === "reduced" ? FADE : FULL;
   const scrim = mode === "reduced" ? FADE : SCRIM_FULL;
@@ -58,7 +65,15 @@ export function ClayDialog({ open, onOpenChange, title, description, children, f
               />
             </DialogPrimitive.Overlay>
             <div className="pointer-events-none fixed inset-0 z-40 flex items-end justify-center sm:items-center sm:p-6">
-              <DialogPrimitive.Content asChild forceMount>
+              <DialogPrimitive.Content
+                asChild
+                forceMount
+                onCloseAutoFocus={event => {
+                  event.preventDefault();
+                  const target = opener.current?.isConnected ? opener.current : fallbackFocus?.current;
+                  target?.focus();
+                }}
+              >
                 <motion.div
                   variants={panel}
                   initial="hidden"

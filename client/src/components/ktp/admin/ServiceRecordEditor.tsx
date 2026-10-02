@@ -5,6 +5,7 @@ import { todayDate } from "@shared/ktp";
 import type { ClinicalData } from "./PatientClinicalTabs";
 import { ClinicalForm, field } from "./ClinicalForm";
 import { serviceNames } from "./ClinicalTracker";
+import { fmtDate } from "./format";
 import { getNormalValue, groupEntries } from "./labCatalogMeta";
 
 /*
@@ -21,19 +22,6 @@ const changed = (next: string, saved: string | null) =>
 /** Same, for a field that the user can clear. */
 const changedOrCleared = (next: string, saved: string | null) =>
   next === (saved ?? "") ? undefined : next || null;
-
-function Reason() {
-  return (
-    <ClayInput
-      name="reason"
-      label="Reason for correction"
-      hint="Saved in the patient history with the values before and after."
-      minLength={3}
-      maxLength={500}
-      required
-    />
-  );
-}
 
 function TrackerLink({ patientId }: { patientId: number }) {
   return (
@@ -94,8 +82,10 @@ function LabCard({
     <ClayCard className="min-w-0 p-5">
       <h2 className="type-headline break-words">{service.label}</h2>
       <p className="type-body-sm text-ink-muted">
-        {serviceNames[service.serviceType]} · Service date {service.serviceDate}{" "}
-        · {saved.size} {saved.size === 1 ? "value" : "values"} saved
+        {serviceNames[service.serviceType]}, service date{" "}
+        <span className="type-data">{fmtDate(service.serviceDate)}</span>,{" "}
+        <span className="type-data">{saved.size}</span>{" "}
+        {saved.size === 1 ? "value" : "values"} saved
       </p>
       <details open={open} className="pt-2">
         <summary className="clay-focus cursor-pointer py-2 font-bold">
@@ -103,12 +93,12 @@ function LabCard({
         </summary>
         <ClinicalForm
           patientId={patientId}
-          label="Save lab corrections"
+          label="Save"
           submit={form =>
             update.mutateAsync({
               patientId,
               id: service.id,
-              reason: field(form, "reason"),
+              reason: field(form, "reason") || "Correction",
               serviceDate: changed(
                 field(form, "serviceDate"),
                 service.serviceDate
@@ -122,7 +112,7 @@ function LabCard({
             })
           }
         >
-          {/* New key after each save: the inputs show the saved values and an empty reason. */}
+          {/* New key after each save: the inputs show the saved values. */}
           <div
             key={JSON.stringify([service.serviceDate, [...saved]])}
             className="grid min-w-0 gap-4"
@@ -171,7 +161,6 @@ function LabCard({
                 ))}
               </div>
             </fieldset>
-            <Reason />
           </div>
         </ClinicalForm>
       </details>
@@ -236,12 +225,12 @@ function ServiceCard({
         </summary>
         <ClinicalForm
           patientId={patientId}
-          label="Save service corrections"
+          label="Save"
           submit={form =>
             update.mutateAsync({
               patientId,
               id: service.id,
-              reason: field(form, "reason"),
+              reason: field(form, "reason") || "Correction",
               label: changed(field(form, "label"), service.label),
               dueDate: changed(field(form, "dueDate"), service.dueDate),
               serviceDate: done
@@ -312,7 +301,6 @@ function ServiceCard({
               maxLength={2000}
               defaultValue={service.note ?? ""}
             />
-            <Reason />
           </div>
         </ClinicalForm>
       </details>
