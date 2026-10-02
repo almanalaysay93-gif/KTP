@@ -131,6 +131,28 @@ describe("clinical persisted workflows", () => {
     expect((await admin.get({ patientId })).services[0]).toMatchObject({ label: "Fixture lab", serviceDate: "2026-09-02", claimDeadline: null });
     expect(getSqliteDb().prepare("SELECT count(*) AS n FROM recordRevisions WHERE entityId=?").get(id)).toMatchObject({ n: 0 });
   });
+  it("adds lab results to a phase and removes one with a reason", async () => {
+    const [first, second] = (await admin.get({ patientId })).labTests;
+    getSqliteDb().prepare('UPDATE labTests SET low=?, high=? WHERE id=?').run('3', '8', first.id);
+    const a = await admin.addLabResult({ patientId, phase: "Phase1", serviceDate: "2026-09-02", labTestId: first.id, value: "9" });
+    const b = await admin.addLabResult({ patientId, phase: "Phase1", serviceDate: "2026-09-02", labTestId: second.id, value: "4" });
+    const c = await admin.addLabResult({ patientId, phase: "Phase2", serviceDate: "2026-09-02", labTestId: first.id, value: "5" });
+    expect(b.serviceRecordId).toBe(a.serviceRecordId);
+    expect(c.serviceRecordId).not.toBe(a.serviceRecordId);
+    await expect(admin.addLabResult({ patientId, phase: "Phase1", serviceDate: "2026-09-02", labTestId: first.id, value: "7" })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(admin.addLabResult({ patientId, phase: "PostDonation", serviceDate: "2026-09-02", labTestId: first.id, value: "7" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.addLabResult({ patientId: otherId, phase: "PostKT", serviceDate: "2026-09-02", labTestId: first.id, value: "7" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.addLabResult({ patientId, phase: "Phase1", serviceDate: "2999-01-01", labTestId: first.id, value: "7" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.addLabResult({ patientId, phase: "Phase1", serviceDate: "2026-09-03", labTestId: 999999, value: "7" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    let saved = await admin.get({ patientId });
+    expect(saved.services).toHaveLength(2);
+    expect(saved.services.find(s => s.id === a.serviceRecordId)).toMatchObject({ label: "Phase 1 labs", status: "Done", serviceType: "Laboratory", serviceDate: "2026-09-02", phase: "Phase1" });
+    expect(saved.labResults.map(r => [r.phase, r.labTestId, r.value, r.flag]).sort()).toEqual([["Phase1", first.id, "9", "High"], ["Phase1", second.id, "4", null], ["Phase2", first.id, "5", "Normal"]].sort());
+    await admin.updateService({ patientId, id: a.serviceRecordId, reason: "Entered for the wrong patient", results: [{ labTestId: first.id, value: "" }] });
+    saved = await admin.get({ patientId });
+    expect(saved.labResults.map(r => [r.phase, r.labTestId]).sort()).toEqual([["Phase1", second.id], ["Phase2", first.id]].sort());
+    expect(getSqliteDb().prepare("SELECT count(*) AS n FROM activityLog WHERE patientId=? AND action='clinical.lab.add'").get(patientId)).toMatchObject({ n: 3 });
+  });
   it("persists appointment timezone and scopes cancellation to patient", async () => {
     const { id } = await admin.addAppointment({ patientId, title: "Fixture visit", kind: "FollowUp", startsAt: "2026-10-05T09:00:00+08:00" });
     expect((await admin.get({ patientId })).appointments[0].startsAt).toBe("2026-10-05T01:00:00.000Z");

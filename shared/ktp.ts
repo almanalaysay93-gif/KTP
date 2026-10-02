@@ -83,7 +83,18 @@ export type ChecklistAppliesTo = (typeof CHECKLIST_APPLIES_TO)[number];
 export const CHECKLIST_STATUSES = ["Pending", "Done", "NA"] as const;
 export type ChecklistStatus = (typeof CHECKLIST_STATUSES)[number];
 
-export const LAB_FLAGS = ["Low", "Normal", "High"] as const;
+/** Phases that a lab result entered from the Labs tab can belong to. Each one is also a stage. */
+export const LAB_PHASES = ["Phase1", "Phase2", "Phase3", "PostKT", "PostDonation"] as const;
+export type LabPhase = (typeof LAB_PHASES)[number];
+export const LAB_PHASE_LABEL: Record<LabPhase, string> = {
+  Phase1: "Phase 1",
+  Phase2: "Phase 2",
+  Phase3: "Phase 3",
+  PostKT: "Post-KT",
+  PostDonation: "Post-donation",
+};
+
+export const LAB_FLAGS =["Low", "Normal", "High"] as const;
 export type LabFlag = (typeof LAB_FLAGS)[number];
 
 export const RISK_CATEGORIES = ["StandardLow", "High"] as const;

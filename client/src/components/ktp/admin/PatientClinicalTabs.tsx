@@ -5,6 +5,8 @@ import { trpc } from "@/lib/trpc";
 import { dateKey, todayDate } from "@shared/ktp";
 import { ClinicalForm, ClinicalSelect, field } from "./ClinicalForm";
 import { ClinicalTracker } from "./ClinicalTracker";
+import { AdminChecklist } from "./AdminChecklist";
+import { LabPhases } from "./LabPhases";
 
 export type ClinicalData = inferRouterOutputs<AppRouter>["clinical"]["get"];
 export function PatientClinicalTabs({
@@ -28,56 +30,13 @@ export function PatientClinicalTabs({
   if (!query.data) return null;
   if (tab === "tracker")
     return <ClinicalTracker patientId={patientId} data={query.data} patient={patient} />;
-  if (tab === "labs") return <Labs data={query.data} />;
+  if (tab === "labs")
+    return <LabPhases patientId={patientId} data={query.data} patient={patient} />;
   if (tab === "checklist")
     return <Checklist patientId={patientId} data={query.data} />;
   if (tab === "appointments")
     return <Appointments patientId={patientId} data={query.data} />;
   return null;
-}
-
-function Labs({ data }: { data: ClinicalData }) {
-  return (
-    <ClayCard className="min-w-0 p-5">
-      <h2 className="type-headline">Lab results</h2>
-      <p className="mt-2 type-body-sm text-ink-muted">
-        Record values through a scheduled service in Tracker. Reference ranges
-        use the saved laboratory range.
-      </p>
-      {data.labResults.length === 0 ? (
-        <p className="mt-4">No lab results recorded.</p>
-      ) : (
-        <ul className="mt-4 divide-y divide-hairline">
-          {data.labResults.map(result => (
-            <li
-              key={result.id}
-              className="flex flex-wrap justify-between gap-3 py-4"
-            >
-              <div className="min-w-0 break-words">
-                <strong>{result.testName}</strong>
-                <p className="type-body-sm">
-                  {dateKey(result.serviceDate) ?? "Date not recorded"}
-                </p>
-              </div>
-              <div>
-                <p className="font-mono">
-                  {result.value} {result.unit}
-                </p>
-                <p className="type-body-sm">{result.flag ?? "Range not set"}</p>
-                {(result.lowSnapshot !== null ||
-                  result.highSnapshot !== null) && (
-                  <p className="type-caption">
-                    Range: {result.lowSnapshot ?? "—"} to{" "}
-                    {result.highSnapshot ?? "—"}
-                  </p>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </ClayCard>
-  );
 }
 
 function Checklist({
@@ -87,66 +46,7 @@ function Checklist({
   patientId: number;
   data: ClinicalData;
 }) {
-  const mutation = trpc.clinical.setChecklist.useMutation();
-  return (
-    <div className="space-y-4">
-      <h2 className="type-headline">Workup checklist</h2>
-      {data.checklist.length === 0 && (
-        <p>No checklist items configured for this patient type.</p>
-      )}
-      {data.checklist.map(item => (
-        <ClayCard
-          key={`${item.catalogId}-${item.status}-${item.doneDate}-${item.note}`}
-          className="min-w-0 p-5"
-        >
-          <h3 className="mb-2 font-bold break-words">{item.name}</h3>
-          <p className="mb-4 type-body-sm text-ink-muted">
-            {item.category}
-            {item.phase ? ` · Phase ${item.phase}` : ""}
-            {item.asIndicated ? " · As indicated" : ""}
-          </p>
-          <ClinicalForm
-            patientId={patientId}
-            label="Save checklist item"
-            submit={form =>
-              mutation.mutateAsync({
-                patientId,
-                catalogId: item.catalogId,
-                status: field(form, "status") as "Pending" | "Done" | "NA",
-                doneDate: field(form, "doneDate") || undefined,
-                note: field(form, "note"),
-              })
-            }
-          >
-            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-              <ClinicalSelect
-                name="status"
-                label="Status"
-                defaultValue={item.status}
-              >
-                <option value="Pending">Pending</option>
-                <option value="Done">Done</option>
-                <option value="NA">Not applicable</option>
-              </ClinicalSelect>
-              <ClayInput
-                name="doneDate"
-                label="Completion date (for Done)"
-                type="date"
-                max={todayDate()}
-                defaultValue={dateKey(item.doneDate) ?? ""}
-              />
-            </div>
-            <ClayInput
-              name="note"
-              label="Note (optional)"
-              maxLength={2000}
-              defaultValue={item.note ?? ""}
-            />
-          </ClinicalForm>
-        </ClayCard>
-      ))}
-    </div>
-  );
+  return <AdminChecklist patientId={patientId} checklist={data.checklist} />;
 }
 
 function Appointments({

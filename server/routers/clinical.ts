@@ -2,7 +2,7 @@ import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import * as clinical from "../dbClinical";
 import { parseLabBuffer } from "../labOcrBridge";
-import { todayDate } from "../../shared/ktp";
+import { LAB_PHASES, todayDate } from "../../shared/ktp";
 
 const id = z.number().int().positive().safe();
 const patient = z.object({ patientId: id });
@@ -30,6 +30,9 @@ export const clinicalRouter = router({
   }).refine(input => !input.claimDeadline || input.claimDeadline >= input.serviceDate, "Claim deadline cannot precede service date")
     .refine(input => new Set(input.results?.map(row => row.labTestId)).size === (input.results?.length ?? 0), "Each lab test may occur once"))
     .mutation(({ input, ctx }) => clinical.recordResult(input, ctx.user.id)),
+  addLabResult: adminProcedure.input(patient.extend({
+    phase: z.enum(LAB_PHASES), serviceDate: pastDate, labTestId: id, value: z.string().trim().min(1).max(100),
+  })).mutation(({ input, ctx }) => clinical.addLabResult(input, ctx.user.id)),
   updateService: adminProcedure.input(patient.extend({
     id, reason: z.string().trim().min(3).max(500),
     label: z.string().trim().min(1).max(200).optional(), dueDate: date.optional(), serviceDate: pastDate.optional(),

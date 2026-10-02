@@ -9,7 +9,7 @@ vi.mock("./db", () => ({
       state.pg.transaction(tx => callback({ unsafe: async (sql, args = []) => (await tx.query(sql, args)).rows })),
   }),
 }));
-import { addService, recordResult, getClinical, addAppointment, setChecklist, setChecklistMany, updateService } from "./dbClinical";
+import { addLabResult, addService, recordResult, getClinical, addAppointment, setChecklist, setChecklistMany, updateService } from "./dbClinical";
 beforeAll(async () => {
   state.pg = new PGlite();
   await state.pg.exec('CREATE SCHEMA ktp');
@@ -54,6 +54,12 @@ describe("clinical PostgreSQL transactions", () => {
     const revisions = (await state.pg.query<{ reason: string; after: string }>('SELECT * FROM "recordRevisions" WHERE "entityId" = $1', [id])).rows;
     expect(revisions).toHaveLength(1);
     expect(JSON.parse(revisions[0].after)).toMatchObject({ serviceDate: "2026-09-03", labs: [{ labTestId: first.id, value: "6" }, { labTestId: second.id, value: "2" }] });
+    const added = await addLabResult({ patientId: 1, phase: "Phase2", serviceDate: "2026-09-04", labTestId: first.id, value: "8" }, 1);
+    const again = await addLabResult({ patientId: 1, phase: "Phase2", serviceDate: "2026-09-04", labTestId: second.id, value: "3" }, 1);
+    expect(again.serviceRecordId).toBe(added.serviceRecordId);
+    await expect(addLabResult({ patientId: 1, phase: "Phase2", serviceDate: "2026-09-04", labTestId: first.id, value: "9" }, 1)).rejects.toMatchObject({ code: "CONFLICT" });
+    const phased = (await getClinical(1)).labResults.filter(r => r.serviceRecordId === added.serviceRecordId);
+    expect(phased.map(r => [r.phase, r.serviceDate, r.value]).sort()).toEqual([["Phase2", "2026-09-04", "3"], ["Phase2", "2026-09-04", "8"]]);
     const [a, b] = initial.checklist.slice(1, 3);
     await setChecklistMany({ patientId: 1, items: [{ catalogId: a.catalogId, status: "Done", doneDate: "2026-09-02" }, { catalogId: b.catalogId, status: "NA" }] }, 1);
     const checklist = (await getClinical(1)).checklist;

@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { getBatchClient, getDb } from "./db";
 import { getSqliteDb } from "./localDb";
 import type { Appointment, ChecklistCatalogItem, LabResult, LabTest, ServiceRecord } from "../drizzle/schema";
+import { LAB_PHASE_LABEL, isValidStageForPatientType, type LabPhase } from "../shared/ktp";
 
 type Row = Record<string, any>;
 type Query = { sql: string; args: unknown[] };
@@ -59,7 +60,7 @@ function* audit(actor: number, patientId: number, action: string, id: number, ex
 type DateFields = "dueDate" | "serviceDate" | "claimDeadline" | "claimFiledDate";
 export type ClinicalService = Omit<ServiceRecord, DateFields> & Record<DateFields, string | null> & { dueDate: string };
 export type ClinicalAppointment = Omit<Appointment, "startsAt" | "cancelledAt"> & { startsAt: string; cancelledAt: string | null };
-export type ClinicalLabResult = LabResult & { testName: string; unit: string; serviceDate: string | null };
+export type ClinicalLabResult = LabResult & { testName: string; unit: string; serviceDate: string | null; phase: LabPhase | null };
 export type ClinicalChecklist = ChecklistCatalogItem & { catalogId: number; status: "Pending" | "Done" | "NA"; doneDate: string | null; note: string | null };
 function dateOnly(value: unknown): string | null {
   return value instanceof Date ? value.toISOString().slice(0, 10) : typeof value === "string" ? value.slice(0, 10) : null;
@@ -79,7 +80,7 @@ export async function getClinical(patientId: number) {
     const profile = yield* patient(patientId);
     const services = yield query('SELECT * FROM "serviceRecords" WHERE "patientId" = ? ORDER BY "dueDate" DESC, id DESC', patientId);
     const tests = yield query('SELECT * FROM "labTests" WHERE active = true ORDER BY "sortOrder", name');
-    const labs = yield query(`SELECT r.*, t.name AS "testName", t.unit, s."serviceDate"
+    const labs = yield query(`SELECT r.*, t.name AS "testName", t.unit, s."serviceDate", s.phase
       FROM "labResults" r JOIN "labTests" t ON t.id = r."labTestId"
       JOIN "serviceRecords" s ON s.id = r."serviceRecordId"
       WHERE s."patientId" = ? AND s.status = 'Done' ORDER BY s."serviceDate" DESC, r.id DESC`, patientId);
@@ -162,6 +163,27 @@ export async function recordResult(input: RecordResult, actor: number) {
       approvedByNurse: input.approvedByNurse ?? null,
     });
     return { id: input.serviceRecordId };
+  });
+}
+
+export type AddLabResult = { patientId: number; phase: LabPhase; serviceDate: string; labTestId: number; value: string };
+// A lab result entered from the Labs tab. Results of one phase and one date share one completed laboratory service.
+export async function addLabResult(input: AddLabResult, actor: number) {
+  return execute(function* () {
+    const profile = yield* patient(input.patientId);
+    if (!isValidStageForPatientType(input.phase, profile.patientType)) fail("Phase does not apply to this patient type");
+    const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', input.labTestId);
+    if (!test) fail("Lab test not found", "NOT_FOUND");
+    let [record] = yield query(`SELECT id FROM "serviceRecords" WHERE "patientId" = ? AND phase = ? AND "serviceDate" = ? AND "serviceType" = 'Laboratory' AND status = 'Done' ORDER BY id LIMIT 1`,
+      input.patientId, input.phase, input.serviceDate);
+    if (!record) [record] = yield query(`INSERT INTO "serviceRecords" ("patientId", "serviceType", label, status, "dueDate", "serviceDate", phase) VALUES (?, 'Laboratory', ?, 'Done', ?, ?, ?) RETURNING id`,
+      input.patientId, `${LAB_PHASE_LABEL[input.phase]} labs`, input.serviceDate, input.serviceDate, input.phase);
+    const saved = yield query('SELECT id FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', record.id, input.labTestId);
+    if (saved.length) fail("This test already has a result for that phase and date. Remove it first, or correct it in Edit patient.", "CONFLICT");
+    const [row] = yield query('INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+      record.id, input.labTestId, input.value, test.low, test.high, labFlag(input.value, test.low, test.high));
+    yield* audit(actor, input.patientId, "clinical.lab.add", row.id, { serviceRecordId: record.id, phase: input.phase });
+    return { id: row.id as number, serviceRecordId: record.id as number };
   });
 }
 

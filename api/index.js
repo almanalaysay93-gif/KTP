@@ -238,6 +238,11 @@ var init_schema = __esm({
       }),
       repeatEveryDays: integer("repeatEveryDays"),
       source: varchar("source", { length: 16, enum: ["Manual", "Guide"] }).default("Manual").notNull(),
+      /** Work-up phase of a lab result entered from the Labs tab. Null for a service scheduled in Tracker. */
+      phase: varchar("phase", {
+        length: 16,
+        enum: ["Phase1", "Phase2", "Phase3", "PostKT", "PostDonation"]
+      }),
       note: text("note"),
       fileIds: text("fileIds"),
       createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -527,6 +532,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."serviceRecords" (
 	"repeatReason" varchar(32),
 	"repeatEveryDays" integer,
 	"source" varchar(16) DEFAULT 'Manual' NOT NULL,
+	"phase" varchar(16),
 	"note" text,
 	"fileIds" text,
 	"createdAt" timestamp DEFAULT now() NOT NULL,
@@ -904,6 +910,9 @@ function initSchemaAndSeed(db) {
       updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
   `);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('serviceRecords') WHERE name = 'phase'").get()) {
+    db.exec("ALTER TABLE serviceRecords ADD COLUMN phase TEXT");
+  }
   const settingCount = db.prepare("SELECT count(*) as count FROM appSettings").get();
   if (settingCount.count === 0) {
     const insertSetting = db.prepare("INSERT INTO appSettings (key, value) VALUES (?, ?)");
@@ -1230,6 +1239,7 @@ async function ensureSchema(client) {
       await client.unsafe(BASELINE_SQL);
       console.log("[Database] ktp schema initialized successfully.");
     }
+    await client`ALTER TABLE "ktp"."serviceRecords" ADD COLUMN IF NOT EXISTS "phase" varchar(16)`;
     await client`
       INSERT INTO "ktp"."patients" (
         "hrn", "patientType", "firstName", "lastName", "accountEmail", "stage", "status", "surgeryDate", "consentVersion", "consentAcceptedAt"
@@ -1500,7 +1510,7 @@ function isValidStageForPatientType(stage, patientType) {
   }
   return false;
 }
-var RECIPIENT_STAGES, DONOR_STAGES, PATIENT_TYPES, PATIENT_STATUSES, DOCTOR_ROLES, RISK_CATEGORIES;
+var RECIPIENT_STAGES, DONOR_STAGES, PATIENT_TYPES, PATIENT_STATUSES, DOCTOR_ROLES, LAB_PHASES, LAB_PHASE_LABEL, RISK_CATEGORIES;
 var init_ktp = __esm({
   "shared/ktp.ts"() {
     "use strict";
@@ -1524,6 +1534,14 @@ var init_ktp = __esm({
     PATIENT_TYPES = ["Recipient", "Donor"];
     PATIENT_STATUSES = ["Active", "Inactive", "Deceased", "Transferred"];
     DOCTOR_ROLES = ["Nephrologist", "Fellow"];
+    LAB_PHASES = ["Phase1", "Phase2", "Phase3", "PostKT", "PostDonation"];
+    LAB_PHASE_LABEL = {
+      Phase1: "Phase 1",
+      Phase2: "Phase 2",
+      Phase3: "Phase 3",
+      PostKT: "Post-KT",
+      PostDonation: "Post-donation"
+    };
     RISK_CATEGORIES = ["StandardLow", "High"];
   }
 });
@@ -2063,6 +2081,7 @@ var patientProcedure = patientBaseProcedure.use(
 init_clinicalCatalog();
 init_db();
 init_localDb();
+init_ktp();
 import { TRPCError as TRPCError2 } from "@trpc/server";
 var query = (sql4, ...args) => ({ sql: sql4, args });
 var fail = (message, code = "BAD_REQUEST") => {
@@ -2131,7 +2150,7 @@ async function getClinical(patientId) {
     const profile = yield* patient(patientId);
     const services = yield query('SELECT * FROM "serviceRecords" WHERE "patientId" = ? ORDER BY "dueDate" DESC, id DESC', patientId);
     const tests = yield query('SELECT * FROM "labTests" WHERE active = true ORDER BY "sortOrder", name');
-    const labs = yield query(`SELECT r.*, t.name AS "testName", t.unit, s."serviceDate"
+    const labs = yield query(`SELECT r.*, t.name AS "testName", t.unit, s."serviceDate", s.phase
       FROM "labResults" r JOIN "labTests" t ON t.id = r."labTestId"
       JOIN "serviceRecords" s ON s.id = r."serviceRecordId"
       WHERE s."patientId" = ? AND s.status = 'Done' ORDER BY s."serviceDate" DESC, r.id DESC`, patientId);
@@ -2214,6 +2233,41 @@ async function recordResult(input, actor) {
       approvedByNurse: input.approvedByNurse ?? null
     });
     return { id: input.serviceRecordId };
+  });
+}
+async function addLabResult(input, actor) {
+  return execute(function* () {
+    const profile = yield* patient(input.patientId);
+    if (!isValidStageForPatientType(input.phase, profile.patientType)) fail("Phase does not apply to this patient type");
+    const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', input.labTestId);
+    if (!test) fail("Lab test not found", "NOT_FOUND");
+    let [record] = yield query(
+      `SELECT id FROM "serviceRecords" WHERE "patientId" = ? AND phase = ? AND "serviceDate" = ? AND "serviceType" = 'Laboratory' AND status = 'Done' ORDER BY id LIMIT 1`,
+      input.patientId,
+      input.phase,
+      input.serviceDate
+    );
+    if (!record) [record] = yield query(
+      `INSERT INTO "serviceRecords" ("patientId", "serviceType", label, status, "dueDate", "serviceDate", phase) VALUES (?, 'Laboratory', ?, 'Done', ?, ?, ?) RETURNING id`,
+      input.patientId,
+      `${LAB_PHASE_LABEL[input.phase]} labs`,
+      input.serviceDate,
+      input.serviceDate,
+      input.phase
+    );
+    const saved = yield query('SELECT id FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', record.id, input.labTestId);
+    if (saved.length) fail("This test already has a result for that phase and date. Remove it first, or correct it in Edit patient.", "CONFLICT");
+    const [row] = yield query(
+      'INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+      record.id,
+      input.labTestId,
+      input.value,
+      test.low,
+      test.high,
+      labFlag(input.value, test.low, test.high)
+    );
+    yield* audit(actor, input.patientId, "clinical.lab.add", row.id, { serviceRecordId: record.id, phase: input.phase });
+    return { id: row.id, serviceRecordId: record.id };
   });
 }
 async function updateService(input, actor) {
@@ -2499,6 +2553,12 @@ var clinicalRouter = router({
     approvedByNurse: z.string().trim().max(200).optional(),
     results: z.array(z.object({ labTestId: id, value: z.string().trim().min(1).max(100) })).max(100).optional()
   }).refine((input) => !input.claimDeadline || input.claimDeadline >= input.serviceDate, "Claim deadline cannot precede service date").refine((input) => new Set(input.results?.map((row) => row.labTestId)).size === (input.results?.length ?? 0), "Each lab test may occur once")).mutation(({ input, ctx }) => recordResult(input, ctx.user.id)),
+  addLabResult: adminProcedure.input(patient2.extend({
+    phase: z.enum(LAB_PHASES),
+    serviceDate: pastDate,
+    labTestId: id,
+    value: z.string().trim().min(1).max(100)
+  })).mutation(({ input, ctx }) => addLabResult(input, ctx.user.id)),
   updateService: adminProcedure.input(patient2.extend({
     id,
     reason: z.string().trim().min(3).max(500),

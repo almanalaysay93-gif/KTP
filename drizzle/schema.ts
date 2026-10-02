@@ -302,6 +302,11 @@ export const serviceRecords = pgTable("serviceRecords", {
   source: varchar("source", { length: 16, enum: ["Manual", "Guide"] })
     .default("Manual")
     .notNull(),
+  /** Work-up phase of a lab result entered from the Labs tab. Null for a service scheduled in Tracker. */
+  phase: varchar("phase", {
+    length: 16,
+    enum: ["Phase1", "Phase2", "Phase3", "PostKT", "PostDonation"],
+  }),
   note: text("note"),
   fileIds: text("fileIds"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

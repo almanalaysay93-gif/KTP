@@ -49,6 +49,8 @@ async function ensureSchema(client: ReturnType<typeof postgres>) {
       await client.unsafe(BASELINE_SQL);
       console.log("[Database] ktp schema initialized successfully.");
     }
+    // Databases made before lab phases have no phase column on serviceRecords.
+    await client`ALTER TABLE "ktp"."serviceRecords" ADD COLUMN IF NOT EXISTS "phase" varchar(16)`;
     await client`
       INSERT INTO "ktp"."patients" (
         "hrn", "patientType", "firstName", "lastName", "accountEmail", "stage", "status", "surgeryDate", "consentVersion", "consentAcceptedAt"

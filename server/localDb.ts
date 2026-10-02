@@ -270,6 +270,11 @@ function initSchemaAndSeed(db: Database.Database) {
     );
   `);
 
+  // Databases made before lab phases have no phase column on serviceRecords.
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('serviceRecords') WHERE name = 'phase'").get()) {
+    db.exec("ALTER TABLE serviceRecords ADD COLUMN phase TEXT");
+  }
+
   // Seed settings if empty
   const settingCount = db.prepare("SELECT count(*) as count FROM appSettings").get() as { count: number };
   if (settingCount.count === 0) {

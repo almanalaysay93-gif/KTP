@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."serviceRecords" (
 	"repeatReason" varchar(32),
 	"repeatEveryDays" integer,
 	"source" varchar(16) DEFAULT 'Manual' NOT NULL,
+	"phase" varchar(16),
 	"note" text,
 	"fileIds" text,
 	"createdAt" timestamp DEFAULT now() NOT NULL,
