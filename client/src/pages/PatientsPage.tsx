@@ -11,6 +11,7 @@ import {
 } from "@/components/ktp/admin";
 import { ClayAvatar, ClayButton, ClayCard, ClayInput, StatusChip } from "@/components/clay";
 import { MotionClayButton, MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
+import { PatientImportButton } from "@/components/ktp/admin/PatientImportDialog";
 import { trpc } from "@/lib/trpc";
 import { type PatientType, type PatientStatus, PATIENT_TYPES, PATIENT_STATUSES } from "@shared/ktp";
 
@@ -70,6 +71,7 @@ export default function PatientsPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
+                    <PatientImportButton />
                     <ClayButton
                       variant="primary"
                       icon={<Plus strokeWidth={1.75} />}
@@ -182,7 +184,7 @@ export default function PatientsPage() {
                                         {patient.lastName}, {patient.firstName} {patient.suffix ?? ""}
                                         </Link>
                                       </p>
-                                      <p className="text-ink-muted type-body-sm">{patient.accountEmail}</p>
+                                      <p className="text-ink-muted type-body-sm">{patient.accountEmail ?? "No Gmail account"}</p>
                                     </div>
                                   </div>
                                 </td>

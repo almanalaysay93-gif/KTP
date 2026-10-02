@@ -75,7 +75,7 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
       setSex((p.sex as "M" | "F") ?? "");
       setBirthDate(dateKey(p.birthDate));
       setContactNumber(p.contactNumber ?? "");
-      setAccountEmail(p.accountEmail);
+      setAccountEmail(p.accountEmail ?? "");
       setNephrologistId(p.nephrologistId ?? undefined);
       setFellowId(p.fellowId ?? undefined);
       setStage(p.stage);
@@ -112,7 +112,7 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
       sex: sex || null,
       birthDate: birthDate || null,
       contactNumber: contactNumber.trim() || null,
-      accountEmail: accountEmail.trim(),
+      accountEmail: accountEmail.trim() || null,
       nephrologistId: nephrologistId || null,
       fellowId: fellowId || null,
       stage,
@@ -315,17 +315,16 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
                     <h2 className="type-headline text-ink">Contact & Portal Access</h2>
                     <div className="mt-4 grid gap-4 sm:grid-cols-2">
                       <div>
-                        <label className="type-label text-ink">Enrolled Gmail account *</label>
+                        <label className="type-label text-ink">Enrolled Gmail account (optional)</label>
                         <input
                           type="email"
-                          required
                           value={accountEmail}
                           onChange={(e) => setAccountEmail(e.target.value)}
                           placeholder="patient@gmail.com"
                           className="mt-1 w-full rounded-md border border-hairline bg-surface-2 px-3 py-2 type-body text-ink outline-none"
                         />
                         <p className="mt-1 type-body-sm text-ink-muted">
-                          Used for Google single sign-on to patient portal.
+                          Used for Google single sign-on to patient portal. Without it, the patient has no portal access.
                         </p>
                       </div>
                       <div>

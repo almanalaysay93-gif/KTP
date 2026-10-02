@@ -22,7 +22,13 @@ const patientInputSchema = z.object({
   sex: z.enum(["M", "F"]).nullable().optional(),
   birthDate: z.string().nullable().optional(),
   contactNumber: z.string().max(32).nullable().optional(),
-  accountEmail: z.string().email("Valid Gmail account is required").max(320),
+  // Optional. A patient with no Gmail account has no access to the patient portal.
+  accountEmail: z
+    .union([z.literal(""), z.string().trim().email("Gmail account is not a valid e-mail address").max(320)])
+    .nullable()
+    .optional()
+    // Not sent: no change (an update keeps the saved value). Empty: no Gmail account.
+    .transform(value => (value === undefined ? undefined : value || null)),
   nephrologistId: z.number().nullable().optional(),
   fellowId: z.number().nullable().optional(),
   stage: z.string().min(1, "Stage is required"),
@@ -39,7 +45,7 @@ function validatePatientBusinessRules(
   patientId?: number
 ) {
   // Gmail cannot be on admin allowlist
-  if (hasFullAccess(data.accountEmail)) {
+  if (data.accountEmail && hasFullAccess(data.accountEmail)) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "Patient Gmail cannot be on the admin email allowlist",
@@ -154,7 +160,7 @@ export const patientsRouter = router({
       }
 
       // Check unique accountEmail
-      const existingEmail = await db.getPatientByAccountEmail(input.accountEmail);
+      const existingEmail = input.accountEmail ? await db.getPatientByAccountEmail(input.accountEmail) : null;
       if (existingEmail) {
         throw new TRPCError({
           code: "CONFLICT",
@@ -173,7 +179,7 @@ export const patientsRouter = router({
         }
       }
 
-      const created = await db.createPatient(input as any);
+      const created = await db.createPatient({ ...input, accountEmail: input.accountEmail ?? null } as any);
 
       await db.logActivity(
         ctx.user.id,
@@ -216,7 +222,7 @@ export const patientsRouter = router({
       }
 
       // Check Gmail duplicate if changed
-      if (input.data.accountEmail && input.data.accountEmail.toLowerCase() !== existing.accountEmail.toLowerCase()) {
+      if (input.data.accountEmail && input.data.accountEmail.toLowerCase() !== (existing.accountEmail ?? "").toLowerCase()) {
         const dupEmail = await db.getPatientByAccountEmail(input.data.accountEmail);
         if (dupEmail && dupEmail.id !== input.id) {
           throw new TRPCError({

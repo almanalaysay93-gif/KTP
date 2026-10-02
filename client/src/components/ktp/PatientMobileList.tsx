@@ -30,7 +30,7 @@ export function PatientMobileList({
             </span>
           </Link>
           <p className="mt-1 break-all type-body-sm text-ink-muted">
-            {patient.accountEmail}
+            {patient.accountEmail ?? "No Gmail account"}
           </p>
           <dl className="mt-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 type-body-sm">
             <dt className="text-ink-muted">HRN</dt>

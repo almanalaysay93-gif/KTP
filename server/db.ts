@@ -51,6 +51,8 @@ async function ensureSchema(client: ReturnType<typeof postgres>) {
     }
     // Databases made before lab phases have no phase column on serviceRecords.
     await client`ALTER TABLE "ktp"."serviceRecords" ADD COLUMN IF NOT EXISTS "phase" varchar(16)`;
+    // A patient with no Gmail account is allowed: that patient has no portal access.
+    await client`ALTER TABLE "ktp"."patients" ALTER COLUMN "accountEmail" DROP NOT NULL`;
     await client`
       INSERT INTO "ktp"."patients" (
         "hrn", "patientType", "firstName", "lastName", "accountEmail", "stage", "status", "surgeryDate", "consentVersion", "consentAcceptedAt"

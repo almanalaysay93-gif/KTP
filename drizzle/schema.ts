@@ -70,7 +70,8 @@ export const patients = pgTable(
     sex: varchar("sex", { length: 8, enum: ["M", "F"] }),
     birthDate: date("birthDate"),
     contactNumber: varchar("contactNumber", { length: 32 }),
-    accountEmail: varchar("accountEmail", { length: 320 }).notNull(),
+    /** Gmail account for the patient portal. Null: the patient has no portal access. */
+    accountEmail: varchar("accountEmail", { length: 320 }),
     linkedUserId: integer("linkedUserId").unique(),
     nephrologistId: integer("nephrologistId"),
     fellowId: integer("fellowId"),

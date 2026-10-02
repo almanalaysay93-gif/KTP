@@ -9,6 +9,7 @@ vi.mock("./db", () => ({
       state.pg.transaction(tx => callback({ unsafe: async (sql, args = []) => (await tx.query(sql, args)).rows })),
   }),
 }));
+import { checkImportRows, commitImportRows } from "./dbPatientImport";
 import { addLabResult, addService, recordResult, getClinical, addAppointment, setChecklist, setChecklistMany, updateService } from "./dbClinical";
 beforeAll(async () => {
   state.pg = new PGlite();
@@ -65,5 +66,23 @@ describe("clinical PostgreSQL transactions", () => {
     const checklist = (await getClinical(1)).checklist;
     expect(checklist.find(i => i.catalogId === a.catalogId)).toMatchObject({ status: "Done", doneDate: "2026-09-02" });
     expect(checklist.find(i => i.catalogId === b.catalogId)?.status).toBe("NA");
+  });
+  it("checks and saves an imported patient list through real PostgreSQL syntax", async () => {
+    const recipient = { hrn: "PG-IMPORT-1", patientType: "Recipient", firstName: "Synthetic", lastName: "Recipient", accountEmail: "PG.Import1@example.invalid", stage: "PostKT", surgeryDate: "2026-08-01", birthDate: "1980-03-04", sex: "M" };
+    const donor = { hrn: "PG-IMPORT-2", patientType: "Donor", firstName: "Synthetic", lastName: "Donor", accountEmail: "pg.import2@example.invalid", stage: "Phase2", linkedRecipientHrn: "PG-IMPORT-1" };
+    expect(await checkImportRows([{ ...recipient, hrn: "PG-TEST", accountEmail: "PG@example.invalid" }])).toEqual([{ errors: ["HRN PG-TEST is already enrolled.", "Gmail account is already enrolled."], warnings: [] }]);
+    await expect(commitImportRows([recipient, { ...donor, linkedRecipientHrn: "NONE" }], 1, "list.xlsx")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect((await state.pg.query(`SELECT count(*)::int AS n FROM patients WHERE hrn LIKE 'PG-IMPORT-%'`)).rows).toEqual([{ n: 0 }]);
+    expect(await commitImportRows([donor, recipient], 1, "list.xlsx")).toMatchObject({ count: 2 });
+    const rows = (await state.pg.query<Record<string, any>>(`SELECT hrn, "accountEmail", CAST("surgeryDate" AS TEXT) AS "surgeryDate", CAST("birthDate" AS TEXT) AS "birthDate", "linkedRecipientId", id, "followupMonths", status FROM patients WHERE hrn LIKE 'PG-IMPORT-%' ORDER BY hrn`)).rows;
+    expect(rows[0]).toMatchObject({ hrn: "PG-IMPORT-1", accountEmail: "pg.import1@example.invalid", surgeryDate: "2026-08-01", birthDate: "1980-03-04", followupMonths: 1, status: "Active", linkedRecipientId: null });
+    expect(rows[1]).toMatchObject({ hrn: "PG-IMPORT-2", linkedRecipientId: rows[0].id });
+    expect((await state.pg.query(`SELECT count(*)::int AS n FROM "activityLog" WHERE action = 'IMPORT_PATIENT'`)).rows).toEqual([{ n: 2 }]);
+    // Two patients with no Gmail account do not collide on the unique e-mail index. An older database drops NOT NULL with this statement.
+    await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" SET NOT NULL`);
+    await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" DROP NOT NULL`);
+    await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" DROP NOT NULL`);
+    expect(await commitImportRows([{ ...recipient, hrn: "PG-IMPORT-3", accountEmail: "" }, { ...recipient, hrn: "PG-IMPORT-4", accountEmail: null }], 1, "list.xlsx")).toMatchObject({ count: 2 });
+    expect((await state.pg.query(`SELECT count(*)::int AS n FROM patients WHERE hrn LIKE 'PG-IMPORT-%' AND "accountEmail" IS NULL`)).rows).toEqual([{ n: 2 }]);
   });
 });

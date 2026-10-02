@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS "ktp"."patients" (
 	"sex" varchar(8),
 	"birthDate" date,
 	"contactNumber" varchar(32),
-	"accountEmail" varchar(320) NOT NULL,
+	"accountEmail" varchar(320),
 	"linkedUserId" integer,
 	"nephrologistId" integer,
 	"fellowId" integer,

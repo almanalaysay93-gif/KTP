@@ -11,6 +11,7 @@ import { notificationsRouter } from "./routers/notifications";
 import { patientPortalRouter } from "./routers/patientPortal";
 import { messagesRouter } from "./routers/messages";
 import { automationsRouter } from "./routers/automations";
+import { patientImportRouter } from "./routers/patientImport";
 import * as db from "./db";
 import { hasFullAccess } from "./adminAccess";
 import type { Patient } from "../drizzle/schema";
@@ -97,6 +98,7 @@ export const appRouter = router({
   patientPortal: patientPortalRouter,
   messages: messagesRouter,
   automations: automationsRouter,
+  patientImport: patientImportRouter,
 });
 
 export type AppRouter = typeof appRouter;

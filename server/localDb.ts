@@ -36,6 +36,26 @@ export function closeSqliteDb(): void {
   }
 }
 
+/**
+ * Databases made before the Gmail account became optional have NOT NULL on patients.accountEmail.
+ * SQLite cannot drop NOT NULL from a column, so the table is made again with the same rows and indexes.
+ */
+export function allowPatientWithoutEmail(db: Database.Database) {
+  const column = db.prepare("SELECT \"notnull\" AS required FROM pragma_table_info('patients') WHERE name = 'accountEmail'").get() as { required: number } | undefined;
+  if (!column?.required) return;
+  const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'patients'").get() as { sql: string };
+  const indexes = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'patients' AND sql IS NOT NULL").all() as { sql: string }[];
+  const relaxed = table.sql.replace(/accountEmail\s+TEXT\s+NOT\s+NULL/i, "accountEmail TEXT").replace(/^CREATE TABLE\s+(IF NOT EXISTS\s+)?"?patients"?/i, "CREATE TABLE patients_new");
+  if (relaxed === table.sql || !relaxed.startsWith("CREATE TABLE patients_new")) throw new Error("Could not make patients.accountEmail optional");
+  db.transaction(() => {
+    db.exec(relaxed);
+    db.exec("INSERT INTO patients_new SELECT * FROM patients");
+    db.exec("DROP TABLE patients");
+    db.exec("ALTER TABLE patients_new RENAME TO patients");
+    for (const index of indexes) db.exec(index.sql);
+  })();
+}
+
 function initSchemaAndSeed(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -70,7 +90,7 @@ function initSchemaAndSeed(db: Database.Database) {
       sex TEXT,
       birthDate TEXT,
       contactNumber TEXT,
-      accountEmail TEXT NOT NULL,
+      accountEmail TEXT,
       linkedUserId INTEGER UNIQUE,
       nephrologistId INTEGER,
       fellowId INTEGER,
@@ -269,6 +289,8 @@ function initSchemaAndSeed(db: Database.Database) {
       updatedAt TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     );
   `);
+
+  allowPatientWithoutEmail(db);
 
   // Databases made before lab phases have no phase column on serviceRecords.
   if (!db.prepare("SELECT 1 FROM pragma_table_info('serviceRecords') WHERE name = 'phase'").get()) {

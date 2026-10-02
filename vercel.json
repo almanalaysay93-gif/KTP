@@ -2,10 +2,16 @@
   "version": 2,
   "buildCommand": "pnpm run build:vercel-api && vite build",
   "outputDirectory": "dist/public",
-  "regions": ["sin1"],
+  "regions": [
+    "sin1"
+  ],
   "functions": {
     "api/index.js": {
       "maxDuration": 15
+    },
+    "api/patient_import.py": {
+      "maxDuration": 15,
+      "excludeFiles": "{node_modules,client,dist,server,shared,drizzle,docs,patches,attached_assets}/**"
     }
   },
   "crons": [
@@ -15,6 +21,10 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/api/patient_import",
+      "destination": "/api/patient_import"
+    },
     {
       "source": "/api/(.*)",
       "destination": "/api/index.js"

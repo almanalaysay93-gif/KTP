@@ -5,17 +5,17 @@ import { getSqliteDb } from "./localDb";
 import type { Appointment, ChecklistCatalogItem, LabResult, LabTest, ServiceRecord } from "../drizzle/schema";
 import { LAB_PHASE_LABEL, isValidStageForPatientType, type LabPhase } from "../shared/ktp";
 
-type Row = Record<string, any>;
-type Query = { sql: string; args: unknown[] };
-type Program<T> = Generator<Query, T, Row[]>;
-const query = (sql: string, ...args: unknown[]): Query => ({ sql, args });
-const fail = (message: string, code: "NOT_FOUND" | "BAD_REQUEST" | "CONFLICT" = "BAD_REQUEST"): never => {
+export type Row = Record<string, any>;
+export type Query = { sql: string; args: unknown[] };
+export type Program<T> = Generator<Query, T, Row[]>;
+export const query = (sql: string, ...args: unknown[]): Query => ({ sql, args });
+export const fail = (message: string, code: "NOT_FOUND" | "BAD_REQUEST" | "CONFLICT" = "BAD_REQUEST"): never => {
   throw new TRPCError({ code, message });
 };
 
 // One synchronous SQLite transaction or one PostgreSQL transaction runs the same
 // operation. No await inside SQLite: unrelated requests cannot enter its transaction.
-async function execute<T>(make: () => Program<T>): Promise<T> {
+export async function execute<T>(make: () => Program<T>): Promise<T> {
   if (!process.env.DATABASE_URL) {
     const db = getSqliteDb();
     return db.transaction(() => {
