@@ -15,6 +15,7 @@ const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"), "Dashboard")
 const PatientsPage = lazyWithRetry(() => import("./pages/PatientsPage"), "PatientsPage")
 const PatientEnrollPage = lazyWithRetry(() => import("./pages/PatientEnrollPage"), "PatientEnrollPage")
 const PatientDetailPage = lazyWithRetry(() => import("./pages/PatientDetailPage"), "PatientDetailPage")
+const ZBenefitPage = lazyWithRetry(() => import("./pages/ZBenefitPage"), "ZBenefitPage")
 const SettingsPage = lazyWithRetry(() => import("./pages/Settings"), "Settings")
 const AdminAutomationsPage = lazyWithRetry(() => import("./pages/AdminAutomationsPage"), "AdminAutomationsPage")
 const AdminCalendarPage = lazyWithRetry(() => import("./pages/AdminCalendarPage"), "AdminCalendarPage")
@@ -102,6 +103,11 @@ function Router() {
         <Route path="/patients">
           <Protected>
             <PatientsPage />
+          </Protected>
+        </Route>
+        <Route path="/z-benefit">
+          <Protected>
+            <ZBenefitPage />
           </Protected>
         </Route>
         <Route path="/patients/new">

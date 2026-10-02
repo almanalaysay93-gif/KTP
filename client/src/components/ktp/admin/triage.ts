@@ -2,7 +2,7 @@ import { STAGE_ADMIN_LABEL } from "@/lib/ktpLabels";
 import { daysSinceSurgery, patientDisplayName } from "@/lib/ktpPatientView";
 import { dateKey } from "@shared/ktp";
 /*
- * Triage model for the admin dashboard: the nine tray cells, what each one filters, and the rows
+ * Triage model for the admin dashboard: the dashboard tray cells, what each one filters, and the rows
  * behind it. Callers supply an explicit dataset and calendar date.
  */
 import {
@@ -25,12 +25,11 @@ export type TriageCellId =
   | "postkt"
   | "donors";
 
-/** Row-major tray order. Index 4 is the center cell (people, never an alarm). */
+/** Visible dashboard options in row-major order. */
 export const TRIAGE_ORDER: readonly TriageCellId[] = [
   "overdue",
   "claims",
   "reschedule",
-  "superseded",
   "active",
   "dueSoon",
   "workup",

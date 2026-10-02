@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { clinicalRouter } from "./routers/clinical";
 import { getSqliteDb } from "./localDb";
+import { zDueState } from "../shared/zBenefit";
 import type { TrpcContext } from "./_core/context";
 
 const ctx = (email: string | null): TrpcContext => ({
@@ -185,6 +186,38 @@ describe("clinical persisted workflows", () => {
     const logs = getSqliteDb().prepare("SELECT details FROM activityLog WHERE patientId=? AND action='clinical.lab.add'").all(patientId) as { details: string }[];
     expect(logs).toHaveLength(3);
     expect(JSON.parse(logs[0].details)).toMatchObject({ nurseApproved: true, approvedByNurse: "RN Dela Cruz", phase: "Phase1" });
+  });
+  it("lists the Z Benefit dates of each active recipient from the service records", async () => {
+    const add = async (serviceType: "Meds" | "Laboratory" | "Tacro" | "XrayUsd", dueDate: string, done?: { serviceDate: string; claimDeadline?: string; filed?: string }) => {
+      const { id } = await admin.addService({ patientId, serviceType, label: "Fixture", dueDate });
+      if (done) await admin.recordResult({ patientId, serviceRecordId: id, serviceDate: done.serviceDate, claimDeadline: done.claimDeadline });
+      if (done?.filed) await admin.fileClaim({ patientId, id, claimFiledDate: done.filed });
+    };
+    await add("Meds", "2026-07-01", { serviceDate: "2026-07-02", claimDeadline: "2026-08-30", filed: "2026-07-10" });
+    await add("Meds", "2026-08-01", { serviceDate: "2026-08-03", claimDeadline: "2026-10-02" });
+    await add("Meds", "2026-09-01", { serviceDate: "2026-09-02", claimDeadline: "2026-11-01" });
+    await add("Meds", "2026-11-01");
+    await add("Meds", "2026-10-01");
+    await add("Laboratory", "2026-08-01", { serviceDate: "2026-08-05" });
+    await add("Laboratory", "2026-09-01", { serviceDate: "2026-09-04", claimDeadline: "2026-11-03" });
+    await add("Tacro", "2026-10-15");
+    const doctor = getSqliteDb().prepare("SELECT id, name FROM doctors WHERE role = 'Nephrologist' LIMIT 1").get() as { id: number; name: string };
+    getSqliteDb().prepare("UPDATE patients SET nephrologistId = ? WHERE id = ?").run(doctor.id, patientId);
+    const rows = (await admin.zBenefit()).filter(row => row.hrn.startsWith("CLINICAL-TEST-"));
+    // The donor fixture is not a recipient, so it is not in the list.
+    expect(rows.map(row => row.hrn)).toEqual(["CLINICAL-TEST-1"]);
+    expect(rows[0]).toMatchObject({ patientId, lastName: "Patient", firstName: "Synthetic", stage: "Phase1", nephrologist: doctor.name, fellow: null });
+    expect(rows[0].services).toEqual({
+      // First claim, newest claim, next planned claim, and the earliest deadline with no filed claim.
+      Meds: { firstDate: "2026-07-02", lastDate: "2026-09-02", nextDue: "2026-10-01", claimDue: "2026-10-02" },
+      Laboratory: { firstDate: "2026-08-05", lastDate: "2026-09-04", nextDue: null, claimDue: "2026-11-03" },
+      Tacro: { firstDate: null, lastDate: null, nextDue: "2026-10-15", claimDue: null },
+      XrayUsd: { firstDate: null, lastDate: null, nextDue: null, claimDue: null },
+    });
+    getSqliteDb().prepare("UPDATE patients SET status = 'Inactive' WHERE id = ?").run(patientId);
+    expect((await admin.zBenefit()).some(row => row.patientId === patientId)).toBe(false);
+    await expect(clinicalRouter.createCaller(ctx("patient@example.invalid")).zBenefit()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect([zDueState("2026-10-01", "2026-10-02"), zDueState("2026-10-02", "2026-10-02"), zDueState("2026-10-09", "2026-10-02"), zDueState("2026-10-10", "2026-10-02")]).toEqual(["overdue", "soon", "soon", "later"]);
   });
   it("persists appointment timezone and scopes cancellation to patient", async () => {
     const { id } = await admin.addAppointment({ patientId, title: "Fixture visit", kind: "FollowUp", startsAt: "2026-10-05T09:00:00+08:00" });

@@ -3,14 +3,14 @@ import {
   ArrowLeftRight, CalendarClock, CalendarDays, FileClock, HandHeart, History, TriangleAlert, UserRoundCheck,
   UserRoundSearch, Users,
 } from "lucide-react";
-import { ClayTray, StatusChip, type ClayCellTone } from "@/components/clay";
+import { ClayCell, ClayTray, StatusChip, type ClayCellTone } from "@/components/clay";
 import { CountUp, MotionClayCell, SharedCellBar, StaggerTray } from "@/components/motion";
 import { fmtWeekday, plural } from "./format";
 import { TRIAGE_ORDER, type TriageCellId, type TriageCounts, type TriageSelection } from "./triage";
 
 /*
- * The Nine-Cell Tray (DESIGN.md Screens 2). Most urgent count top-left in raspberry, people in the
- * sage center cell, every cell filters the triage panel. One tab stop; arrows move inside the 3x3.
+ * Eight dashboard options in two columns. Active patients keeps its sage styling.
+ * Every cell filters the triage panel. One tab stop. Arrows move between cells.
  */
 
 const I = { strokeWidth: 1.75 } as const;
@@ -116,14 +116,19 @@ export interface TriageTrayProps {
 
 export function TriageTray({ counts, selection, onSelect, panelId, state = "ready", onRetry }: TriageTrayProps) {
   if (state === "loading") {
-    return <ClayTray label="Triage counts" loading loadingLabel="Loading dashboard..." />;
+    return (
+      <ClayTray label="Triage counts" reflow={false} aria-busy="true" roving={false} style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <span className="sr-only">Loading dashboard...</span>
+        {TRIAGE_ORDER.map(id => <ClayCell key={id} state="loading" center={id === "active"} />)}
+      </ClayTray>
+    );
   }
 
   return (
-    <StaggerTray label="Triage counts" layout="3x3">
-      {TRIAGE_ORDER.map((id, index) => {
+    <StaggerTray label="Triage counts" reflow={false} style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      {TRIAGE_ORDER.map((id) => {
         const spec = cellSpec(id, counts);
-        const center = index === 4;
+        const center = id === "active";
         if (state === "error") {
           return (
             <MotionClayCell

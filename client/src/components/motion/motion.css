@@ -104,8 +104,54 @@
   100% { background-position: -200% 0; }
 }
 
+/* Quiet background movement: three soft washes, only transforms animated. */
+.ambient-shape {
+  position: absolute;
+  width: clamp(280px, 58vw, 820px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, var(--ambient-color), transparent 68%);
+  animation: ambient-drift 24s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.ambient-shape-sage {
+  --ambient-color: color-mix(in oklab, var(--sage) 18%, transparent);
+  left: -18%;
+  top: -22%;
+  --ambient-x: 36px;
+  --ambient-y: 28px;
+  animation-delay: -8s;
+}
+.ambient-shape-peach {
+  --ambient-color: color-mix(in oklab, var(--peach) 48%, transparent);
+  right: -20%;
+  top: 12%;
+  --ambient-x: -32px;
+  --ambient-y: 40px;
+  animation-duration: 30s;
+  animation-delay: -17s;
+}
+.ambient-shape-lilac {
+  --ambient-color: color-mix(in oklab, var(--lilac) 24%, transparent);
+  left: 14%;
+  bottom: -38%;
+  --ambient-x: 28px;
+  --ambient-y: -32px;
+  animation-duration: 28s;
+  animation-delay: -5s;
+}
+.ambient-backdrop[data-paused="true"] .ambient-shape {
+  animation-play-state: paused;
+}
+@keyframes ambient-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(var(--ambient-x), var(--ambient-y), 0) scale(1.08); }
+}
+
 /* Reduced motion is never waived: loops and transforms off, content rendered complete. */
 @media (prefers-reduced-motion: reduce) {
+  .ambient-backdrop { display: none; }
+  .ambient-shape { animation: none; will-change: auto; }
   .motion-breathe,
   .motion-status-pulse,
   .motion-status-pill-pulse,

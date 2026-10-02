@@ -10,6 +10,7 @@ vi.mock("./db", () => ({
   }),
 }));
 import { checkImportRows, commitImportRows } from "./dbPatientImport";
+import { listZBenefit } from "./dbClinical";
 import { addLabResult, addService, recordResult, getClinical, addAppointment, setChecklist, setChecklistMany, updateService } from "./dbClinical";
 beforeAll(async () => {
   state.pg = new PGlite();
@@ -78,6 +79,10 @@ describe("clinical PostgreSQL transactions", () => {
     expect(rows[0]).toMatchObject({ hrn: "PG-IMPORT-1", accountEmail: "pg.import1@example.invalid", surgeryDate: "2026-08-01", birthDate: "1980-03-04", followupMonths: 1, status: "Active", linkedRecipientId: null });
     expect(rows[1]).toMatchObject({ hrn: "PG-IMPORT-2", linkedRecipientId: rows[0].id });
     expect((await state.pg.query(`SELECT count(*)::int AS n FROM "activityLog" WHERE action = 'IMPORT_PATIENT'`)).rows).toEqual([{ n: 2 }]);
+    // The Z Benefit list reads recipients, doctors, and service dates through PostgreSQL.
+    const zRows = await listZBenefit();
+    expect(zRows.map(row => row.hrn)).toEqual(["PG-TEST", "PG-IMPORT-1"]);
+    expect(zRows[0].services.Laboratory).toEqual({ firstDate: "2026-09-02", lastDate: "2026-09-04", nextDue: "2026-09-01", claimDue: "2026-10-01" });
     // Two patients with no Gmail account do not collide on the unique e-mail index. An older database drops NOT NULL with this statement.
     await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" SET NOT NULL`);
     await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" DROP NOT NULL`);
