@@ -134,8 +134,8 @@ Work units (one writer, main tree: a second session writes other files in this t
 | L4 Result dialog | 2 frontend-architect, 4 ui-ux | `LabResultsDialog.tsx` replaces the Encode and Auto-transcribe dialogs | done |
 | L5 Motion | 5 motion | section reveal, chevron, progress bar, all transform and opacity only | done |
 | L6 Edit patient > Labs | 2 frontend-architect | lab inputs grouped by panel in `ServiceRecordEditor.tsx` | done |
-| L7 Gates | 7 anti-slop, 8 bug-hunter, 10 perf-a11y | `docs/buildme/gates/labs-*.md` | see Log |
-| L8 Snapshot | 12 token-snapshotter | `docs/buildme/snapshots/snap-labs-001/` | see Log |
+| L7 Gates | 7 anti-slop, 8 bug-hunter, 10 perf-a11y | `docs/buildme/gates/labs-gates.md` | done, all pass after one revision round |
+| L8 Snapshot | 12 token-snapshotter | `docs/buildme/snapshots/snap-labs-001/` | done |
 
 Not run, with reason:
 
@@ -143,3 +143,13 @@ Not run, with reason:
 - Agent 1 (design context): `PRODUCT.md` and `DESIGN.md` exist and stay binding.
 - Agent 6 (llms.txt) and Agent 13 (post-launch monitor): the app is private, signed-in, and `noindex`.
 - Design Arena: the user chose a layout.
+
+Run 2 log:
+
+- L1 to L6 done. The first build was committed and pushed by a second session as `8c5e30b` before the gates ran.
+- L7: the three gates failed on the first pass (1 block for anti-slop, 1 major for bugs, 1 block and 4 major for accessibility). One revision round fixed them. The open minor findings are in `gates/labs-gates.md`.
+- L8: `snap-labs-001` has 6 screenshots (1440 and 390) and `delta.md`. No token changed.
+- Shared components changed in the revision round: `ClayDialog` (focus returns on close, `fallbackFocus` prop) and `ClinicalForm` (`variant` prop).
+- A second session removed the reason field from Edit patient > Labs and set a default reason on the server. This run did not change that.
+- Open for an owner: clinical approval of the reference ranges in `labCatalogMeta.ts`, and a unique constraint on (`serviceRecordId`, `labTestId`).
+- Verification: `pnpm check` clean, 117 tests pass, `pnpm build` passes, headless Chrome checks pass on a scratch database. Production is not checked.

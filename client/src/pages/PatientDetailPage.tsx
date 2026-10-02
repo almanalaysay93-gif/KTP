@@ -187,10 +187,6 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
               linked={linkedRecipient ?? linkedDonors[0] ?? null}
               doctors={(doctorsQuery.data ?? []).map(toDoctorView)}
               backHref="/patients"
-              onRecordResult={() => {
-                setTab("tracker");
-                requestAnimationFrame(() => document.getElementById("clinical-content")?.scrollIntoView({ block: "start" }));
-              }}
               onEdit={() => navigate(`/patients/${patient.id}/edit`)}
               onOpenLinked={linked => navigate(`/patients/${linked.id}`)}
             />

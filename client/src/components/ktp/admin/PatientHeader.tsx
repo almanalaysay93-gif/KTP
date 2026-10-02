@@ -1,6 +1,6 @@
 import { DONOR_STAGES, RECIPIENT_STAGES } from "@/lib/ktpLabels";
 import { daysSinceSurgery, patientDisplayName } from "@/lib/ktpPatientView";
-import { ChevronLeft, ClipboardPen, Pencil, Send } from "lucide-react";
+import { ChevronLeft, Pencil, Send } from "lucide-react";
 import { Link } from "wouter";
 import { ClayAvatar, ClayAvatarPair } from "@/components/clay";
 import { MotionClayButton, MotionStepper } from "@/components/motion";
@@ -119,15 +119,6 @@ export function PatientHeader({
           >
             <Pencil strokeWidth={1.75} />
           </MotionClayButton>
-          {onRecordResult ? (
-            <MotionClayButton
-              size="sm"
-              icon={<ClipboardPen strokeWidth={1.75} />}
-              onClick={onRecordResult}
-            >
-              Record result
-            </MotionClayButton>
-          ) : null}
         </div>
       </div>
 
