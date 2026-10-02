@@ -182,14 +182,14 @@ export default function SettingsPage() {
                     <ClayTabsContent value="privacy" className="mt-6">
                       <form onSubmit={handleSaveSettings} className="flex flex-col gap-6">
                         <ClayCard className="p-6">
-                          <div className="flex items-start justify-between gap-4">
+                          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
                             <div>
                               <h2 className="type-headline text-ink">Data Privacy Consent Gate (RA 10173)</h2>
                               <p className="type-body-sm text-ink-muted">
                                 Controls the mandatory privacy notice presented to patients before portal access is granted.
                               </p>
                             </div>
-                            <div className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-1 font-mono type-body-sm text-ink">
+                            <div className="flex shrink-0 items-center gap-2 rounded-lg bg-surface-2 px-3 py-1 font-mono type-body-sm text-ink">
                               <span>Version:</span>
                               <span className="font-bold text-olive">{consentVersion}</span>
                             </div>
@@ -206,7 +206,7 @@ export default function SettingsPage() {
                             />
                           </div>
 
-                          <div className="mt-4 flex items-center justify-between rounded-lg bg-surface-2 p-4">
+                          <div className="mt-4 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center rounded-lg bg-surface-2 p-4">
                             <div>
                               <h3 className="type-headline text-ink">Bump Consent Version</h3>
                               <p className="type-body-sm text-ink-muted">
@@ -241,7 +241,7 @@ export default function SettingsPage() {
                     {/* Tab 3: Care Team Doctors */}
                     <ClayTabsContent value="doctors" className="mt-6">
                       <ClayCard className="p-6">
-                        <div className="flex items-center justify-between pb-4">
+                        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between pb-4">
                           <div>
                             <h2 className="type-headline text-ink">Nephrologists & Fellows</h2>
                             <p className="type-body-sm text-ink-muted">
@@ -260,18 +260,18 @@ export default function SettingsPage() {
 
                         <div className="mt-4 divide-y divide-hairline">
                           {(doctorsQuery.data ?? []).map((doc) => (
-                            <div key={doc.id} className="flex items-center justify-between py-3">
-                              <div className="flex items-center gap-3">
-                                <div className="flex size-8 items-center justify-center rounded-full bg-surface-2 text-ink">
+                            <div key={doc.id} className="flex items-center justify-between gap-3 py-3">
+                              <div className="flex min-w-0 flex-1 items-center gap-3">
+                                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-2 text-ink">
                                   <UserCheck className="size-4" />
                                 </div>
-                                <div>
-                                  <p className="font-medium text-ink type-body">{doc.name}</p>
+                                <div className="min-w-0">
+                                  <p className="break-words font-medium text-ink type-body">{doc.name}</p>
                                   <p className="type-body-sm text-ink-muted">{doc.role}</p>
                                 </div>
                               </div>
                               <span
-                                className={`inline-flex rounded-full px-2 py-0.5 type-label ${
+                                className={`inline-flex shrink-0 rounded-full px-2 py-0.5 type-label ${
                                   doc.active ? "bg-olive-tint text-olive" : "bg-ink-muted/10 text-ink-muted"
                                 }`}
                               >

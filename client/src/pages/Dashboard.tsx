@@ -1,6 +1,10 @@
 import { liveDashboardData, liveDashboardAggregates } from "@/lib/ktpDashboard";
 import { toPatientView } from "@/lib/ktpPatientView";
 import { ADMIN_HREFS } from "@/lib/ktpAdminRoutes";
+import {
+  dashboardSelectionFromSearch,
+  dashboardSelectionParam,
+} from "@/lib/ktpDashboardSelection";
 import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { useLocation } from "wouter";
@@ -8,14 +12,12 @@ import {
   AdminShell,
   AdminToaster,
   SearchField,
-  ServiceActionDialog,
   StageBoard,
   TriagePanel,
   TriageTray,
   triageCounts,
   fmtLongDate,
   type RowActions,
-  type ServiceAction,
   type TriageCellId,
   type TriageSelection,
 } from "@/components/ktp/admin";
@@ -31,22 +33,21 @@ import { todayDate } from "@shared/ktp";
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const [query, setQuery] = useState("");
-  const [selection, setSelection] = useState<TriageSelection>({
-    kind: "cell",
-    id: "overdue",
-  });
-  const [action, setAction] = useState<ServiceAction | null>(null);
+  const [selection, setSelection] = useState<TriageSelection>(() =>
+    dashboardSelectionFromSearch(window.location.search)
+  );
 
   const dashQuery = trpc.dashboard.initial.useQuery();
   const today = dashQuery.data?.today ?? todayDate();
   const data = useMemo(
     () =>
       liveDashboardData(
-        (dashQuery.data?.patients ?? []).map(p => toPatientView(p, today))
+        (dashQuery.data?.patients ?? []).map(p => toPatientView(p, today)),
+        dashQuery.data
       ),
     [dashQuery.data, today]
   );
-  const aggregates = useMemo(() => liveDashboardAggregates(data), [data]);
+  const aggregates = useMemo(() => liveDashboardAggregates(data, today), [data, today]);
   const counts = useMemo(
     () => triageCounts(aggregates, data, today),
     [aggregates, data, today]
@@ -61,18 +62,32 @@ export default function Dashboard() {
     document.title = "Dashboard | KTP";
   }, []);
 
+  useEffect(() => {
+    const restoreSelection = () =>
+      setSelection(dashboardSelectionFromSearch(window.location.search));
+    window.addEventListener("popstate", restoreSelection);
+    return () => window.removeEventListener("popstate", restoreSelection);
+  }, []);
+
+  const selectAndReveal = (next: TriageSelection) => {
+    setQuery("");
+    setSelection(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set("list", dashboardSelectionParam(next));
+    if (url.href !== window.location.href) window.history.pushState(null, "", url);
+    requestAnimationFrame(() => {
+      const panel = document.getElementById("triage-panel");
+      panel?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
+      panel?.focus({ preventScroll: true });
+    });
+  };
+
   const actions: RowActions = {
     onOpenPatient: patient => {
       navigate(`/patients/${patient.id}`);
     },
-    onMarkFiled: (patient, record) =>
-      setAction({ kind: "claim", patient, record }),
-    onSetNewTime: row =>
-      setAction({
-        kind: "reschedule",
-        patient: row.patient,
-        appointment: row.appointment,
-      }),
+    onMarkFiled: patient => navigate(`/patients/${patient.id}`),
+    onSetNewTime: row => navigate(`/patients/${row.patient.id}?tab=appointments`),
   };
 
   const enroll = () => navigate("/patients/new");
@@ -141,7 +156,7 @@ export default function Dashboard() {
                       counts={counts}
                       selection={selection}
                       onSelect={(id: TriageCellId) =>
-                        setSelection({ kind: "cell", id })
+                        selectAndReveal({ kind: "cell", id })
                       }
                       panelId="triage-panel"
                       state={state}
@@ -169,7 +184,7 @@ export default function Dashboard() {
                     donors={aggregates.donorStages}
                     selection={selection}
                     onSelectStage={(patientType, stage) =>
-                      setSelection({ kind: "stage", patientType, stage })
+                      selectAndReveal({ kind: "stage", patientType, stage })
                     }
                     panelId="triage-panel"
                     state={state}
@@ -179,10 +194,6 @@ export default function Dashboard() {
                 </div>
               </main>
             </PageTransition>
-            <ServiceActionDialog
-              action={action}
-              onClose={() => setAction(null)}
-            />
           </AdminShell>
         </div>
       </AdminToaster>

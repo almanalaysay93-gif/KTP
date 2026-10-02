@@ -97,10 +97,18 @@ export const patientsRouter = router({
     }),
 
   getById: adminProcedure
-    .input(z.object({ id: z.number().int().positive().safe() }))
+    .input(
+      z.object({
+        id: z.number().int().positive().safe(),
+        allowMissing: z.boolean().optional(),
+      })
+    )
     .query(async ({ ctx, input }) => {
       const patient = await db.getPatientById(input.id);
       if (!patient) {
+        if (input.allowMissing) {
+          return { patient: null, linkedRecipient: null, linkedDonors: [] };
+        }
         throw new TRPCError({ code: "NOT_FOUND", message: "Patient not found" });
       }
 

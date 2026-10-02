@@ -1,10 +1,11 @@
+import { listClinicalDashboard } from "../dbClinical";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { todayDate } from "@shared/ktp";
 
 export const dashboardRouter = router({
   initial: adminProcedure.query(async () => {
-    const patients = await db.listPatients();
+    const [patients, clinical] = await Promise.all([db.listPatients(), listClinicalDashboard()]);
     const today = todayDate();
 
     // Stage & type counts
@@ -22,8 +23,8 @@ export const dashboardRouter = router({
       donorStages[p.stage] = (donorStages[p.stage] || 0) + 1;
     }
 
-    // In Phase A2, services and appointments are empty until Phase A3 tables are populated
     return {
+      ...clinical,
       today,
       patients,
       activeCount: active.length,

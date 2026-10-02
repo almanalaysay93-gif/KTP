@@ -1,0 +1,82 @@
+checks[81]{name,passed}:
+  "cold 360 /dashboard",true
+  "loaded 360 /dashboard",true
+  "cold 360 /patients",true
+  "loaded 360 /patients",true
+  "cold 360 /settings",true
+  "loaded 360 /settings",true
+  "cold 360 /patients/new",true
+  "loaded 360 /patients/new",true
+  "cold 390 /dashboard",true
+  "loaded 390 /dashboard",true
+  "cold 390 /patients",true
+  "loaded 390 /patients",true
+  "cold 390 /settings",true
+  "loaded 390 /settings",true
+  "cold 390 /patients/new",true
+  "loaded 390 /patients/new",true
+  "cold 400 /dashboard",true
+  "loaded 400 /dashboard",true
+  "cold 400 /patients",true
+  "loaded 400 /patients",true
+  "cold 400 /settings",true
+  "loaded 400 /settings",true
+  "cold 400 /patients/new",true
+  "loaded 400 /patients/new",true
+  "cold 430 /dashboard",true
+  "loaded 430 /dashboard",true
+  "cold 430 /patients",true
+  "loaded 430 /patients",true
+  "cold 430 /settings",true
+  "loaded 430 /settings",true
+  "cold 430 /patients/new",true
+  "loaded 430 /patients/new",true
+  "cold 1440 /dashboard",true
+  "loaded 1440 /dashboard",true
+  "cold 1440 /patients",true
+  "loaded 1440 /patients",true
+  "cold 1440 /settings",true
+  "loaded 1440 /settings",true
+  "cold 1440 /patients/new",true
+  "loaded 1440 /patients/new",true
+  "22 dashboard buttons",true
+  "settings Privacy & Consent 360",true
+  "settings Care Team Doctors 360",true
+  "settings Privacy & Consent 400",true
+  "settings Care Team Doctors 400",true
+  "CTA Overdue services, 0. Show list.",true
+  "CTA Claims due in 7 days, 0. Show list.",true
+  "CTA Reschedule requests, 0. Show list.",true
+  "CTA Superseded, claim not filed, 0. Show list.",true
+  "CTA Active patients, 11. Show list.",true
+  "CTA Services due in 7 days, 0. Show list.",true
+  "CTA Recipients, work-up, 7. Show list.",true
+  "CTA Recipients, Post-KT, 2. Show list.",true
+  "CTA Donors, 2. Show list.",true
+  "CTA Orientation: 0 recipients. Open filtered list",true
+  "CTA Phase 1 work-up: 6 recipients. Open filtered list",true
+  "CTA Phase 2 work-up: 1 recipient. Open filtered list",true
+  "CTA Clearances: 0 recipients. Open filtered list",true
+  "CTA PhilHealth Z: 0 recipients. Open filtered list",true
+  "CTA Phase 3 pre-admission: 0 recipients. Open filtered list",true
+  "CTA Post-KT: 2 recipients. Open filtered list",true
+  "CTA Orientation: 0 donors. Open filtered list",true
+  "CTA Phase 1 work-up: 1 donor. Open filtered list",true
+  "CTA Phase 2 work-up: 0 donors. Open filtered list",true
+  "CTA Clearances: 0 donors. Open filtered list",true
+  "CTA Phase 3 pre-admission: 0 donors. Open filtered list",true
+  "CTA Post-donation: 1 donor. Open filtered list",true
+  "missing patient graceful",true
+  "missing patient console clean",true
+  "service saved",true
+  "result saved",true
+  "lab displayed",true
+  "checklist survives reload",true
+  "appointment saved",true
+  "appointment cancelled",true
+  "appointment survives reload",true
+  "clinical mobile fit",true
+  "no page errors",true
+  "legacy /calendar redirects",true
+  "legacy /messages redirects",true
+  "legacy /notifications redirects",true

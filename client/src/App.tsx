@@ -121,6 +121,21 @@ function Router() {
             <SettingsPage />
           </Protected>
         </Route>
+        <Route path="/calendar">
+          <Protected>
+            <Redirect to="/dashboard" />
+          </Protected>
+        </Route>
+        <Route path="/messages">
+          <Protected>
+            <Redirect to="/dashboard" />
+          </Protected>
+        </Route>
+        <Route path="/notifications">
+          <Protected>
+            <Redirect to="/dashboard" />
+          </Protected>
+        </Route>
 
         {/* Patient portal routes */}
         <Route path="/me">

@@ -1,3 +1,4 @@
+import { PatientClinicalTabs } from "@/components/ktp/admin/PatientClinicalTabs";
 import { PatientProfileBoundary } from "@/components/ktp/PatientProfileBoundary";
 import {
   parsePatientId,
@@ -12,7 +13,6 @@ import {
   AdminShell,
   AdminToaster,
   PatientHeader,
-  useAdminToast,
 } from "@/components/ktp/admin";
 import {
   ClayButton,
@@ -55,8 +55,8 @@ export default function PatientDetailPage(props: { id?: string }) {
               onRetry={async () => {
                 const id = parsePatientId(rawId);
                 if (id === null) return;
-                await utils.patients.getById.invalidate({ id });
-                await utils.patients.getById.fetch({ id });
+                await utils.patients.getById.invalidate({ id, allowMissing: true });
+                await utils.patients.getById.fetch({ id, allowMissing: true });
               }}
             >
               <PatientContent rawId={rawId} />
@@ -70,13 +70,15 @@ export default function PatientDetailPage(props: { id?: string }) {
 
 function PatientContent({ rawId }: { rawId: string | undefined }) {
   const [, navigate] = useLocation();
-  const toast = useAdminToast();
   const patientId = parsePatientId(rawId);
   const today = todayDate();
-  const [tab, setTab] = useState<string>("tracker");
+  const [tab, setTab] = useState<string>(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return ["tracker", "labs", "checklist", "appointments", "history"].includes(requested ?? "") ? requested! : "tracker";
+  });
 
   const query = trpc.patients.getById.useQuery(
-    { id: patientId ?? 0 },
+    { id: patientId ?? 0, allowMissing: true },
     {
       enabled: Boolean(patientId),
     }
@@ -194,13 +196,10 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
               linked={linkedRecipient ?? linkedDonors[0] ?? null}
               doctors={(doctorsQuery.data ?? []).map(toDoctorView)}
               backHref="/patients"
-              onRecordResult={() =>
-                toast({
-                  title: "Result entry unavailable",
-                  body: "Result entry is not available yet.",
-                  tone: "info",
-                })
-              }
+              onRecordResult={() => {
+                setTab("tracker");
+                requestAnimationFrame(() => document.getElementById("clinical-content")?.scrollIntoView({ block: "start" }));
+              }}
               onEdit={() => navigate(`/patients/${patient.id}/edit`)}
               onOpenLinked={linked => navigate(`/patients/${linked.id}`)}
             />
@@ -209,7 +208,7 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
           {/* Tabs */}
           <div className="mt-6">
             <ClayTabs value={tab} onValueChange={setTab}>
-              <ClayTabsList>
+              <ClayTabsList className="h-auto w-full flex-wrap overflow-visible rounded-2xl sm:w-fit">
                 <ClayTabsTrigger value="tracker">Tracker</ClayTabsTrigger>
                 <ClayTabsTrigger value="labs">Labs</ClayTabsTrigger>
                 <ClayTabsTrigger value="checklist">Checklist</ClayTabsTrigger>
@@ -219,45 +218,13 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
                 <ClayTabsTrigger value="history">History</ClayTabsTrigger>
               </ClayTabsList>
 
-              <ClayTabsContent value="tracker" className="mt-6">
-                <ClayCard className="p-6 text-center text-ink-muted">
-                  <p className="type-headline text-ink">Service Tracker</p>
-                  <p className="mt-2 type-body-sm">
-                    Scheduled Meds, Laboratory, Tacro, and X-ray/USD records for
-                    this patient will be connected in Phase A3.
-                  </p>
-                </ClayCard>
-              </ClayTabsContent>
-
-              <ClayTabsContent value="labs" className="mt-6">
-                <ClayCard className="p-6 text-center text-ink-muted">
-                  <p className="type-headline text-ink">Lab Results</p>
-                  <p className="mt-2 type-body-sm">
-                    Laboratory values and longitudinal trend charts will be
-                    connected in Phase A3.
-                  </p>
-                </ClayCard>
-              </ClayTabsContent>
-
-              <ClayTabsContent value="checklist" className="mt-6">
-                <ClayCard className="p-6 text-center text-ink-muted">
-                  <p className="type-headline text-ink">Workup Checklist</p>
-                  <p className="mt-2 type-body-sm">
-                    Pre-transplant workup items and clearances will be connected
-                    in Phase A3.
-                  </p>
-                </ClayCard>
-              </ClayTabsContent>
-
-              <ClayTabsContent value="appointments" className="mt-6">
-                <ClayCard className="p-6 text-center text-ink-muted">
-                  <p className="type-headline text-ink">Appointments</p>
-                  <p className="mt-2 type-body-sm">
-                    Clinical appointment scheduling and confirmations will be
-                    connected in Phase A3.
-                  </p>
-                </ClayCard>
-              </ClayTabsContent>
+              {["tracker", "labs", "checklist", "appointments"].map(value => (
+                <ClayTabsContent key={value} value={value} className="mt-6">
+                  <div id={tab === value ? "clinical-content" : undefined} className="scroll-mt-20">
+                    <PatientClinicalTabs patientId={patientId} tab={value} />
+                  </div>
+                </ClayTabsContent>
+              ))}
 
               <ClayTabsContent value="history" className="mt-6">
                 <ClayCard className="p-6">

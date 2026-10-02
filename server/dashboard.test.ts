@@ -1,3 +1,4 @@
+vi.mock("./dbClinical", () => ({ listClinicalDashboard: vi.fn(async () => ({ services: [], appointments: [] })) }));
 import { describe, expect, it, vi } from "vitest";
 import type { Patient } from "../drizzle/schema";
 import type { TrpcContext } from "./_core/context";

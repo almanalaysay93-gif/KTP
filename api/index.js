@@ -565,6 +565,94 @@ CREATE INDEX IF NOT EXISTS "patients_type_idx" ON "ktp"."patients" USING btree (
   }
 });
 
+// server/clinicalCatalog.ts
+var LAB_CATALOG, CHECKLIST_CATALOG;
+var init_clinicalCatalog = __esm({
+  "server/clinicalCatalog.ts"() {
+    "use strict";
+    LAB_CATALOG = [
+      ["Hemoglobin", "g/L", 1],
+      ["WBC", "x10^9/L", 2],
+      ["Platelets", "x10^9/L", 3],
+      ["Creatinine", "umol/L", 4],
+      ["BUN", "mmol/L", 5],
+      ["FBS", "mmol/L", 6],
+      ["Sodium", "mmol/L", 7],
+      ["Potassium", "mmol/L", 8],
+      ["ALT (SGPT)", "U/L", 9],
+      ["Tacrolimus trough", "ng/mL", 10],
+      ["Total cholesterol", "mmol/L", 11],
+      ["Triglycerides", "mmol/L", 12],
+      ["HDL", "mmol/L", 13],
+      ["LDL", "mmol/L", 14],
+      ["CMV PCR", "IU/mL", 15]
+    ];
+    CHECKLIST_CATALOG = [
+      // Milestones
+      ["Pre-transplant orientation", "Milestone", null, "Both", 0, 1],
+      ["Initial nephrology assessment", "Milestone", null, "Both", 0, 2],
+      ["HTEC evaluation and approval", "Milestone", null, "Both", 0, 3],
+      ["CDTE and risk stratification", "Milestone", null, "Recipient", 0, 4],
+      ["PhilHealth Z Package qualification and application", "Milestone", null, "Recipient", 0, 5],
+      // Phase 1 labs
+      ["CBC with differential", "Lab", 1, "Both", 0, 10],
+      ["Blood typing ABO and Rh", "Lab", 1, "Both", 0, 11],
+      ["BT, CT, PT/INR, aPTT", "Lab", 1, "Both", 0, 12],
+      ["FBS and HbA1c", "Lab", 1, "Both", 0, 13],
+      ["Creatinine, BUN, uric acid", "Lab", 1, "Both", 0, 14],
+      ["SGPT, SGOT, ALP", "Lab", 1, "Both", 0, 15],
+      ["Na, K, Ca, phosphorus, Mg", "Lab", 1, "Both", 0, 16],
+      ["Lipid profile", "Lab", 1, "Both", 0, 17],
+      ["Albumin and total protein", "Lab", 1, "Both", 0, 18],
+      ["iPTH", "Lab", 1, "Both", 0, 19],
+      ["Hepatitis B markers", "Lab", 1, "Both", 0, 20],
+      ["Anti-HCV", "Lab", 1, "Both", 0, 21],
+      ["TPPA/VDRL/RPR", "Lab", 1, "Both", 0, 22],
+      ["HIV", "Lab", 1, "Both", 0, 23],
+      ["Malaria (BSMP)", "Lab", 1, "Both", 0, 24],
+      ["CMV IgG", "Lab", 1, "Both", 0, 25],
+      ["EBV IgG", "Lab", 1, "Both", 0, 26],
+      ["Varicella IgG", "Lab", 1, "Both", 0, 27],
+      ["TB Quantiferon", "Lab", 1, "Both", 0, 28],
+      ["Throat swab GS and C/S", "Lab", 1, "Both", 0, 29],
+      ["Urinalysis with microscopy", "Lab", 1, "Both", 0, 30],
+      ["Urine C/S", "Lab", 1, "Both", 0, 31],
+      ["UACR or 24-hour urine protein and creatinine", "Lab", 1, "Both", 0, 32],
+      ["Fecalysis with occult blood or FIT", "Lab", 1, "Both", 0, 33],
+      ["Pregnancy test", "Lab", 1, "Both", 1, 34],
+      // Phase 1 imaging
+      ["Chest X-ray PA", "Imaging", 1, "Both", 0, 40],
+      ["12-lead ECG", "Imaging", 1, "Both", 0, 41],
+      ["Whole abdomen ultrasound", "Imaging", 1, "Both", 0, 42],
+      ["2D echo with Doppler", "Imaging", 1, "Both", 0, 43],
+      // Phase 2
+      ["HLA typing class I and II", "Lab", 2, "Both", 0, 50],
+      ["PRA screening class I, II, MICA", "Lab", 2, "Recipient", 0, 51],
+      ["Single antigen bead / DSA", "Lab", 2, "Recipient", 0, 52],
+      ["T and B cell crossmatch", "Lab", 2, "Recipient", 0, 53],
+      ["Renal CT angiography with 3D reconstruction", "Imaging", 2, "Donor", 0, 54],
+      ["Nuclear GFR scan (split function)", "Imaging", 2, "Donor", 0, 55],
+      ["Aorto-iliac duplex ultrasound", "Imaging", 2, "Donor", 0, 56],
+      // Phase 3
+      ["Repeat chest X-ray", "Imaging", 3, "Both", 0, 60],
+      ["Repeat urinalysis and CBC", "Lab", 3, "Both", 0, 61],
+      ["RT-PCR on admission day", "Lab", 3, "Both", 0, 62],
+      ["Pre-transplant HD or PD session", "Clearance", 3, "Recipient", 1, 63],
+      // Clearances
+      ["Cardiology", "Clearance", null, "Both", 0, 70],
+      ["Infectious disease", "Clearance", null, "Both", 0, 71],
+      ["Dental", "Clearance", null, "Both", 0, 72],
+      ["Neuropsychiatric", "Clearance", null, "Both", 0, 73],
+      ["Endocrinology", "Clearance", null, "Both", 0, 74],
+      ["Donor advocate", "Clearance", null, "Donor", 0, 75],
+      ["Gastroenterology or hepatology", "Clearance", null, "Both", 1, 76],
+      ["Pulmonology", "Clearance", null, "Both", 1, 77],
+      ["Urology", "Clearance", null, "Both", 1, 78],
+      ["OB-Gyn with Pap smear or mammogram", "Clearance", null, "Both", 1, 79]
+    ];
+  }
+});
+
 // server/localDb.ts
 import fs from "fs";
 import path from "path";
@@ -840,24 +928,7 @@ function initSchemaAndSeed(db) {
   const labCount = db.prepare("SELECT count(*) as count FROM labTests").get();
   if (labCount.count === 0) {
     const insertLab = db.prepare("INSERT INTO labTests (name, unit, sortOrder, active) VALUES (?, ?, ?, 1)");
-    const tests = [
-      ["Hemoglobin", "g/L", 1],
-      ["WBC", "x10^9/L", 2],
-      ["Platelets", "x10^9/L", 3],
-      ["Creatinine", "umol/L", 4],
-      ["BUN", "mmol/L", 5],
-      ["FBS", "mmol/L", 6],
-      ["Sodium", "mmol/L", 7],
-      ["Potassium", "mmol/L", 8],
-      ["ALT (SGPT)", "U/L", 9],
-      ["Tacrolimus trough", "ng/mL", 10],
-      ["Total cholesterol", "mmol/L", 11],
-      ["Triglycerides", "mmol/L", 12],
-      ["HDL", "mmol/L", 13],
-      ["LDL", "mmol/L", 14],
-      ["CMV PCR", "IU/mL", 15]
-    ];
-    for (const [name, unit, sort] of tests) {
+    for (const [name, unit, sort] of LAB_CATALOG) {
       insertLab.run(name, unit, sort);
     }
   }
@@ -866,70 +937,7 @@ function initSchemaAndSeed(db) {
     const insertChecklist = db.prepare(
       "INSERT INTO checklistCatalog (name, category, phase, appliesTo, asIndicated, sortOrder, active) VALUES (?, ?, ?, ?, ?, ?, 1)"
     );
-    const items = [
-      // Milestones
-      ["Pre-transplant orientation", "Milestone", null, "Both", 0, 1],
-      ["Initial nephrology assessment", "Milestone", null, "Both", 0, 2],
-      ["HTEC evaluation and approval", "Milestone", null, "Both", 0, 3],
-      ["CDTE and risk stratification", "Milestone", null, "Recipient", 0, 4],
-      ["PhilHealth Z Package qualification and application", "Milestone", null, "Recipient", 0, 5],
-      // Phase 1 labs
-      ["CBC with differential", "Lab", 1, "Both", 0, 10],
-      ["Blood typing ABO and Rh", "Lab", 1, "Both", 0, 11],
-      ["BT, CT, PT/INR, aPTT", "Lab", 1, "Both", 0, 12],
-      ["FBS and HbA1c", "Lab", 1, "Both", 0, 13],
-      ["Creatinine, BUN, uric acid", "Lab", 1, "Both", 0, 14],
-      ["SGPT, SGOT, ALP", "Lab", 1, "Both", 0, 15],
-      ["Na, K, Ca, phosphorus, Mg", "Lab", 1, "Both", 0, 16],
-      ["Lipid profile", "Lab", 1, "Both", 0, 17],
-      ["Albumin and total protein", "Lab", 1, "Both", 0, 18],
-      ["iPTH", "Lab", 1, "Both", 0, 19],
-      ["Hepatitis B markers", "Lab", 1, "Both", 0, 20],
-      ["Anti-HCV", "Lab", 1, "Both", 0, 21],
-      ["TPPA/VDRL/RPR", "Lab", 1, "Both", 0, 22],
-      ["HIV", "Lab", 1, "Both", 0, 23],
-      ["Malaria (BSMP)", "Lab", 1, "Both", 0, 24],
-      ["CMV IgG", "Lab", 1, "Both", 0, 25],
-      ["EBV IgG", "Lab", 1, "Both", 0, 26],
-      ["Varicella IgG", "Lab", 1, "Both", 0, 27],
-      ["TB Quantiferon", "Lab", 1, "Both", 0, 28],
-      ["Throat swab GS and C/S", "Lab", 1, "Both", 0, 29],
-      ["Urinalysis with microscopy", "Lab", 1, "Both", 0, 30],
-      ["Urine C/S", "Lab", 1, "Both", 0, 31],
-      ["UACR or 24-hour urine protein and creatinine", "Lab", 1, "Both", 0, 32],
-      ["Fecalysis with occult blood or FIT", "Lab", 1, "Both", 0, 33],
-      ["Pregnancy test", "Lab", 1, "Both", 1, 34],
-      // Phase 1 imaging
-      ["Chest X-ray PA", "Imaging", 1, "Both", 0, 40],
-      ["12-lead ECG", "Imaging", 1, "Both", 0, 41],
-      ["Whole abdomen ultrasound", "Imaging", 1, "Both", 0, 42],
-      ["2D echo with Doppler", "Imaging", 1, "Both", 0, 43],
-      // Phase 2
-      ["HLA typing class I and II", "Lab", 2, "Both", 0, 50],
-      ["PRA screening class I, II, MICA", "Lab", 2, "Recipient", 0, 51],
-      ["Single antigen bead / DSA", "Lab", 2, "Recipient", 0, 52],
-      ["T and B cell crossmatch", "Lab", 2, "Recipient", 0, 53],
-      ["Renal CT angiography with 3D reconstruction", "Imaging", 2, "Donor", 0, 54],
-      ["Nuclear GFR scan (split function)", "Imaging", 2, "Donor", 0, 55],
-      ["Aorto-iliac duplex ultrasound", "Imaging", 2, "Donor", 0, 56],
-      // Phase 3
-      ["Repeat chest X-ray", "Imaging", 3, "Both", 0, 60],
-      ["Repeat urinalysis and CBC", "Lab", 3, "Both", 0, 61],
-      ["RT-PCR on admission day", "Lab", 3, "Both", 0, 62],
-      ["Pre-transplant HD or PD session", "Clearance", 3, "Recipient", 1, 63],
-      // Clearances
-      ["Cardiology", "Clearance", null, "Both", 0, 70],
-      ["Infectious disease", "Clearance", null, "Both", 0, 71],
-      ["Dental", "Clearance", null, "Both", 0, 72],
-      ["Neuropsychiatric", "Clearance", null, "Both", 0, 73],
-      ["Endocrinology", "Clearance", null, "Both", 0, 74],
-      ["Donor advocate", "Clearance", null, "Donor", 0, 75],
-      ["Gastroenterology or hepatology", "Clearance", null, "Both", 1, 76],
-      ["Pulmonology", "Clearance", null, "Both", 1, 77],
-      ["Urology", "Clearance", null, "Both", 1, 78],
-      ["OB-Gyn with Pap smear or mammogram", "Clearance", null, "Both", 1, 79]
-    ];
-    for (const [name, cat, phase, applies, asInd, sort] of items) {
+    for (const [name, cat, phase, applies, asInd, sort] of CHECKLIST_CATALOG) {
       insertChecklist.run(name, cat, phase, applies, asInd, sort);
     }
   }
@@ -948,6 +956,7 @@ var require2, __filename, __dirname, _sqliteDb;
 var init_localDb = __esm({
   "server/localDb.ts"() {
     "use strict";
+    init_clinicalCatalog();
     require2 = createRequire(import.meta.url);
     __filename = fileURLToPath(import.meta.url);
     __dirname = path.dirname(__filename);
@@ -957,14 +966,14 @@ var init_localDb = __esm({
 
 // server/dbPatients.ts
 import { and, eq, ilike, or, sql as sql2 } from "drizzle-orm";
-async function getPatientById(id) {
+async function getPatientById(id2) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    const row = sqlite.prepare("SELECT * FROM patients WHERE id = ?").get(id);
+    const row = sqlite.prepare("SELECT * FROM patients WHERE id = ?").get(id2);
     return row ?? null;
   }
-  const result = await db.select().from(patients).where(eq(patients.id, id)).limit(1);
+  const result = await db.select().from(patients).where(eq(patients.id, id2)).limit(1);
   return result[0] ?? null;
 }
 async function getPatientByHrn(hrn) {
@@ -1005,10 +1014,10 @@ async function autoLinkPatientByEmail(userId, email) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    const patient = sqlite.prepare("SELECT * FROM patients WHERE lower(accountEmail) = ? AND status = 'Active'").get(cleanEmail);
-    if (!patient) return null;
-    sqlite.prepare("UPDATE patients SET linkedUserId = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?").run(userId, patient.id);
-    return sqlite.prepare("SELECT * FROM patients WHERE id = ?").get(patient.id);
+    const patient3 = sqlite.prepare("SELECT * FROM patients WHERE lower(accountEmail) = ? AND status = 'Active'").get(cleanEmail);
+    if (!patient3) return null;
+    sqlite.prepare("UPDATE patients SET linkedUserId = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?").run(userId, patient3.id);
+    return sqlite.prepare("SELECT * FROM patients WHERE id = ?").get(patient3.id);
   }
   const [match] = await db.select().from(patients).where(and(sql2`lower(${patients.accountEmail}) = ${cleanEmail}`, eq(patients.status, "Active"))).limit(1);
   if (!match) return null;
@@ -1019,31 +1028,31 @@ async function listPatients(opts = {}) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    let query = "SELECT * FROM patients WHERE 1=1";
+    let query2 = "SELECT * FROM patients WHERE 1=1";
     const params = [];
     if (opts.type) {
-      query += " AND patientType = ?";
+      query2 += " AND patientType = ?";
       params.push(opts.type);
     }
     if (opts.stage) {
-      query += " AND stage = ?";
+      query2 += " AND stage = ?";
       params.push(opts.stage);
     }
     if (opts.doctorId) {
-      query += " AND (nephrologistId = ? OR fellowId = ?)";
+      query2 += " AND (nephrologistId = ? OR fellowId = ?)";
       params.push(opts.doctorId, opts.doctorId);
     }
     if (opts.status) {
-      query += " AND status = ?";
+      query2 += " AND status = ?";
       params.push(opts.status);
     }
     if (opts.search) {
       const term = `%${opts.search.toLowerCase()}%`;
-      query += " AND (lower(firstName) LIKE ? OR lower(lastName) LIKE ? OR lower(hrn) LIKE ?)";
+      query2 += " AND (lower(firstName) LIKE ? OR lower(lastName) LIKE ? OR lower(hrn) LIKE ?)";
       params.push(term, term, term);
     }
-    query += " ORDER BY lastName ASC, firstName ASC";
-    return sqlite.prepare(query).all(...params);
+    query2 += " ORDER BY lastName ASC, firstName ASC";
+    return sqlite.prepare(query2).all(...params);
   }
   const conditions = [];
   if (opts.type) conditions.push(eq(patients.patientType, opts.type));
@@ -1108,11 +1117,11 @@ async function createPatient(data) {
   const [row] = await db.insert(patients).values(data).returning();
   return row;
 }
-async function updatePatient(id, data) {
+async function updatePatient(id2, data) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    const existing = sqlite.prepare("SELECT * FROM patients WHERE id = ?").get(id);
+    const existing = sqlite.prepare("SELECT * FROM patients WHERE id = ?").get(id2);
     if (!existing) return null;
     const keys = Object.keys(data).filter((k) => k !== "id");
     if (keys.length === 0) return existing;
@@ -1122,10 +1131,10 @@ async function updatePatient(id, data) {
       if (v instanceof Date) return v.toISOString().slice(0, 10);
       return v ?? null;
     });
-    sqlite.prepare(`UPDATE patients SET ${sets}, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`).run(...vals, id);
-    return sqlite.prepare("SELECT * FROM patients WHERE id = ?").get(id);
+    sqlite.prepare(`UPDATE patients SET ${sets}, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`).run(...vals, id2);
+    return sqlite.prepare("SELECT * FROM patients WHERE id = ?").get(id2);
   }
-  const [updated] = await db.update(patients).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(patients.id, id)).returning();
+  const [updated] = await db.update(patients).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(patients.id, id2)).returning();
   return updated ?? null;
 }
 async function updatePatientConsent(patientId, version) {
@@ -1139,29 +1148,29 @@ async function listDoctors(opts = {}) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    let query = "SELECT * FROM doctors WHERE 1=1";
+    let query2 = "SELECT * FROM doctors WHERE 1=1";
     const params = [];
-    if (activeOnly) query += " AND active = 1";
+    if (activeOnly) query2 += " AND active = 1";
     if (opts.role) {
-      query += " AND role = ?";
+      query2 += " AND role = ?";
       params.push(opts.role);
     }
-    query += " ORDER BY name ASC";
-    return sqlite.prepare(query).all(...params);
+    query2 += " ORDER BY name ASC";
+    return sqlite.prepare(query2).all(...params);
   }
   const conditions = [];
   if (activeOnly) conditions.push(eq(doctors.active, true));
   if (opts.role) conditions.push(eq(doctors.role, opts.role));
   return db.select().from(doctors).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(doctors.name);
 }
-async function getDoctorById(id) {
+async function getDoctorById(id2) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    const row = sqlite.prepare("SELECT * FROM doctors WHERE id = ?").get(id);
+    const row = sqlite.prepare("SELECT * FROM doctors WHERE id = ?").get(id2);
     return row ?? null;
   }
-  const [doc] = await db.select().from(doctors).where(eq(doctors.id, id)).limit(1);
+  const [doc] = await db.select().from(doctors).where(eq(doctors.id, id2)).limit(1);
   return doc ?? null;
 }
 async function createDoctor(data) {
@@ -1174,11 +1183,11 @@ async function createDoctor(data) {
   const [doc] = await db.insert(doctors).values(data).returning();
   return doc;
 }
-async function updateDoctor(id, data) {
+async function updateDoctor(id2, data) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    const existing = sqlite.prepare("SELECT * FROM doctors WHERE id = ?").get(id);
+    const existing = sqlite.prepare("SELECT * FROM doctors WHERE id = ?").get(id2);
     if (!existing) return null;
     const keys = Object.keys(data).filter((k) => k !== "id");
     if (keys.length === 0) return existing;
@@ -1187,10 +1196,10 @@ async function updateDoctor(id, data) {
       const v = data[k];
       return typeof v === "boolean" ? v ? 1 : 0 : v ?? null;
     });
-    sqlite.prepare(`UPDATE doctors SET ${sets}, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`).run(...vals, id);
-    return sqlite.prepare("SELECT * FROM doctors WHERE id = ?").get(id);
+    sqlite.prepare(`UPDATE doctors SET ${sets}, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`).run(...vals, id2);
+    return sqlite.prepare("SELECT * FROM doctors WHERE id = ?").get(id2);
   }
-  const [updated] = await db.update(doctors).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(doctors.id, id)).returning();
+  const [updated] = await db.update(doctors).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(doctors.id, id2)).returning();
   return updated ?? null;
 }
 var init_dbPatients = __esm({
@@ -1253,6 +1262,20 @@ async function getDb() {
     }
   }
   return _db;
+}
+function getBatchClient() {
+  if (!_batchPg && process.env.DATABASE_URL) {
+    _batchPg = postgres(process.env.DATABASE_URL, {
+      max: 3,
+      prepare: false,
+      idle_timeout: 20,
+      connect_timeout: 15,
+      connection: {
+        search_path: "ktp, public"
+      }
+    });
+  }
+  return _batchPg;
 }
 async function upsertUser(user) {
   const db = await getDb();
@@ -1394,14 +1417,14 @@ async function countUnreadNotifications(patientId) {
   const result = await db.select({ count: sql3`count(*)` }).from(notifications).where(and2(eq2(notifications.patientId, patientId), eq2(notifications.read, false)));
   return Number(result[0]?.count ?? 0);
 }
-async function markNotificationRead(id, patientId) {
+async function markNotificationRead(id2, patientId) {
   const db = await getDb();
   if (!db) {
     const sqlite = getSqliteDb();
-    sqlite.prepare("UPDATE notifications SET read = 1 WHERE id = ? AND patientId = ?").run(id, patientId);
+    sqlite.prepare("UPDATE notifications SET read = 1 WHERE id = ? AND patientId = ?").run(id2, patientId);
     return;
   }
-  await db.update(notifications).set({ read: true }).where(and2(eq2(notifications.id, id), eq2(notifications.patientId, patientId)));
+  await db.update(notifications).set({ read: true }).where(and2(eq2(notifications.id, id2), eq2(notifications.patientId, patientId)));
 }
 async function markAllNotificationsRead(patientId) {
   const db = await getDb();
@@ -1441,7 +1464,7 @@ async function acquireReminderLock() {
 async function releaseReminderLock() {
   _reminderLockHeld = false;
 }
-var _db, _schemaEnsured, _reminderLockHeld;
+var _db, _batchPg, _schemaEnsured, _reminderLockHeld;
 var init_db = __esm({
   "server/db.ts"() {
     "use strict";
@@ -1451,6 +1474,7 @@ var init_db = __esm({
     init_localDb();
     init_dbPatients();
     _db = null;
+    _batchPg = null;
     _schemaEnsured = false;
     _reminderLockHeld = false;
   }
@@ -1933,7 +1957,7 @@ function registerStorageProxy(app) {
   });
 }
 
-// server/_core/systemRouter.ts
+// server/routers/clinical.ts
 import { z } from "zod";
 
 // server/_core/trpc.ts
@@ -1990,21 +2014,21 @@ var patientBaseProcedure = baseProcedure.use(
     if (!ctx.user) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     }
-    const patient = await getPatientByLinkedUserId(ctx.user.id);
-    if (!patient) {
+    const patient3 = await getPatientByLinkedUserId(ctx.user.id);
+    if (!patient3) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     }
     const userEmail = (ctx.user.email ?? "").trim().toLowerCase();
-    const patientEmail = (patient.accountEmail ?? "").trim().toLowerCase();
-    if (!userEmail || !patientEmail || userEmail !== patientEmail || patient.status !== "Active") {
+    const patientEmail = (patient3.accountEmail ?? "").trim().toLowerCase();
+    if (!userEmail || !patientEmail || userEmail !== patientEmail || patient3.status !== "Active") {
       throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     }
     return next({
       ctx: {
         ...ctx,
         user: ctx.user,
-        patientId: patient.id,
-        patient
+        patientId: patient3.id,
+        patient: patient3
       }
     });
   })
@@ -2012,10 +2036,10 @@ var patientBaseProcedure = baseProcedure.use(
 var patientProcedure = patientBaseProcedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
-    const patient = ctx.patient;
+    const patient3 = ctx.patient;
     const currentConsentVersion = await getSetting("consentVersion");
     const requiredVersion = currentConsentVersion ? parseInt(currentConsentVersion, 10) : 1;
-    const acceptedVersion = patient.consentVersion ?? 0;
+    const acceptedVersion = patient3.consentVersion ?? 0;
     if (acceptedVersion < requiredVersion) {
       throw new TRPCError({
         code: "FORBIDDEN",
@@ -2025,18 +2049,284 @@ var patientProcedure = patientBaseProcedure.use(
     return next({
       ctx: {
         ...ctx,
-        patientId: patient.id,
-        patient
+        patientId: patient3.id,
+        patient: patient3
       }
     });
   })
 );
 
+// server/dbClinical.ts
+init_clinicalCatalog();
+init_db();
+init_localDb();
+import { TRPCError as TRPCError2 } from "@trpc/server";
+var query = (sql4, ...args) => ({ sql: sql4, args });
+var fail = (message, code = "BAD_REQUEST") => {
+  throw new TRPCError2({ code, message });
+};
+async function execute(make) {
+  if (!process.env.DATABASE_URL) {
+    const db = getSqliteDb();
+    return db.transaction(() => {
+      const program = make();
+      let step = program.next();
+      while (!step.done) {
+        const statement = db.prepare(step.value.sql);
+        const rows = statement.reader ? statement.all(...step.value.args) : (statement.run(...step.value.args), []);
+        step = program.next(rows);
+      }
+      return step.value;
+    }).immediate();
+  }
+  if (!await getDb()) throw new Error("Database unavailable");
+  const client = getBatchClient();
+  await ensureCatalog();
+  return await client.begin(async (transaction) => {
+    const program = make();
+    let step = program.next();
+    while (!step.done) {
+      let parameter = 0;
+      const sql4 = step.value.sql.replace(/\?/g, () => `$${++parameter}`);
+      const rows = await transaction.unsafe(sql4, step.value.args);
+      step = program.next([...rows]);
+    }
+    return step.value;
+  });
+}
+function* patient(patientId) {
+  const rows = yield query('SELECT * FROM "patients" WHERE id = ?', patientId);
+  return rows[0] ?? fail("Patient not found", "NOT_FOUND");
+}
+function* audit(actor, patientId, action, id2) {
+  yield query(
+    'INSERT INTO "activityLog" ("actorUserId", "patientId", action, details) VALUES (?, ?, ?, ?)',
+    actor,
+    patientId,
+    action,
+    JSON.stringify({ id: id2 })
+  );
+}
+function dateOnly(value) {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : typeof value === "string" ? value.slice(0, 10) : null;
+}
+function service(row) {
+  return {
+    ...row,
+    dueDate: dateOnly(row.dueDate),
+    serviceDate: dateOnly(row.serviceDate),
+    claimDeadline: dateOnly(row.claimDeadline),
+    claimFiledDate: dateOnly(row.claimFiledDate)
+  };
+}
+function appointment(row) {
+  const iso = (value) => value instanceof Date ? value.toISOString() : new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value.replace(" ", "T")}Z`).toISOString();
+  return { ...row, startsAt: iso(row.startsAt), cancelledAt: row.cancelledAt ? iso(row.cancelledAt) : null };
+}
+async function getClinical(patientId) {
+  return execute(function* () {
+    const profile = yield* patient(patientId);
+    const services = yield query('SELECT * FROM "serviceRecords" WHERE "patientId" = ? ORDER BY "dueDate" DESC, id DESC', patientId);
+    const tests = yield query('SELECT * FROM "labTests" WHERE active = true ORDER BY "sortOrder", name');
+    const labs = yield query(`SELECT r.*, t.name AS "testName", t.unit, s."serviceDate"
+      FROM "labResults" r JOIN "labTests" t ON t.id = r."labTestId"
+      JOIN "serviceRecords" s ON s.id = r."serviceRecordId"
+      WHERE s."patientId" = ? AND s.status = 'Done' ORDER BY s."serviceDate" DESC, r.id DESC`, patientId);
+    const checklist = yield query(`SELECT c.*, c.id AS "catalogId", COALESCE(p.status, 'Pending') AS status, p."doneDate", p.note
+      FROM "checklistCatalog" c LEFT JOIN "patientChecklist" p ON p."catalogId" = c.id AND p."patientId" = ?
+      WHERE c.active = true AND (c."appliesTo" = 'Both' OR c."appliesTo" = ?) ORDER BY c.phase, c."sortOrder", c.id`, patientId, profile.patientType);
+    const visits = yield query('SELECT *, CAST("startsAt" AS TEXT) AS "startsAt", CAST("cancelledAt" AS TEXT) AS "cancelledAt" FROM appointments WHERE "patientId" = ? ORDER BY appointments."startsAt" DESC, id DESC', patientId);
+    return {
+      services: services.map(service),
+      labTests: tests,
+      labResults: labs.map((row) => ({ ...row, serviceDate: dateOnly(row.serviceDate) })),
+      checklist: checklist.map((row) => ({ ...row, asIndicated: Boolean(row.asIndicated), doneDate: dateOnly(row.doneDate) })),
+      appointments: visits.map(appointment)
+    };
+  });
+}
+async function listClinicalDashboard() {
+  return execute(function* () {
+    const services = yield query('SELECT s.* FROM "serviceRecords" s JOIN patients p ON p.id = s."patientId" WHERE p.status = ?', "Active");
+    const visits = yield query('SELECT a.*, CAST(a."startsAt" AS TEXT) AS "startsAt", CAST(a."cancelledAt" AS TEXT) AS "cancelledAt" FROM appointments a JOIN patients p ON p.id = a."patientId" WHERE p.status = ?', "Active");
+    return { services: services.map(service), appointments: visits.map(appointment) };
+  });
+}
+async function addService(input, actor) {
+  return execute(function* () {
+    yield* patient(input.patientId);
+    const [row] = yield query(
+      'INSERT INTO "serviceRecords" ("patientId", "serviceType", label, "dueDate", note) VALUES (?, ?, ?, ?, ?) RETURNING id',
+      input.patientId,
+      input.serviceType,
+      input.label,
+      input.dueDate,
+      input.note ?? null
+    );
+    yield* audit(actor, input.patientId, "clinical.service.add", row.id);
+    return { id: row.id };
+  });
+}
+async function recordResult(input, actor) {
+  return execute(function* () {
+    yield* patient(input.patientId);
+    const [current] = yield query('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.serviceRecordId, input.patientId);
+    if (!current) fail("Service not found", "NOT_FOUND");
+    if (current.status !== "Planned") fail("Only planned services can receive results", "CONFLICT");
+    if (input.results?.length && !["Laboratory", "Tacro"].includes(current.serviceType)) fail("Lab values require a laboratory or tacrolimus service");
+    const changed = yield query(
+      `UPDATE "serviceRecords" SET status = 'Done', "serviceDate" = ?, "claimDeadline" = ?, note = COALESCE(?, note), "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = ? AND "patientId" = ? AND status = 'Planned' RETURNING id`,
+      input.serviceDate,
+      input.claimDeadline ?? null,
+      input.note ?? null,
+      input.serviceRecordId,
+      input.patientId
+    );
+    if (!changed.length) fail("Service already changed; refresh and retry", "CONFLICT");
+    for (const value of input.results ?? []) {
+      const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', value.labTestId);
+      if (!test) fail("Lab test not found", "NOT_FOUND");
+      const numeric2 = Number(value.value);
+      const bound = (raw) => raw == null || String(raw).trim() === "" || !Number.isFinite(Number(raw)) ? null : Number(raw);
+      const low = bound(test.low), high = bound(test.high);
+      const flag = !Number.isFinite(numeric2) || low === null && high === null ? null : low !== null && numeric2 < low ? "Low" : high !== null && numeric2 > high ? "High" : "Normal";
+      yield query(
+        'INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?)',
+        input.serviceRecordId,
+        value.labTestId,
+        value.value,
+        test.low,
+        test.high,
+        flag
+      );
+    }
+    yield* audit(actor, input.patientId, "clinical.result.record", input.serviceRecordId);
+    return { id: input.serviceRecordId };
+  });
+}
+async function setChecklist(input, actor) {
+  return execute(function* () {
+    const profile = yield* patient(input.patientId);
+    const [catalog] = yield query('SELECT * FROM "checklistCatalog" WHERE id = ? AND active = true', input.catalogId);
+    if (!catalog || !["Both", profile.patientType].includes(catalog.appliesTo)) fail("Checklist item not found for this patient", "NOT_FOUND");
+    const [row] = yield query(
+      `INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate", note) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT ("patientId", "catalogId") DO UPDATE SET status = excluded.status, "doneDate" = excluded."doneDate", note = excluded.note, "updatedAt" = CURRENT_TIMESTAMP RETURNING id`,
+      input.patientId,
+      input.catalogId,
+      input.status,
+      input.status === "Done" ? input.doneDate : null,
+      input.note ?? null
+    );
+    yield* audit(actor, input.patientId, "clinical.checklist.update", row.id);
+    return { id: row.id };
+  });
+}
+async function addAppointment(input, actor) {
+  return execute(function* () {
+    yield* patient(input.patientId);
+    const [row] = yield query(
+      'INSERT INTO appointments ("patientId", title, kind, "startsAt", location, note) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+      input.patientId,
+      input.title,
+      input.kind,
+      new Date(input.startsAt).toISOString(),
+      input.location ?? null,
+      input.note ?? null
+    );
+    yield* audit(actor, input.patientId, "clinical.appointment.add", row.id);
+    return { id: row.id };
+  });
+}
+async function cancelAppointment(input, actor) {
+  return execute(function* () {
+    yield* patient(input.patientId);
+    const [row] = yield query('UPDATE appointments SET "cancelledAt" = CURRENT_TIMESTAMP, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "cancelledAt" IS NULL RETURNING id, title', input.id, input.patientId);
+    if (!row) fail("Appointment missing or already cancelled", "CONFLICT");
+    yield* audit(actor, input.patientId, "clinical.appointment.cancel", row.id);
+    return { id: input.id };
+  });
+}
+async function fileClaim(input, actor) {
+  return execute(function* () {
+    yield* patient(input.patientId);
+    const [current] = yield query('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.id, input.patientId);
+    if (!current) fail("Service not found", "NOT_FOUND");
+    if (!current.serviceDate || current.status === "Planned") fail("Record a result before filing a claim");
+    if (input.claimFiledDate < dateOnly(current.serviceDate)) fail("Claim filing cannot precede service date");
+    const changed = yield query('UPDATE "serviceRecords" SET "claimFiledDate" = ?, "updatedAt" = CURRENT_TIMESTAMP WHERE id = ? AND "patientId" = ? AND "claimFiledDate" IS NULL RETURNING id', input.claimFiledDate, input.id, input.patientId);
+    if (!changed.length) fail("Claim already filed", "CONFLICT");
+    yield* audit(actor, input.patientId, "clinical.claim.file", input.id);
+    return { id: input.id };
+  });
+}
+var catalogReady;
+function ensureCatalog() {
+  return catalogReady ??= getBatchClient().begin(async (tx) => {
+    await tx.unsafe('LOCK TABLE "labTests", "checklistCatalog" IN SHARE ROW EXCLUSIVE MODE');
+    const [labs] = await tx.unsafe('SELECT COUNT(*) AS count FROM "labTests"');
+    if (Number(labs.count) === 0) for (const [name, unit, sort] of LAB_CATALOG) {
+      await tx.unsafe('INSERT INTO "labTests" (name, unit, "sortOrder", active) VALUES ($1,$2,$3,true)', [name, unit, sort]);
+    }
+    const [items] = await tx.unsafe('SELECT COUNT(*) AS count FROM "checklistCatalog"');
+    if (Number(items.count) === 0) for (const [name, category, phase, appliesTo, asIndicated, sort] of CHECKLIST_CATALOG) {
+      await tx.unsafe('INSERT INTO "checklistCatalog" (name, category, phase, "appliesTo", "asIndicated", "sortOrder", active) VALUES ($1,$2,$3,$4,$5,$6,true)', [name, category, phase, appliesTo, Boolean(asIndicated), sort]);
+    }
+  }).then(() => void 0).catch((error) => {
+    catalogReady = void 0;
+    throw error;
+  });
+}
+
+// server/routers/clinical.ts
+init_ktp();
+var id = z.number().int().positive().safe();
+var patient2 = z.object({ patientId: id });
+var date2 = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const parsed = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value && value >= "1900-01-01";
+}, "Use a valid calendar date");
+var pastDate = date2.refine((value) => value <= todayDate(), "Date cannot be in the future");
+var note = z.string().trim().max(4e3).optional();
+var clinicalRouter = router({
+  get: adminProcedure.input(patient2).query(({ input }) => getClinical(input.patientId)),
+  addService: adminProcedure.input(patient2.extend({
+    serviceType: z.enum(["Meds", "Laboratory", "Tacro", "XrayUsd"]),
+    label: z.string().trim().min(1).max(200),
+    dueDate: date2,
+    note
+  })).mutation(({ input, ctx }) => addService(input, ctx.user.id)),
+  recordResult: adminProcedure.input(patient2.extend({
+    serviceRecordId: id,
+    serviceDate: pastDate,
+    claimDeadline: date2.optional(),
+    note,
+    results: z.array(z.object({ labTestId: id, value: z.string().trim().min(1).max(100) })).max(100).optional()
+  }).refine((input) => !input.claimDeadline || input.claimDeadline >= input.serviceDate, "Claim deadline cannot precede service date").refine((input) => new Set(input.results?.map((row) => row.labTestId)).size === (input.results?.length ?? 0), "Each lab test may occur once")).mutation(({ input, ctx }) => recordResult(input, ctx.user.id)),
+  setChecklist: adminProcedure.input(patient2.extend({
+    catalogId: id,
+    status: z.enum(["Pending", "Done", "NA"]),
+    doneDate: pastDate.optional(),
+    note
+  }).refine((input) => input.status !== "Done" || !!input.doneDate, "Completion date is required")).mutation(({ input, ctx }) => setChecklist(input, ctx.user.id)),
+  addAppointment: adminProcedure.input(patient2.extend({
+    title: z.string().trim().min(1).max(200),
+    kind: z.enum(["FollowUp", "Biopsy", "Workup", "Clearance", "Other"]),
+    startsAt: z.string().datetime({ offset: true }).refine((value) => Number.isFinite(new Date(value).getTime()), "Invalid appointment time"),
+    location: z.string().trim().max(300).optional(),
+    note
+  })).mutation(({ input, ctx }) => addAppointment(input, ctx.user.id)),
+  cancelAppointment: adminProcedure.input(patient2.extend({ id })).mutation(({ input, ctx }) => cancelAppointment(input, ctx.user.id)),
+  fileClaim: adminProcedure.input(patient2.extend({ id, claimFiledDate: pastDate })).mutation(({ input, ctx }) => fileClaim(input, ctx.user.id))
+});
+
 // server/_core/systemRouter.ts
+import { z as z2 } from "zod";
 var systemRouter = router({
   health: publicProcedure.input(
-    z.object({
-      timestamp: z.number().min(0, "timestamp cannot be negative")
+    z2.object({
+      timestamp: z2.number().min(0, "timestamp cannot be negative")
     })
   ).query(() => ({
     ok: true
@@ -2045,59 +2335,59 @@ var systemRouter = router({
 
 // server/routers/patients.ts
 init_db();
-import { TRPCError as TRPCError2 } from "@trpc/server";
-import { z as z2 } from "zod";
+import { TRPCError as TRPCError3 } from "@trpc/server";
+import { z as z3 } from "zod";
 init_adminAccess();
 init_ktp();
-var patientInputSchema = z2.object({
-  hrn: z2.string().min(1, "HRN is required").max(64),
-  patientType: z2.enum(PATIENT_TYPES),
-  firstName: z2.string().min(1, "First name is required").max(128),
-  middleName: z2.string().max(128).nullable().optional(),
-  lastName: z2.string().min(1, "Last name is required").max(128),
-  suffix: z2.string().max(32).nullable().optional(),
-  sex: z2.enum(["M", "F"]).nullable().optional(),
-  birthDate: z2.string().nullable().optional(),
-  contactNumber: z2.string().max(32).nullable().optional(),
-  accountEmail: z2.string().email("Valid Gmail account is required").max(320),
-  nephrologistId: z2.number().nullable().optional(),
-  fellowId: z2.number().nullable().optional(),
-  stage: z2.string().min(1, "Stage is required"),
-  riskCategory: z2.enum(RISK_CATEGORIES).nullable().optional(),
-  surgeryDate: z2.string().nullable().optional(),
-  linkedRecipientId: z2.number().nullable().optional(),
-  followupMonths: z2.number().int().min(1).max(3).default(1),
-  status: z2.enum(PATIENT_STATUSES).default("Active"),
-  photoFileId: z2.number().nullable().optional()
+var patientInputSchema = z3.object({
+  hrn: z3.string().min(1, "HRN is required").max(64),
+  patientType: z3.enum(PATIENT_TYPES),
+  firstName: z3.string().min(1, "First name is required").max(128),
+  middleName: z3.string().max(128).nullable().optional(),
+  lastName: z3.string().min(1, "Last name is required").max(128),
+  suffix: z3.string().max(32).nullable().optional(),
+  sex: z3.enum(["M", "F"]).nullable().optional(),
+  birthDate: z3.string().nullable().optional(),
+  contactNumber: z3.string().max(32).nullable().optional(),
+  accountEmail: z3.string().email("Valid Gmail account is required").max(320),
+  nephrologistId: z3.number().nullable().optional(),
+  fellowId: z3.number().nullable().optional(),
+  stage: z3.string().min(1, "Stage is required"),
+  riskCategory: z3.enum(RISK_CATEGORIES).nullable().optional(),
+  surgeryDate: z3.string().nullable().optional(),
+  linkedRecipientId: z3.number().nullable().optional(),
+  followupMonths: z3.number().int().min(1).max(3).default(1),
+  status: z3.enum(PATIENT_STATUSES).default("Active"),
+  photoFileId: z3.number().nullable().optional()
 });
 function validatePatientBusinessRules(data, patientId) {
   if (hasFullAccess(data.accountEmail)) {
-    throw new TRPCError2({
+    throw new TRPCError3({
       code: "BAD_REQUEST",
       message: "Patient Gmail cannot be on the admin email allowlist"
     });
   }
   if (!isValidStageForPatientType(data.stage, data.patientType)) {
-    throw new TRPCError2({
+    throw new TRPCError3({
       code: "BAD_REQUEST",
       message: `Stage '${data.stage}' is not valid for patient type '${data.patientType}'`
     });
   }
   if ((data.stage === "PostKT" || data.stage === "PostDonation") && !data.surgeryDate) {
-    throw new TRPCError2({
+    throw new TRPCError3({
       code: "BAD_REQUEST",
       message: `Surgery date is required when stage is '${data.stage}'`
     });
   }
   if (data.patientType === "Donor") {
     if (!data.linkedRecipientId) {
-      throw new TRPCError2({
+      throw new TRPCError3({
         code: "BAD_REQUEST",
         message: "Living donor must be linked to a recipient"
       });
     }
     if (patientId && data.linkedRecipientId === patientId) {
-      throw new TRPCError2({
+      throw new TRPCError3({
         code: "BAD_REQUEST",
         message: "Donor cannot be linked to themselves"
       });
@@ -2106,40 +2396,48 @@ function validatePatientBusinessRules(data, patientId) {
 }
 var patientsRouter = router({
   list: adminProcedure.input(
-    z2.object({
-      type: z2.enum(PATIENT_TYPES).optional(),
-      stage: z2.string().optional(),
-      doctorId: z2.number().optional(),
-      status: z2.enum(PATIENT_STATUSES).optional(),
-      search: z2.string().optional()
+    z3.object({
+      type: z3.enum(PATIENT_TYPES).optional(),
+      stage: z3.string().optional(),
+      doctorId: z3.number().optional(),
+      status: z3.enum(PATIENT_STATUSES).optional(),
+      search: z3.string().optional()
     }).optional()
   ).query(async ({ input }) => {
     return listPatients(input);
   }),
-  getById: adminProcedure.input(z2.object({ id: z2.number().int().positive().safe() })).query(async ({ ctx, input }) => {
-    const patient = await getPatientById(input.id);
-    if (!patient) {
-      throw new TRPCError2({ code: "NOT_FOUND", message: "Patient not found" });
+  getById: adminProcedure.input(
+    z3.object({
+      id: z3.number().int().positive().safe(),
+      allowMissing: z3.boolean().optional()
+    })
+  ).query(async ({ ctx, input }) => {
+    const patient3 = await getPatientById(input.id);
+    if (!patient3) {
+      if (input.allowMissing) {
+        return { patient: null, linkedRecipient: null, linkedDonors: [] };
+      }
+      throw new TRPCError3({ code: "NOT_FOUND", message: "Patient not found" });
     }
     await logActivity(
       ctx.user.id,
-      patient.id,
+      patient3.id,
       "VIEW_PATIENT_PROFILE",
-      { hrn: patient.hrn, name: `${patient.lastName}, ${patient.firstName}` },
+      { hrn: patient3.hrn, name: `${patient3.lastName}, ${patient3.firstName}` },
       ctx.req.ip,
       ctx.req.headers["user-agent"]
     );
     let linkedRecipient = null;
-    if (patient.linkedRecipientId) {
-      linkedRecipient = await getPatientById(patient.linkedRecipientId);
+    if (patient3.linkedRecipientId) {
+      linkedRecipient = await getPatientById(patient3.linkedRecipientId);
     }
     let linkedDonors = [];
-    if (patient.patientType === "Recipient") {
+    if (patient3.patientType === "Recipient") {
       const allPatients = await listPatients({ type: "Donor" });
-      linkedDonors = allPatients.filter((p) => p.linkedRecipientId === patient.id);
+      linkedDonors = allPatients.filter((p) => p.linkedRecipientId === patient3.id);
     }
     return {
-      patient,
+      patient: patient3,
       linkedRecipient,
       linkedDonors
     };
@@ -2148,11 +2446,11 @@ var patientsRouter = router({
     validatePatientBusinessRules(input);
     const existingHrn = await getPatientByHrn(input.hrn);
     if (existingHrn) {
-      throw new TRPCError2({ code: "CONFLICT", message: "A patient with this HRN already exists" });
+      throw new TRPCError3({ code: "CONFLICT", message: "A patient with this HRN already exists" });
     }
     const existingEmail = await getPatientByAccountEmail(input.accountEmail);
     if (existingEmail) {
-      throw new TRPCError2({
+      throw new TRPCError3({
         code: "CONFLICT",
         message: "A patient with this Gmail account is already enrolled"
       });
@@ -2160,7 +2458,7 @@ var patientsRouter = router({
     if (input.patientType === "Donor" && input.linkedRecipientId) {
       const recipient = await getPatientById(input.linkedRecipientId);
       if (!recipient || recipient.patientType !== "Recipient") {
-        throw new TRPCError2({
+        throw new TRPCError3({
           code: "BAD_REQUEST",
           message: "Linked recipient not found or is not a recipient profile"
         });
@@ -2178,14 +2476,14 @@ var patientsRouter = router({
     return created;
   }),
   update: adminProcedure.input(
-    z2.object({
-      id: z2.number().int().positive().safe(),
+    z3.object({
+      id: z3.number().int().positive().safe(),
       data: patientInputSchema.partial()
     })
   ).mutation(async ({ ctx, input }) => {
     const existing = await getPatientById(input.id);
     if (!existing) {
-      throw new TRPCError2({ code: "NOT_FOUND", message: "Patient not found" });
+      throw new TRPCError3({ code: "NOT_FOUND", message: "Patient not found" });
     }
     const merged = {
       ...existing,
@@ -2195,13 +2493,13 @@ var patientsRouter = router({
     if (input.data.hrn && input.data.hrn !== existing.hrn) {
       const dupHrn = await getPatientByHrn(input.data.hrn);
       if (dupHrn && dupHrn.id !== input.id) {
-        throw new TRPCError2({ code: "CONFLICT", message: "A patient with this HRN already exists" });
+        throw new TRPCError3({ code: "CONFLICT", message: "A patient with this HRN already exists" });
       }
     }
     if (input.data.accountEmail && input.data.accountEmail.toLowerCase() !== existing.accountEmail.toLowerCase()) {
       const dupEmail = await getPatientByAccountEmail(input.data.accountEmail);
       if (dupEmail && dupEmail.id !== input.id) {
-        throw new TRPCError2({
+        throw new TRPCError3({
           code: "CONFLICT",
           message: "A patient with this Gmail account is already enrolled"
         });
@@ -2210,7 +2508,7 @@ var patientsRouter = router({
     if (merged.patientType === "Donor" && merged.linkedRecipientId) {
       const recipient = await getPatientById(merged.linkedRecipientId);
       if (!recipient || recipient.patientType !== "Recipient") {
-        throw new TRPCError2({
+        throw new TRPCError3({
           code: "BAD_REQUEST",
           message: "Linked recipient not found or is not a recipient profile"
         });
@@ -2228,15 +2526,15 @@ var patientsRouter = router({
     return updated;
   }),
   archive: adminProcedure.input(
-    z2.object({
-      id: z2.number().int().positive().safe(),
-      status: z2.enum(["Inactive", "Deceased", "Transferred"]),
-      reason: z2.string().optional()
+    z3.object({
+      id: z3.number().int().positive().safe(),
+      status: z3.enum(["Inactive", "Deceased", "Transferred"]),
+      reason: z3.string().optional()
     })
   ).mutation(async ({ ctx, input }) => {
     const existing = await getPatientById(input.id);
     if (!existing) {
-      throw new TRPCError2({ code: "NOT_FOUND", message: "Patient not found" });
+      throw new TRPCError3({ code: "NOT_FOUND", message: "Patient not found" });
     }
     const updated = await updatePatient(input.id, { status: input.status });
     await logActivity(
@@ -2249,60 +2547,60 @@ var patientsRouter = router({
     );
     return updated;
   }),
-  activityLogs: adminProcedure.input(z2.object({ patientId: z2.number().int().positive().safe(), limit: z2.number().optional() })).query(async ({ input }) => {
+  activityLogs: adminProcedure.input(z3.object({ patientId: z3.number().int().positive().safe(), limit: z3.number().optional() })).query(async ({ input }) => {
     return listActivityLogs(input.patientId, input.limit ?? 50);
   })
 });
 
 // server/routers/doctors.ts
 init_db();
-import { TRPCError as TRPCError3 } from "@trpc/server";
-import { z as z3 } from "zod";
+import { TRPCError as TRPCError4 } from "@trpc/server";
+import { z as z4 } from "zod";
 init_ktp();
 var doctorsRouter = router({
   list: protectedProcedure.input(
-    z3.object({
-      role: z3.enum(DOCTOR_ROLES).optional(),
-      activeOnly: z3.boolean().default(true)
+    z4.object({
+      role: z4.enum(DOCTOR_ROLES).optional(),
+      activeOnly: z4.boolean().default(true)
     }).optional()
   ).query(async ({ input }) => {
     return listDoctors(input);
   }),
-  getById: adminProcedure.input(z3.object({ id: z3.number() })).query(async ({ input }) => {
+  getById: adminProcedure.input(z4.object({ id: z4.number() })).query(async ({ input }) => {
     const doc = await getDoctorById(input.id);
     if (!doc) {
-      throw new TRPCError3({ code: "NOT_FOUND", message: "Doctor not found" });
+      throw new TRPCError4({ code: "NOT_FOUND", message: "Doctor not found" });
     }
     return doc;
   }),
   create: adminProcedure.input(
-    z3.object({
-      name: z3.string().min(1, "Doctor name is required").max(128),
-      role: z3.enum(DOCTOR_ROLES),
-      active: z3.boolean().default(true)
+    z4.object({
+      name: z4.string().min(1, "Doctor name is required").max(128),
+      role: z4.enum(DOCTOR_ROLES),
+      active: z4.boolean().default(true)
     })
   ).mutation(async ({ input }) => {
     return createDoctor(input);
   }),
   update: adminProcedure.input(
-    z3.object({
-      id: z3.number(),
-      name: z3.string().min(1).max(128).optional(),
-      role: z3.enum(DOCTOR_ROLES).optional(),
-      active: z3.boolean().optional()
+    z4.object({
+      id: z4.number(),
+      name: z4.string().min(1).max(128).optional(),
+      role: z4.enum(DOCTOR_ROLES).optional(),
+      active: z4.boolean().optional()
     })
   ).mutation(async ({ input }) => {
-    const { id, ...data } = input;
-    const updated = await updateDoctor(id, data);
+    const { id: id2, ...data } = input;
+    const updated = await updateDoctor(id2, data);
     if (!updated) {
-      throw new TRPCError3({ code: "NOT_FOUND", message: "Doctor not found" });
+      throw new TRPCError4({ code: "NOT_FOUND", message: "Doctor not found" });
     }
     return updated;
   })
 });
 
 // server/routers/settings.ts
-import { z as z4 } from "zod";
+import { z as z5 } from "zod";
 init_db();
 var settingsRouter = router({
   getAll: adminProcedure.query(async () => {
@@ -2325,13 +2623,13 @@ var settingsRouter = router({
     };
   }),
   update: adminProcedure.input(
-    z4.object({
-      emergencyHotlineText: z4.string().max(1e3).optional(),
-      consentNoticeText: z4.string().max(5e3).optional(),
-      consentVersion: z4.number().int().min(1).optional(),
-      appTitle: z4.string().max(128).optional(),
-      orgName: z4.string().max(128).optional(),
-      contactEmail: z4.string().email().or(z4.literal("")).optional()
+    z5.object({
+      emergencyHotlineText: z5.string().max(1e3).optional(),
+      consentNoticeText: z5.string().max(5e3).optional(),
+      consentVersion: z5.number().int().min(1).optional(),
+      appTitle: z5.string().max(128).optional(),
+      orgName: z5.string().max(128).optional(),
+      contactEmail: z5.string().email().or(z5.literal("")).optional()
     })
   ).mutation(async ({ ctx, input }) => {
     if (input.emergencyHotlineText !== void 0) {
@@ -2369,7 +2667,7 @@ init_db();
 init_ktp();
 var dashboardRouter = router({
   initial: adminProcedure.query(async () => {
-    const patients2 = await listPatients();
+    const [patients2, clinical] = await Promise.all([listPatients(), listClinicalDashboard()]);
     const today = todayDate();
     const active = patients2.filter((p) => p.status === "Active");
     const recipients = active.filter((p) => p.patientType === "Recipient");
@@ -2383,6 +2681,7 @@ var dashboardRouter = router({
       donorStages[p.stage] = (donorStages[p.stage] || 0) + 1;
     }
     return {
+      ...clinical,
       today,
       patients: patients2,
       activeCount: active.length,
@@ -2400,7 +2699,7 @@ var dashboardRouter = router({
 });
 
 // server/routers/notifications.ts
-import { z as z5 } from "zod";
+import { z as z6 } from "zod";
 init_db();
 var notificationsRouter = router({
   myList: patientProcedure.query(async ({ ctx }) => {
@@ -2409,7 +2708,7 @@ var notificationsRouter = router({
   myUnreadCount: patientProcedure.query(async ({ ctx }) => {
     return countUnreadNotifications(ctx.patientId);
   }),
-  markMyRead: patientProcedure.input(z5.object({ id: z5.number() })).mutation(async ({ ctx, input }) => {
+  markMyRead: patientProcedure.input(z6.object({ id: z6.number() })).mutation(async ({ ctx, input }) => {
     await markNotificationRead(input.id, ctx.patientId);
     return { success: true };
   }),
@@ -2421,43 +2720,43 @@ var notificationsRouter = router({
 
 // server/routers/patientPortal.ts
 init_db();
-import { TRPCError as TRPCError4 } from "@trpc/server";
-import { z as z6 } from "zod";
+import { TRPCError as TRPCError5 } from "@trpc/server";
+import { z as z7 } from "zod";
 var patientPortalRouter = router({
   getMyProfile: patientProcedure.query(async ({ ctx }) => {
-    const patient = await getPatientById(ctx.patientId);
-    if (!patient) {
-      throw new TRPCError4({ code: "NOT_FOUND", message: "Patient profile not found" });
+    const patient3 = await getPatientById(ctx.patientId);
+    if (!patient3) {
+      throw new TRPCError5({ code: "NOT_FOUND", message: "Patient profile not found" });
     }
     let nephrologist = null;
-    if (patient.nephrologistId) {
-      nephrologist = await getDoctorById(patient.nephrologistId);
+    if (patient3.nephrologistId) {
+      nephrologist = await getDoctorById(patient3.nephrologistId);
     }
     let fellow = null;
-    if (patient.fellowId) {
-      fellow = await getDoctorById(patient.fellowId);
+    if (patient3.fellowId) {
+      fellow = await getDoctorById(patient3.fellowId);
     }
     let linkedRecipientName = null;
-    if (patient.linkedRecipientId) {
-      const recipient = await getPatientById(patient.linkedRecipientId);
+    if (patient3.linkedRecipientId) {
+      const recipient = await getPatientById(patient3.linkedRecipientId);
       if (recipient) {
         linkedRecipientName = `${recipient.firstName} ${recipient.lastName}`;
       }
     }
     return {
-      patient,
+      patient: patient3,
       nephrologist,
       fellow,
       linkedRecipientName
     };
   }),
-  updateContact: patientProcedure.input(z6.object({ contactNumber: z6.string().max(32).nullable() })).mutation(async ({ ctx, input }) => {
+  updateContact: patientProcedure.input(z7.object({ contactNumber: z7.string().max(32).nullable() })).mutation(async ({ ctx, input }) => {
     const updated = await updatePatient(ctx.patientId, {
       contactNumber: input.contactNumber
     });
     return updated;
   }),
-  updatePhoto: patientProcedure.input(z6.object({ photoFileId: z6.number().nullable() })).mutation(async ({ ctx, input }) => {
+  updatePhoto: patientProcedure.input(z7.object({ photoFileId: z7.number().nullable() })).mutation(async ({ ctx, input }) => {
     const updated = await updatePatient(ctx.patientId, {
       photoFileId: input.photoFileId
     });
@@ -2474,26 +2773,26 @@ var appRouter = router({
     me: publicProcedure.query(async ({ ctx }) => {
       if (!ctx.user) return null;
       const isAdmin = hasFullAccess(ctx.user.email);
-      let patient = null;
+      let patient3 = null;
       let consentRequired = false;
       if (!isAdmin) {
-        patient = await getPatientByLinkedUserId(ctx.user.id);
-        if (patient) {
+        patient3 = await getPatientByLinkedUserId(ctx.user.id);
+        if (patient3) {
           const userEmail = (ctx.user.email ?? "").trim().toLowerCase();
-          const patientEmail = (patient.accountEmail ?? "").trim().toLowerCase();
-          if (userEmail !== patientEmail || patient.status !== "Active") {
-            patient = null;
+          const patientEmail = (patient3.accountEmail ?? "").trim().toLowerCase();
+          if (userEmail !== patientEmail || patient3.status !== "Active") {
+            patient3 = null;
           } else {
             const currentConsent = await getSetting("consentVersion");
             const reqVersion = currentConsent ? parseInt(currentConsent, 10) : 1;
-            consentRequired = (patient.consentVersion ?? 0) < reqVersion;
+            consentRequired = (patient3.consentVersion ?? 0) < reqVersion;
           }
         }
       }
       return {
         ...ctx.user,
         isAdmin,
-        patient,
+        patient: patient3,
         consentRequired
       };
     }),
@@ -2525,6 +2824,7 @@ var appRouter = router({
       return { success: true };
     })
   }),
+  clinical: clinicalRouter,
   patients: patientsRouter,
   doctors: doctorsRouter,
   settings: settingsRouter,

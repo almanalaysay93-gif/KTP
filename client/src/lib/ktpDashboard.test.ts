@@ -95,7 +95,7 @@ describe("live dashboard data consistency", () => {
   it("shows only active patients' planned services due within seven days", () => {
     const record: ServiceRecord = {
       id: "service-1",
-      patientId: "101",
+      patientId: 101,
       serviceType: "Meds",
       label: "Meds",
       status: "Planned",
@@ -109,12 +109,15 @@ describe("live dashboard data consistency", () => {
       source: "Manual",
       note: null,
     };
-    const data = liveDashboardData([{ ...base, id: "101" }]);
+    const data = liveDashboardData([base]);
     data.serviceRecords = [
       record,
       { ...record, id: "done", status: "Done" },
       { ...record, id: "later", dueDate: "2026-10-09" },
     ];
+    data.serviceRecords.push({ ...record, id: "overdue", dueDate: "2026-09-30" });
+    const agg = liveDashboardAggregates(data, today);
+    expect(agg.overdueServices[0]).toMatchObject({ patient: { id: 101 }, daysOverdue: 1 });
     expect(servicesDueSoon(data, today).map(r => r.record.id)).toEqual([
       "service-1",
     ]);

@@ -209,13 +209,15 @@ export function TriagePanel({
     <ClayCard
       id={id}
       role="region"
+      tabIndex={-1}
       aria-labelledby={titleId}
-      className="flex min-w-0 flex-col"
+      className="flex min-w-0 scroll-mt-20 flex-col outline-none"
     >
       <div className="relative mb-2 flex items-start justify-between gap-3 pb-3">
         <div className="min-w-0">
           <h2
             id={titleId}
+            aria-live="polite"
             className="type-title flex flex-wrap items-baseline gap-x-2 text-ink"
           >
             <span>{meta.title}</span>

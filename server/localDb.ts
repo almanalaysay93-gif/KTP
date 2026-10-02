@@ -1,3 +1,4 @@
+import { LAB_CATALOG, CHECKLIST_CATALOG } from "./clinicalCatalog";
 import type Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
@@ -298,24 +299,7 @@ function initSchemaAndSeed(db: Database.Database) {
   const labCount = db.prepare("SELECT count(*) as count FROM labTests").get() as { count: number };
   if (labCount.count === 0) {
     const insertLab = db.prepare("INSERT INTO labTests (name, unit, sortOrder, active) VALUES (?, ?, ?, 1)");
-    const tests = [
-      ["Hemoglobin", "g/L", 1],
-      ["WBC", "x10^9/L", 2],
-      ["Platelets", "x10^9/L", 3],
-      ["Creatinine", "umol/L", 4],
-      ["BUN", "mmol/L", 5],
-      ["FBS", "mmol/L", 6],
-      ["Sodium", "mmol/L", 7],
-      ["Potassium", "mmol/L", 8],
-      ["ALT (SGPT)", "U/L", 9],
-      ["Tacrolimus trough", "ng/mL", 10],
-      ["Total cholesterol", "mmol/L", 11],
-      ["Triglycerides", "mmol/L", 12],
-      ["HDL", "mmol/L", 13],
-      ["LDL", "mmol/L", 14],
-      ["CMV PCR", "IU/mL", 15],
-    ] as const;
-    for (const [name, unit, sort] of tests) {
+    for (const [name, unit, sort] of LAB_CATALOG) {
       insertLab.run(name, unit, sort);
     }
   }
@@ -326,76 +310,8 @@ function initSchemaAndSeed(db: Database.Database) {
     const insertChecklist = db.prepare(
       "INSERT INTO checklistCatalog (name, category, phase, appliesTo, asIndicated, sortOrder, active) VALUES (?, ?, ?, ?, ?, ?, 1)"
     );
-    const items: [string, string, number | null, string, number, number][] = [
-      // Milestones
-      ["Pre-transplant orientation", "Milestone", null, "Both", 0, 1],
-      ["Initial nephrology assessment", "Milestone", null, "Both", 0, 2],
-      ["HTEC evaluation and approval", "Milestone", null, "Both", 0, 3],
-      ["CDTE and risk stratification", "Milestone", null, "Recipient", 0, 4],
-      ["PhilHealth Z Package qualification and application", "Milestone", null, "Recipient", 0, 5],
 
-      // Phase 1 labs
-      ["CBC with differential", "Lab", 1, "Both", 0, 10],
-      ["Blood typing ABO and Rh", "Lab", 1, "Both", 0, 11],
-      ["BT, CT, PT/INR, aPTT", "Lab", 1, "Both", 0, 12],
-      ["FBS and HbA1c", "Lab", 1, "Both", 0, 13],
-      ["Creatinine, BUN, uric acid", "Lab", 1, "Both", 0, 14],
-      ["SGPT, SGOT, ALP", "Lab", 1, "Both", 0, 15],
-      ["Na, K, Ca, phosphorus, Mg", "Lab", 1, "Both", 0, 16],
-      ["Lipid profile", "Lab", 1, "Both", 0, 17],
-      ["Albumin and total protein", "Lab", 1, "Both", 0, 18],
-      ["iPTH", "Lab", 1, "Both", 0, 19],
-      ["Hepatitis B markers", "Lab", 1, "Both", 0, 20],
-      ["Anti-HCV", "Lab", 1, "Both", 0, 21],
-      ["TPPA/VDRL/RPR", "Lab", 1, "Both", 0, 22],
-      ["HIV", "Lab", 1, "Both", 0, 23],
-      ["Malaria (BSMP)", "Lab", 1, "Both", 0, 24],
-      ["CMV IgG", "Lab", 1, "Both", 0, 25],
-      ["EBV IgG", "Lab", 1, "Both", 0, 26],
-      ["Varicella IgG", "Lab", 1, "Both", 0, 27],
-      ["TB Quantiferon", "Lab", 1, "Both", 0, 28],
-      ["Throat swab GS and C/S", "Lab", 1, "Both", 0, 29],
-      ["Urinalysis with microscopy", "Lab", 1, "Both", 0, 30],
-      ["Urine C/S", "Lab", 1, "Both", 0, 31],
-      ["UACR or 24-hour urine protein and creatinine", "Lab", 1, "Both", 0, 32],
-      ["Fecalysis with occult blood or FIT", "Lab", 1, "Both", 0, 33],
-      ["Pregnancy test", "Lab", 1, "Both", 1, 34],
-
-      // Phase 1 imaging
-      ["Chest X-ray PA", "Imaging", 1, "Both", 0, 40],
-      ["12-lead ECG", "Imaging", 1, "Both", 0, 41],
-      ["Whole abdomen ultrasound", "Imaging", 1, "Both", 0, 42],
-      ["2D echo with Doppler", "Imaging", 1, "Both", 0, 43],
-
-      // Phase 2
-      ["HLA typing class I and II", "Lab", 2, "Both", 0, 50],
-      ["PRA screening class I, II, MICA", "Lab", 2, "Recipient", 0, 51],
-      ["Single antigen bead / DSA", "Lab", 2, "Recipient", 0, 52],
-      ["T and B cell crossmatch", "Lab", 2, "Recipient", 0, 53],
-      ["Renal CT angiography with 3D reconstruction", "Imaging", 2, "Donor", 0, 54],
-      ["Nuclear GFR scan (split function)", "Imaging", 2, "Donor", 0, 55],
-      ["Aorto-iliac duplex ultrasound", "Imaging", 2, "Donor", 0, 56],
-
-      // Phase 3
-      ["Repeat chest X-ray", "Imaging", 3, "Both", 0, 60],
-      ["Repeat urinalysis and CBC", "Lab", 3, "Both", 0, 61],
-      ["RT-PCR on admission day", "Lab", 3, "Both", 0, 62],
-      ["Pre-transplant HD or PD session", "Clearance", 3, "Recipient", 1, 63],
-
-      // Clearances
-      ["Cardiology", "Clearance", null, "Both", 0, 70],
-      ["Infectious disease", "Clearance", null, "Both", 0, 71],
-      ["Dental", "Clearance", null, "Both", 0, 72],
-      ["Neuropsychiatric", "Clearance", null, "Both", 0, 73],
-      ["Endocrinology", "Clearance", null, "Both", 0, 74],
-      ["Donor advocate", "Clearance", null, "Donor", 0, 75],
-      ["Gastroenterology or hepatology", "Clearance", null, "Both", 1, 76],
-      ["Pulmonology", "Clearance", null, "Both", 1, 77],
-      ["Urology", "Clearance", null, "Both", 1, 78],
-      ["OB-Gyn with Pap smear or mammogram", "Clearance", null, "Both", 1, 79],
-    ];
-
-    for (const [name, cat, phase, applies, asInd, sort] of items) {
+    for (const [name, cat, phase, applies, asInd, sort] of CHECKLIST_CATALOG) {
       insertChecklist.run(name, cat, phase, applies, asInd, sort);
     }
   }

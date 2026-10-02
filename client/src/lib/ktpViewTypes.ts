@@ -80,7 +80,7 @@ export type RepeatReason =
 
 export interface ServiceRecord {
   id: string;
-  patientId: string;
+  patientId: string | number;
   serviceType: ServiceType;
   label: string;
   status: ServiceStatus;
@@ -130,7 +130,7 @@ export type AppointmentResponse =
 
 export interface Appointment {
   id: string;
-  patientId: string;
+  patientId: string | number;
   title: string;
   kind: AppointmentKind;
   startsAt: ISODateTime;
@@ -146,7 +146,7 @@ export type MessageAudience = "OnePatient" | "AllRecipients";
 
 export interface Message {
   id: string;
-  patientId: string;
+  patientId: string | number;
   audience: MessageAudience;
   title: string;
   body: string;

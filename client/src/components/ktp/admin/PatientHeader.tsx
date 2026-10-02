@@ -32,7 +32,7 @@ export interface PatientHeaderProps {
   linked: Patient | null;
   doctors: Doctor[];
   backHref: string;
-  onRecordResult: () => void;
+  onRecordResult?: () => void;
   onSendMessage?: () => void;
   onEdit: () => void;
   onOpenLinked: (patient: Patient) => void;
@@ -119,13 +119,15 @@ export function PatientHeader({
           >
             <Pencil strokeWidth={1.75} />
           </MotionClayButton>
-          <MotionClayButton
-            size="sm"
-            icon={<ClipboardPen strokeWidth={1.75} />}
-            onClick={onRecordResult}
-          >
-            Record result
-          </MotionClayButton>
+          {onRecordResult ? (
+            <MotionClayButton
+              size="sm"
+              icon={<ClipboardPen strokeWidth={1.75} />}
+              onClick={onRecordResult}
+            >
+              Record result
+            </MotionClayButton>
+          ) : null}
         </div>
       </div>
 
