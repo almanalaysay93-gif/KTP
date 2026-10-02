@@ -62,7 +62,7 @@ function suite(name: string, open: () => Promise<{ run: Run; close: () => Promis
       expect(tests.map(test => test.name).sort()).toEqual(LAB_CATALOG.map(test => test[0]).sort());
       expect((await catalog(run)).map(item => [item.name, item.phase, item.sortOrder])).toEqual([
         ["Creatinine", 1, 141], ["BUN", 1, 142], ["Uric acid", 1, 143], ["HIV", 1, 230],
-        ["Repeat urinalysis", 3, 611], ["Repeat CBC", 3, 612], ["Cardiology", null, 700],
+        ["Repeat urinalysis", 3, 611], ["Repeat CBC", 3, 612], ["Cardiology", null, 700], ["Ethics committee", null, 755],
       ]);
       const expected = [
         { patientId: 7, name: "Creatinine", status: "Done", doneDate: "2026-09-02", note: "Outside laboratory" },
@@ -79,7 +79,25 @@ function suite(name: string, open: () => Promise<{ run: Run; close: () => Promis
       const second = await sync(run);
       expect(second.every(sql => sql.trimStart().startsWith("SELECT"))).toBe(true);
       expect(await progress(run)).toEqual(expected);
-      expect(await catalog(run)).toHaveLength(7);
+      expect(await catalog(run)).toHaveLength(8);
+      await close();
+    });
+    it("adds the Ethics committee clearance one time to a database that has the split catalog", async () => {
+      const { run, close } = await open();
+      await sync(run);
+      // The state of a database before the item was added.
+      await run(`DELETE FROM "checklistCatalog" WHERE name = 'Ethics committee'`);
+      await sync(run);
+      await sync(run);
+      const clearances = await run(`SELECT name, "appliesTo", "sortOrder", phase FROM "checklistCatalog" WHERE category = 'Clearance' AND phase IS NULL AND active = true ORDER BY "sortOrder"`);
+      expect(clearances.map(item => item.name)).toEqual(["Cardiology", "Infectious disease", "Dental", "Neuropsychiatric", "Endocrinology", "Donor advocate", "Ethics committee", "Gastroenterology or hepatology", "Pulmonology", "Urology", "OB-Gyn with Pap smear or mammogram"]);
+      expect(clearances.find(item => item.name === "Ethics committee")).toMatchObject({ appliesTo: "Both", sortOrder: 755, phase: null });
+      expect(await catalog(run)).toHaveLength(CHECKLIST_CATALOG.length);
+      // An item that was set inactive is not added again.
+      await run(`UPDATE "checklistCatalog" SET active = false WHERE name = 'Ethics committee'`);
+      await sync(run);
+      expect(await run(`SELECT count(*) AS n FROM "checklistCatalog" WHERE name = 'Ethics committee'`)).toEqual([{ n: expect.anything() }]);
+      expect(Number((await run(`SELECT count(*) AS n FROM "checklistCatalog" WHERE name = 'Ethics committee'`))[0].n)).toBe(1);
       await close();
     });
   });

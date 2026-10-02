@@ -114,11 +114,19 @@ const PANEL_CATALOG: ChecklistRow[] = [
       ["Urology", "Clearance", null, "Both", 1, 78],
       ["OB-Gyn with Pap smear or mammogram", "Clearance", null, "Both", 1, 79],
     ];
+/** Items added after the first catalog, with the final sort order. A database of any age gets each one once. */
+const ADDED_ITEMS: ChecklistRow[] = [
+  // Between "Donor advocate" (750) and "Gastroenterology or hepatology" (760).
+  ["Ethics committee", "Clearance", null, "Both", 0, 755],
+];
+
 /** Sort order of the split catalog: ten times the first order, plus the position of a test in its panel. */
 export const CHECKLIST_CATALOG: ChecklistRow[] = PANEL_CATALOG.flatMap(([name, category, phase, appliesTo, asIndicated, sort]): ChecklistRow[] =>
   CHECKLIST_SPLITS[name]
     ? CHECKLIST_SPLITS[name].map((test, index) => [test, category, phase, appliesTo, asIndicated, sort * 10 + index + 1])
-    : [[name, category, phase, appliesTo, asIndicated, sort * 10]]);
+    : [[name, category, phase, appliesTo, asIndicated, sort * 10]])
+  .concat(ADDED_ITEMS)
+  .sort((a, b) => a[5] - b[5]);
 
 type Row = Record<string, any>;
 type Query = { sql: string; args: unknown[] };
@@ -129,7 +137,7 @@ const flag = (value: unknown) => (value ? "true" : "false");
  * Brings the catalogs of a database to the current lists. An empty database gets the full lists.
  * A database with the first catalog gets the added lab tests, and each active panel is replaced
  * by its tests: the patient progress of the panel is copied to each test, then the panel is set
- * inactive. A second run changes nothing. PostgreSQL and SQLite run the same statements.
+ * inactive. An item of ADDED_ITEMS that the database does not have is added. A second run changes nothing. PostgreSQL and SQLite run the same statements.
  */
 export function* syncCatalog(): Generator<Query, void, Row[]> {
   const tests = new Set((yield query('SELECT name FROM "labTests"')).map(row => row.name));
@@ -145,8 +153,7 @@ export function* syncCatalog(): Generator<Query, void, Row[]> {
     return;
   }
   const panels = items.filter(item => item.active && CHECKLIST_SPLITS[item.name]);
-  if (panels.length === 0) return;
-  yield query('UPDATE "checklistCatalog" SET "sortOrder" = "sortOrder" * 10');
+  if (panels.length > 0) yield query('UPDATE "checklistCatalog" SET "sortOrder" = "sortOrder" * 10');
   for (const panel of panels) {
     for (const [index, name] of CHECKLIST_SPLITS[panel.name].entries()) {
       let [item] = yield query('SELECT id FROM "checklistCatalog" WHERE name = ? AND phase = ? AND active = true', name, panel.phase);
@@ -156,5 +163,9 @@ export function* syncCatalog(): Generator<Query, void, Row[]> {
         ON CONFLICT ("patientId", "catalogId") DO NOTHING`, item.id, panel.id);
     }
     yield query('UPDATE "checklistCatalog" SET active = false WHERE id = ?', panel.id);
+  }
+  // An added item is matched by name and category, active or not: an item that was set inactive stays inactive.
+  for (const row of ADDED_ITEMS) {
+    if (!items.some(item => item.name === row[0] && item.category === row[1])) yield insertItem(row);
   }
 }
