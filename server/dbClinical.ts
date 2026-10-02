@@ -115,6 +115,14 @@ export async function addService(input: AddService, actor: number) {
   });
 }
 
+function labFlag(value: string, lowRaw: unknown, highRaw: unknown): "Low" | "Normal" | "High" | null {
+  const numeric = Number(value);
+  const bound = (raw: unknown) => raw == null || String(raw).trim() === "" || !Number.isFinite(Number(raw)) ? null : Number(raw);
+  const low = bound(lowRaw), high = bound(highRaw);
+  return !Number.isFinite(numeric) || (low === null && high === null) ? null :
+    low !== null && numeric < low ? "Low" : high !== null && numeric > high ? "High" : "Normal";
+}
+
 export type RecordResult = {
   patientId: number;
   serviceRecordId: number;
@@ -145,11 +153,7 @@ export async function recordResult(input: RecordResult, actor: number) {
     for (const value of input.results ?? []) {
       const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', value.labTestId);
       if (!test) fail("Lab test not found", "NOT_FOUND");
-      const numeric = Number(value.value);
-      const bound = (raw: unknown) => raw == null || String(raw).trim() === "" || !Number.isFinite(Number(raw)) ? null : Number(raw);
-      const low = bound(test.low), high = bound(test.high);
-      const flag = !Number.isFinite(numeric) || (low === null && high === null) ? null :
-        low !== null && numeric < low ? "Low" : high !== null && numeric > high ? "High" : "Normal";
+      const flag = labFlag(value.value, test.low, test.high);
       yield query('INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?)',
         input.serviceRecordId, value.labTestId, value.value, test.low, test.high, flag);
     }
@@ -161,17 +165,91 @@ export async function recordResult(input: RecordResult, actor: number) {
   });
 }
 
+export type UpdateService = {
+  patientId: number;
+  id: number;
+  reason: string;
+  label?: string;
+  dueDate?: string;
+  serviceDate?: string;
+  claimDeadline?: string | null;
+  claimFiledDate?: string | null;
+  note?: string | null;
+  /** A blank value removes the saved lab value. Omitted tests stay unchanged. */
+  results?: { labTestId: number; value: string }[];
+};
+// Correction of a saved service record. Each call writes one recordRevisions row with the reason.
+export async function updateService(input: UpdateService, actor: number) {
+  return execute(function* () {
+    yield* patient(input.patientId);
+    const [current] = yield query('SELECT * FROM "serviceRecords" WHERE id = ? AND "patientId" = ?', input.id, input.patientId);
+    if (!current) fail("Service not found", "NOT_FOUND");
+    if (current.status === "Superseded") fail("Superseded services cannot be edited", "CONFLICT");
+    if (current.status === "Planned" && (input.serviceDate || input.claimFiledDate || input.results?.length)) fail("Record a result before editing result details");
+    if (input.results?.length && !["Laboratory", "Tacro"].includes(current.serviceType)) fail("Lab values require a laboratory or tacrolimus service");
+    const keep = <T,>(next: T | undefined, saved: T) => next === undefined ? saved : next;
+    const before = { label: current.label as string, dueDate: dateOnly(current.dueDate), serviceDate: dateOnly(current.serviceDate),
+      claimDeadline: dateOnly(current.claimDeadline), claimFiledDate: dateOnly(current.claimFiledDate), note: (current.note ?? null) as string | null };
+    const after = {
+      label: keep(input.label, before.label), dueDate: keep(input.dueDate, before.dueDate), serviceDate: keep(input.serviceDate, before.serviceDate),
+      claimDeadline: keep(input.claimDeadline, before.claimDeadline), claimFiledDate: keep(input.claimFiledDate, before.claimFiledDate),
+      note: input.note === undefined ? before.note : input.note || null,
+    };
+    if (after.serviceDate && after.claimDeadline && after.claimDeadline < after.serviceDate) fail("Claim deadline cannot precede service date");
+    if (after.serviceDate && after.claimFiledDate && after.claimFiledDate < after.serviceDate) fail("Claim filing cannot precede service date");
+    const labs = 'SELECT * FROM "labResults" WHERE "serviceRecordId" = ? ORDER BY "labTestId", id';
+    const values = (rows: Row[]) => rows.map(row => ({ labTestId: Number(row.labTestId), value: String(row.value) }));
+    const labsBefore = yield query(labs, input.id);
+    yield query(`UPDATE "serviceRecords" SET label = ?, "dueDate" = ?, "serviceDate" = ?, "claimDeadline" = ?, "claimFiledDate" = ?, note = ?, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = ? AND "patientId" = ?`,
+      after.label, after.dueDate, after.serviceDate, after.claimDeadline, after.claimFiledDate, after.note, input.id, input.patientId);
+    for (const value of input.results ?? []) {
+      const saved = labsBefore.find(row => Number(row.labTestId) === value.labTestId);
+      if (value.value === "") {
+        if (saved) yield query('DELETE FROM "labResults" WHERE "serviceRecordId" = ? AND "labTestId" = ?', input.id, value.labTestId);
+      } else if (saved) {
+        // The reference range saved with the result stays. Only the value and its flag change.
+        yield query('UPDATE "labResults" SET value = ?, flag = ? WHERE "serviceRecordId" = ? AND "labTestId" = ?',
+          value.value, labFlag(value.value, saved.lowSnapshot, saved.highSnapshot), input.id, value.labTestId);
+      } else {
+        const [test] = yield query('SELECT * FROM "labTests" WHERE id = ? AND active = true', value.labTestId);
+        if (!test) fail("Lab test not found", "NOT_FOUND");
+        yield query('INSERT INTO "labResults" ("serviceRecordId", "labTestId", value, "lowSnapshot", "highSnapshot", flag) VALUES (?, ?, ?, ?, ?, ?)',
+          input.id, value.labTestId, value.value, test.low, test.high, labFlag(value.value, test.low, test.high));
+      }
+    }
+    const labsAfter = yield query(labs, input.id);
+    const snapshot = { before: JSON.stringify({ ...before, labs: values(labsBefore) }), after: JSON.stringify({ ...after, labs: values(labsAfter) }) };
+    if (snapshot.before === snapshot.after) fail("No change to save");
+    yield query('INSERT INTO "recordRevisions" ("entityType", "entityId", "before", "after", reason, "userId") VALUES (?, ?, ?, ?, ?, ?)',
+      "serviceRecord", input.id, snapshot.before, snapshot.after, input.reason, actor);
+    yield* audit(actor, input.patientId, "clinical.service.update", input.id, { reason: input.reason });
+    return { id: input.id };
+  });
+}
+
 export type SetChecklist = { patientId: number; catalogId: number; status: "Pending" | "Done" | "NA"; doneDate?: string; note?: string };
+function* checklistWrite(profile: Row, input: SetChecklist, actor: number): Program<number> {
+  const [catalog] = yield query('SELECT * FROM "checklistCatalog" WHERE id = ? AND active = true', input.catalogId);
+  if (!catalog || !["Both", profile.patientType].includes(catalog.appliesTo)) fail("Checklist item not found for this patient", "NOT_FOUND");
+  const [row] = yield query(`INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate", note) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT ("patientId", "catalogId") DO UPDATE SET status = excluded.status, "doneDate" = excluded."doneDate", note = excluded.note, "updatedAt" = CURRENT_TIMESTAMP RETURNING id`,
+    input.patientId, input.catalogId, input.status, input.status === "Done" ? input.doneDate : null, input.note ?? null);
+  yield* audit(actor, input.patientId, "clinical.checklist.update", row.id);
+  return row.id as number;
+}
 export async function setChecklist(input: SetChecklist, actor: number) {
   return execute(function* () {
     const profile = yield* patient(input.patientId);
-    const [catalog] = yield query('SELECT * FROM "checklistCatalog" WHERE id = ? AND active = true', input.catalogId);
-    if (!catalog || !["Both", profile.patientType].includes(catalog.appliesTo)) fail("Checklist item not found for this patient", "NOT_FOUND");
-    const [row] = yield query(`INSERT INTO "patientChecklist" ("patientId", "catalogId", status, "doneDate", note) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT ("patientId", "catalogId") DO UPDATE SET status = excluded.status, "doneDate" = excluded."doneDate", note = excluded.note, "updatedAt" = CURRENT_TIMESTAMP RETURNING id`,
-      input.patientId, input.catalogId, input.status, input.status === "Done" ? input.doneDate : null, input.note ?? null);
-    yield* audit(actor, input.patientId, "clinical.checklist.update", row.id);
-    return { id: row.id as number };
+    return { id: yield* checklistWrite(profile, input, actor) };
+  });
+}
+/** Saves several checklist items in one transaction: all items save, or none. */
+export async function setChecklistMany(input: { patientId: number; items: Omit<SetChecklist, "patientId">[] }, actor: number) {
+  return execute(function* () {
+    const profile = yield* patient(input.patientId);
+    for (const item of input.items) yield* checklistWrite(profile, { ...item, patientId: input.patientId }, actor);
+    return { count: input.items.length };
   });
 }
 

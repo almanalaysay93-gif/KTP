@@ -83,6 +83,54 @@ describe("clinical persisted workflows", () => {
     await admin.setChecklist({ patientId, catalogId: item.catalogId, status: "Pending" });
     expect((await admin.get({ patientId })).checklist.find(i => i.catalogId === item.catalogId)).toMatchObject({ status: "Pending", doneDate: null });
   });
+  it("saves several checklist items together and saves none when one item is invalid", async () => {
+    const [first, second] = (await admin.get({ patientId })).checklist;
+    await expect(admin.setChecklistMany({ patientId, items: [
+      { catalogId: first.catalogId, status: "Done", doneDate: "2026-09-02" },
+      { catalogId: 999999, status: "NA" },
+    ] })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await admin.get({ patientId })).checklist.find(i => i.catalogId === first.catalogId)).toMatchObject({ status: "Pending" });
+    await expect(admin.setChecklistMany({ patientId, items: [{ catalogId: first.catalogId, status: "Done" }] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await admin.setChecklistMany({ patientId, items: [
+      { catalogId: first.catalogId, status: "Done", doneDate: "2026-09-02", note: "Verified fixture" },
+      { catalogId: second.catalogId, status: "NA" },
+    ] });
+    const saved = (await admin.get({ patientId })).checklist;
+    expect(saved.find(i => i.catalogId === first.catalogId)).toMatchObject({ status: "Done", doneDate: "2026-09-02", note: "Verified fixture" });
+    expect(saved.find(i => i.catalogId === second.catalogId)).toMatchObject({ status: "NA", doneDate: null });
+  });
+  it("corrects a saved service and its lab values, and keeps a revision with the reason", async () => {
+    const { id } = await service();
+    const [first, second, third] = (await admin.get({ patientId })).labTests;
+    getSqliteDb().prepare('UPDATE labTests SET low=?, high=? WHERE id=?').run('3', '8', first.id);
+    await expect(admin.updateService({ patientId, id, reason: "Typing error", results: [{ labTestId: first.id, value: "5" }] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await admin.recordResult({ patientId, serviceRecordId: id, serviceDate: "2026-09-02", results: [{ labTestId: first.id, value: "9" }, { labTestId: second.id, value: "4" }] });
+    getSqliteDb().prepare('UPDATE labTests SET low=?, high=? WHERE id=?').run('1', '2', first.id);
+    await admin.updateService({ patientId, id, reason: "Typing error", label: "Corrected lab", serviceDate: "2026-09-03", claimDeadline: "2026-10-01",
+      results: [{ labTestId: first.id, value: "5" }, { labTestId: second.id, value: "" }, { labTestId: third.id, value: "7" }] });
+    const saved = await admin.get({ patientId });
+    expect(saved.services[0]).toMatchObject({ label: "Corrected lab", status: "Done", dueDate: "2026-09-01", serviceDate: "2026-09-03", claimDeadline: "2026-10-01" });
+    expect(saved.labResults.map(r => [r.labTestId, r.value]).sort()).toEqual([[first.id, "5"], [third.id, "7"]].sort());
+    expect(saved.labResults.find(r => r.labTestId === first.id)).toMatchObject({ flag: "Normal", lowSnapshot: "3", highSnapshot: "8" });
+    const revision = getSqliteDb().prepare("SELECT * FROM recordRevisions WHERE entityType='serviceRecord' AND entityId=?").all(id) as { before: string; after: string; reason: string; userId: number }[];
+    expect(revision).toHaveLength(1);
+    expect(revision[0]).toMatchObject({ reason: "Typing error", userId: 9991 });
+    expect(JSON.parse(revision[0].before)).toMatchObject({ label: "Fixture lab", serviceDate: "2026-09-02", labs: [{ labTestId: first.id, value: "9" }, { labTestId: second.id, value: "4" }] });
+    expect(JSON.parse(revision[0].after)).toMatchObject({ label: "Corrected lab", serviceDate: "2026-09-03", labs: [{ labTestId: first.id, value: "5" }, { labTestId: third.id, value: "7" }] });
+    expect(getSqliteDb().prepare("SELECT count(*) AS n FROM activityLog WHERE patientId=? AND action='clinical.service.update'").get(patientId)).toMatchObject({ n: 1 });
+  });
+  it("rejects service corrections that are empty, unexplained, out of order, or for another patient", async () => {
+    const { id } = await service();
+    await admin.recordResult({ patientId, serviceRecordId: id, serviceDate: "2026-09-02" });
+    await expect(admin.updateService({ patientId, id, reason: "No change", label: "Fixture lab" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.updateService({ patientId, id, reason: "", label: "Renamed" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.updateService({ patientId, id, reason: "Wrong date", claimDeadline: "2026-09-01" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.updateService({ patientId, id, reason: "Wrong date", claimFiledDate: "2026-09-01" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin.updateService({ patientId, id, reason: "Bad test", results: [{ labTestId: 999999, value: "1" }] })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(admin.updateService({ patientId: otherId, id, reason: "Wrong patient", label: "Renamed" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await admin.get({ patientId })).services[0]).toMatchObject({ label: "Fixture lab", serviceDate: "2026-09-02", claimDeadline: null });
+    expect(getSqliteDb().prepare("SELECT count(*) AS n FROM recordRevisions WHERE entityId=?").get(id)).toMatchObject({ n: 0 });
+  });
   it("persists appointment timezone and scopes cancellation to patient", async () => {
     const { id } = await admin.addAppointment({ patientId, title: "Fixture visit", kind: "FollowUp", startsAt: "2026-10-05T09:00:00+08:00" });
     expect((await admin.get({ patientId })).appointments[0].startsAt).toBe("2026-10-05T01:00:00.000Z");

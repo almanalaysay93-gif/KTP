@@ -9,7 +9,7 @@ vi.mock("./db", () => ({
       state.pg.transaction(tx => callback({ unsafe: async (sql, args = []) => (await tx.query(sql, args)).rows })),
   }),
 }));
-import { addService, recordResult, getClinical, addAppointment, setChecklist } from "./dbClinical";
+import { addService, recordResult, getClinical, addAppointment, setChecklist, setChecklistMany, updateService } from "./dbClinical";
 beforeAll(async () => {
   state.pg = new PGlite();
   await state.pg.exec('CREATE SCHEMA ktp');
@@ -39,5 +39,25 @@ describe("clinical PostgreSQL transactions", () => {
     const { id } = await addService({ patientId: 1, serviceType: "Laboratory", label: "Rollback", dueDate: "2026-09-01" }, 1);
     await expect(recordResult({ patientId: 1, serviceRecordId: id, serviceDate: "2026-09-02", results: [{ labTestId: 999999, value: "1" }] }, 1)).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect((await getClinical(1)).services.find(r => r.id === id)?.status).toBe("Planned");
+  });
+  it("corrects a saved service and saves a checklist group through real PostgreSQL syntax", async () => {
+    const initial = await getClinical(1);
+    const [first, second] = initial.labTests;
+    const { id } = await addService({ patientId: 1, serviceType: "Laboratory", label: "Correction", dueDate: "2026-09-01" }, 1);
+    await recordResult({ patientId: 1, serviceRecordId: id, serviceDate: "2026-09-02", results: [{ labTestId: first.id, value: "5" }] }, 1);
+    await updateService({ patientId: 1, id, reason: "Typing error", serviceDate: "2026-09-03", claimDeadline: "2026-10-01",
+      results: [{ labTestId: first.id, value: "6" }, { labTestId: second.id, value: "2" }] }, 1);
+    await expect(updateService({ patientId: 1, id, reason: "No change", serviceDate: "2026-09-03" }, 1)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const saved = await getClinical(1);
+    expect(saved.services.find(r => r.id === id)).toMatchObject({ serviceDate: "2026-09-03", claimDeadline: "2026-10-01", dueDate: "2026-09-01" });
+    expect(saved.labResults.filter(r => r.serviceRecordId === id).map(r => r.value).sort()).toEqual(["2", "6"]);
+    const revisions = (await state.pg.query<{ reason: string; after: string }>('SELECT * FROM "recordRevisions" WHERE "entityId" = $1', [id])).rows;
+    expect(revisions).toHaveLength(1);
+    expect(JSON.parse(revisions[0].after)).toMatchObject({ serviceDate: "2026-09-03", labs: [{ labTestId: first.id, value: "6" }, { labTestId: second.id, value: "2" }] });
+    const [a, b] = initial.checklist.slice(1, 3);
+    await setChecklistMany({ patientId: 1, items: [{ catalogId: a.catalogId, status: "Done", doneDate: "2026-09-02" }, { catalogId: b.catalogId, status: "NA" }] }, 1);
+    const checklist = (await getClinical(1)).checklist;
+    expect(checklist.find(i => i.catalogId === a.catalogId)).toMatchObject({ status: "Done", doneDate: "2026-09-02" });
+    expect(checklist.find(i => i.catalogId === b.catalogId)?.status).toBe("NA");
   });
 });

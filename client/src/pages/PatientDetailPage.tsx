@@ -7,7 +7,7 @@ import {
 } from "@/lib/ktpPatientView";
 import { ADMIN_HREFS } from "@/lib/ktpAdminRoutes";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Edit3 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Link, useLocation, useParams } from "wouter";
 import {
   AdminShell,
@@ -176,16 +176,6 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
               <ArrowLeft className="size-5" />
               <span className="type-body-sm">All patients</span>
             </button>
-
-            <div className="flex items-center gap-3">
-              <ClayButton
-                variant="secondary"
-                icon={<Edit3 className="size-4" />}
-                onClick={() => navigate(`/patients/${patient.id}/edit`)}
-              >
-                Edit record
-              </ClayButton>
-            </div>
           </div>
 
           {/* Patient Header Card */}

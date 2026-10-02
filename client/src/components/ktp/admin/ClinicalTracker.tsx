@@ -8,7 +8,7 @@ import type { ClinicalData } from "./PatientClinicalTabs";
 import { ClinicalForm, ClinicalSelect, field } from "./ClinicalForm";
 import { NurseApprovalCard } from "./NurseApprovalCard";
 
-const serviceNames = {
+export const serviceNames = {
   Meds: "Medicines",
   Laboratory: "Laboratory",
   Tacro: "Tacrolimus",

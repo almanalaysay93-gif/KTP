@@ -12,6 +12,8 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
 }, "Use a valid calendar date");
 const pastDate = date.refine(value => value <= todayDate(), "Date cannot be in the future");
 const note = z.string().trim().max(4000).optional();
+const checklistItem = z.object({ catalogId: id, status: z.enum(["Pending", "Done", "NA"]), doneDate: pastDate.optional(), note });
+const checklistDone = (input: { status: string; doneDate?: string }) => input.status !== "Done" || !!input.doneDate;
 
 export const clinicalRouter = router({
   get: adminProcedure.input(patient).query(({ input }) => clinical.getClinical(input.patientId)),
@@ -28,10 +30,20 @@ export const clinicalRouter = router({
   }).refine(input => !input.claimDeadline || input.claimDeadline >= input.serviceDate, "Claim deadline cannot precede service date")
     .refine(input => new Set(input.results?.map(row => row.labTestId)).size === (input.results?.length ?? 0), "Each lab test may occur once"))
     .mutation(({ input, ctx }) => clinical.recordResult(input, ctx.user.id)),
-  setChecklist: adminProcedure.input(patient.extend({
-    catalogId: id, status: z.enum(["Pending", "Done", "NA"]), doneDate: pastDate.optional(), note,
-  }).refine(input => input.status !== "Done" || !!input.doneDate, "Completion date is required"))
+  updateService: adminProcedure.input(patient.extend({
+    id, reason: z.string().trim().min(3).max(500),
+    label: z.string().trim().min(1).max(200).optional(), dueDate: date.optional(), serviceDate: pastDate.optional(),
+    claimDeadline: date.nullable().optional(), claimFiledDate: pastDate.nullable().optional(),
+    note: z.string().trim().max(4000).nullable().optional(),
+    results: z.array(z.object({ labTestId: id, value: z.string().trim().max(100) })).max(100).optional(),
+  }).refine(input => new Set(input.results?.map(row => row.labTestId)).size === (input.results?.length ?? 0), "Each lab test may occur once"))
+    .mutation(({ input, ctx }) => clinical.updateService(input, ctx.user.id)),
+  setChecklist: adminProcedure.input(patient.extend(checklistItem.shape).refine(checklistDone, "Completion date is required"))
     .mutation(({ input, ctx }) => clinical.setChecklist(input, ctx.user.id)),
+  setChecklistMany: adminProcedure.input(patient.extend({
+    items: z.array(checklistItem.refine(checklistDone, "Completion date is required")).min(1).max(100),
+  }).refine(input => new Set(input.items.map(item => item.catalogId)).size === input.items.length, "Each checklist item may occur once"))
+    .mutation(({ input, ctx }) => clinical.setChecklistMany(input, ctx.user.id)),
   addAppointment: adminProcedure.input(patient.extend({
     title: z.string().trim().min(1).max(200), kind: z.enum(["FollowUp", "Biopsy", "Workup", "Clearance", "Other"]),
     startsAt: z.string().datetime({ offset: true }).refine(value => Number.isFinite(new Date(value).getTime()), "Invalid appointment time"),

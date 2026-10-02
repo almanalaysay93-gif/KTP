@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Save } from "lucide-react";
 import { Link, useLocation, useParams } from "wouter";
 import { AdminShell, AdminToaster, useAdminToast } from "@/components/ktp/admin";
+import { PatientEditTabs } from "@/components/ktp/admin/PatientEditTabs";
 import { ClayButton, ClayCard } from "@/components/clay";
 import { MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
 import { trpc } from "@/lib/trpc";
@@ -180,11 +181,12 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
                       {editId ? "Edit patient record" : "Enroll new patient"}
                     </h1>
                     <p className="type-body-sm text-ink-muted">
-                      {editId ? "Update patient information and clinical stage" : "Add recipient or living donor to registry"}
+                      {editId ? "Update the profile, lab values, work-up phases, clearances, and service records" : "Add recipient or living donor to registry"}
                     </p>
                   </div>
                 </header>
 
+                <PatientEditTabs patientId={editId} patientType={patientType}>
                 <form id="patient-form" onSubmit={handleSubmit} className="mt-8 flex flex-col gap-6">
                   {errorMsg && (
                     <div className="rounded-lg bg-brick-tint p-4 type-body-sm text-brick">
@@ -472,6 +474,7 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
                     </ClayButton>
                   </div>
                 </form>
+                </PatientEditTabs>
               </main>
             </PageTransition>
           </AdminShell>
