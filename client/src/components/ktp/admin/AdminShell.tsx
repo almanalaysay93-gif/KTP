@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { motion, type Variants } from "framer-motion";
-import { CalendarDays, FileCheck2, LayoutDashboard, LogOut, Mail, Menu, MessageSquare, Settings, Users, X, type LucideIcon } from "lucide-react";
+import { BarChart3, CalendarDays, FileCheck2, LayoutDashboard, LogOut, Mail, Menu, MessageSquare, Settings, Users, X, type LucideIcon } from "lucide-react";
 import { Link } from "wouter";
 import { ClayAvatar } from "@/components/clay";
 import { AnimatePresence, LayoutGroup, PILL_IDS, SHARED_PILL_HOST, SharedPill, SPRINGS, useMotionMode } from "@/components/motion";
@@ -16,10 +16,11 @@ import { useAuth } from "@/_core/hooks/useAuth";
  * route stay visible and say "Preview only" instead of navigating.
  */
 
-export type AdminNavId = "dashboard" | "patients" | "zBenefit" | "calendar" | "messages" | "automations" | "settings";
+export type AdminNavId = "dashboard" | "metrics" | "patients" | "zBenefit" | "calendar" | "messages" | "automations" | "settings";
 
 const NAV: { id: AdminNavId; label: string; Icon: LucideIcon }[] = [
   { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+  { id: "metrics", label: "Metrics", Icon: BarChart3 },
   { id: "patients", label: "Patients", Icon: Users },
   { id: "zBenefit", label: "Z Benefit", Icon: FileCheck2 },
   { id: "calendar", label: "Calendar", Icon: CalendarDays },

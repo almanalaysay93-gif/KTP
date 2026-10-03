@@ -12,6 +12,7 @@ import { ConsentGate } from "./components/ktp/ConsentGate"
 
 // Admin on-demand pages
 const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"), "Dashboard")
+const MetricsPage = lazyWithRetry(() => import("./pages/MetricsPage"), "MetricsPage")
 const PatientsPage = lazyWithRetry(() => import("./pages/PatientsPage"), "PatientsPage")
 const PatientEnrollPage = lazyWithRetry(() => import("./pages/PatientEnrollPage"), "PatientEnrollPage")
 const PatientDetailPage = lazyWithRetry(() => import("./pages/PatientDetailPage"), "PatientDetailPage")
@@ -95,6 +96,9 @@ function Router() {
         </Route>
 
         {/* Admin routes */}
+        <Route path="/metrics">
+          <Protected><MetricsPage /></Protected>
+        </Route>
         <Route path="/dashboard">
           <Protected>
             <Dashboard />

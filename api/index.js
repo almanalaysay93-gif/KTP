@@ -2218,6 +2218,16 @@ function todayDate(now = /* @__PURE__ */ new Date()) {
   const get = (type) => parts.find((part) => part.type === type).value;
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
+function parseLocalDate(value2) {
+  if (!value2) return /* @__PURE__ */ new Date(NaN);
+  const key2 = dateKey(value2);
+  if (key2) {
+    const [y, m, d] = key2.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+  if (value2 instanceof Date) return isNaN(value2.getTime()) ? /* @__PURE__ */ new Date(NaN) : value2;
+  return new Date(value2);
+}
 function isValidStageForPatientType(stage, patientType) {
   if (patientType === "Recipient") {
     return RECIPIENT_STAGES.includes(stage);
@@ -2226,6 +2236,26 @@ function isValidStageForPatientType(stage, patientType) {
     return DONOR_STAGES.includes(stage);
   }
   return false;
+}
+function computeClaimStatus(claimFiledDate, claimDeadline, today = todayDate()) {
+  if (claimFiledDate && dateKey(claimFiledDate)) {
+    return "Filed";
+  }
+  const deadlineKey = dateKey(claimDeadline);
+  if (!deadlineKey) {
+    return "None";
+  }
+  const todayKey = dateKey(today) || todayDate();
+  const deadlineMs = parseLocalDate(deadlineKey).getTime();
+  const todayMs = parseLocalDate(todayKey).getTime();
+  const diffDays = Math.floor((deadlineMs - todayMs) / (1e3 * 60 * 60 * 24));
+  if (diffDays < 0) {
+    return "Overdue";
+  }
+  if (diffDays <= 7) {
+    return "DueSoon";
+  }
+  return "Open";
 }
 var RECIPIENT_STAGES, DONOR_STAGES, PATIENT_TYPES, PATIENT_STATUSES, DOCTOR_ROLES, SERVICE_TYPES, LAB_PHASES, LAB_PHASE_LABEL, RISK_CATEGORIES;
 var init_ktp = __esm({
@@ -3731,7 +3761,10 @@ var patientsRouter = router({
       ctx.user.id,
       input.id,
       "UPDATE_PATIENT",
-      { changes: Object.keys(input.data) },
+      {
+        changes: Object.keys(input.data),
+        ...input.data.stage ? { fromStage: existing.stage, toStage: input.data.stage } : {}
+      },
       ctx.req.ip,
       ctx.req.headers["user-agent"]
     );
@@ -3877,7 +3910,206 @@ var settingsRouter = router({
 // server/routers/dashboard.ts
 init_db();
 init_ktp();
+init_ktp();
+import { z as z6 } from "zod";
+
+// shared/metrics.ts
+init_ktp();
+function summarizeMetrics(rows2) {
+  const recipients = rows2.filter((p) => p.patientType === "Recipient");
+  const donors = rows2.filter((p) => p.patientType === "Donor");
+  const forEthics = rows2.filter((p) => p.stage === "Clearances" && p.ethicsStatus === "Pending");
+  return {
+    total: rows2.length,
+    recipients: recipients.length,
+    donors: donors.length,
+    forEthics: forEthics.length,
+    ethicsRecipients: forEthics.filter((p) => p.patientType === "Recipient").length,
+    ethicsDonors: forEthics.filter((p) => p.patientType === "Donor").length,
+    forTransplant: recipients.filter((p) => p.stage === "Phase3").length,
+    postTransplant: recipients.filter((p) => p.stage === "PostKT").length,
+    postDonation: donors.filter((p) => p.stage === "PostDonation").length,
+    stages: [.../* @__PURE__ */ new Set([...RECIPIENT_STAGES, ...DONOR_STAGES])].map((stage) => ({
+      stage,
+      recipients: recipients.filter((p) => p.stage === stage).length,
+      donors: donors.filter((p) => p.stage === stage).length
+    }))
+  };
+}
+
+// server/dbMetrics.ts
+init_ktp();
+
+// shared/metricsAnalysis.ts
+init_ktp();
+var preop = (p) => p.stage !== "PostKT" && p.stage !== "PostDonation";
+var days = (a, b) => Math.floor((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 864e5);
+var mean = (values) => values.length ? Math.round(values.reduce((sum, n) => sum + n, 0) / values.length) : null;
+var ETHICS = /* @__PURE__ */ new Set(["Ethics committee", "HTEC evaluation and approval"]);
+var timestamp2 = (value2) => typeof value2 === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:/.test(value2) ? `${value2.replace(" ", "T")}Z` : value2;
+var metricDate = (value2) => dateKey(value2 === null ? null : timestamp2(value2));
+function analyzeMetrics(input) {
+  const { today } = input;
+  const selected = input.patients.filter((p) => !input.status || p.status === input.status);
+  const ids = new Set(selected.map((p) => p.id));
+  const checklist = /* @__PURE__ */ new Map();
+  for (const item of input.checklist) checklist.set(item.patientId, [...checklist.get(item.patientId) ?? [], item]);
+  const required = (id2) => (checklist.get(id2) ?? []).filter((c) => !c.asIndicated || c.recorded);
+  const pending = (id2) => required(id2).filter((c) => c.status !== "Done" && c.status !== "NA");
+  const ethicsApproved = (id2) => {
+    const items = (checklist.get(id2) ?? []).filter((c) => ETHICS.has(c.name));
+    return items.some((c) => c.name === "Ethics committee") && items.some((c) => c.name === "HTEC evaluation and approval") && items.every((c) => c.status === "Done");
+  };
+  const complete = (p) => p.stage === "Phase3" && required(p.id).length > 0 && pending(p.id).length === 0 && ethicsApproved(p.id);
+  const candidates = selected.filter((p) => p.patientType === "Recipient" && preop(p));
+  const linked = (id2) => input.patients.filter((p) => p.patientType === "Donor" && p.linkedRecipientId === id2 && p.status === "Active" && preop(p));
+  const matching = { withoutDonor: 0, underEvaluation: 0, qualifiedDonor: 0 };
+  const blockers = /* @__PURE__ */ new Map();
+  const blocked = /* @__PURE__ */ new Set();
+  let ready = 0;
+  for (const p of candidates) {
+    const donors = linked(p.id);
+    const qualified = donors.some(complete);
+    if (!donors.length) matching.withoutDonor++;
+    else if (qualified) matching.qualifiedDonor++;
+    else matching.underEvaluation++;
+    if (p.status === "Active" && complete(p) && qualified) ready++;
+    const reasons = new Set(pending(p.id).map((c) => ETHICS.has(c.name) ? "Ethics approval" : c.category === "Lab" ? "Laboratory requirements" : c.category === "Clearance" ? "Clearances" : c.category === "Imaging" ? "Imaging requirements" : "Other milestones"));
+    if (!ethicsApproved(p.id)) reasons.add("Ethics approval");
+    if (!donors.length) reasons.add("No active linked donor");
+    else if (!qualified) reasons.add("Donor requirements incomplete");
+    if (p.stage !== "Phase3") reasons.add("Not in Phase 3");
+    if (reasons.size) blocked.add(p.id);
+    for (const reason of reasons) blockers.set(reason, (blockers.get(reason) ?? 0) + 1);
+  }
+  const preoperative = selected.filter(preop);
+  const ethics = { awaiting: 0, approved: 0, notApplicable: 0, unknown: 0 };
+  for (const p of preoperative) {
+    const items = (checklist.get(p.id) ?? []).filter((c) => ETHICS.has(c.name));
+    if (!items.length) ethics.unknown++;
+    else if (ethicsApproved(p.id)) ethics.approved++;
+    else if (items.every((c) => c.status === "NA")) ethics.notApplicable++;
+    else ethics.awaiting++;
+  }
+  const entered = /* @__PURE__ */ new Map();
+  for (const event of [...input.stageEvents].sort((a, b) => new Date(timestamp2(a.createdAt)).getTime() - new Date(timestamp2(b.createdAt)).getTime())) {
+    try {
+      const details = typeof event.details === "string" ? JSON.parse(event.details.replace(/^```(?:json)?\s*|\s*```$/g, "")) : event.details;
+      const day2 = metricDate(event.createdAt);
+      if (details && typeof details.toStage === "string") {
+        if (details.fromStage !== details.toStage && day2 && day2 <= today) entered.set(event.patientId, { stage: details.toStage, day: day2 });
+      } else if (details?.changes?.includes("stage")) entered.delete(event.patientId);
+      else if (typeof details?.stage === "string" && day2 && day2 <= today) entered.set(event.patientId, { stage: details.stage, day: day2 });
+    } catch {
+      entered.delete(event.patientId);
+    }
+  }
+  const currentWait = selected.map((p) => {
+    const event = entered.get(p.id);
+    return event?.stage === p.stage ? { stage: p.stage, days: days(today, event.day) } : null;
+  }).filter((p) => !!p);
+  const enrollmentWait = preoperative.map((p) => metricDate(p.createdAt)).filter((day2) => day2 && day2 <= today).map((day2) => days(today, day2));
+  const completedWait = selected.filter((p) => p.patientType === "Recipient" && p.stage === "PostKT").flatMap((p) => {
+    const start = metricDate(p.createdAt), end = metricDate(p.surgeryDate);
+    return start && end && end >= start && end <= today ? [days(end, start)] : [];
+  });
+  const monthly = Array.from({ length: 12 }, (_, index2) => {
+    const month = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 12 + index2, 1)).toISOString().slice(0, 7);
+    const created = selected.filter((p) => metricDate(p.createdAt).slice(0, 7) === month && metricDate(p.createdAt) <= today);
+    const surgeries = selected.filter((p) => dateKey(p.surgeryDate).slice(0, 7) === month && dateKey(p.surgeryDate) <= today);
+    return {
+      month,
+      recipients: created.filter((p) => p.patientType === "Recipient").length,
+      donors: created.filter((p) => p.patientType === "Donor").length,
+      transplants: surgeries.filter((p) => p.patientType === "Recipient" && p.stage === "PostKT").length,
+      donations: surgeries.filter((p) => p.patientType === "Donor" && p.stage === "PostDonation").length
+    };
+  });
+  const services = input.services.filter((s) => ids.has(s.patientId));
+  const overdue = services.filter((s) => s.status === "Planned" && dateKey(s.dueDate) && dateKey(s.dueDate) < today);
+  const pastFollowups = input.appointments.filter((a) => ids.has(a.patientId) && a.kind === "FollowUp" && !a.cancelledAt && metricDate(a.startsAt) && metricDate(a.startsAt) < today);
+  const postTransplantIds = new Set(selected.filter((p) => p.patientType === "Recipient" && p.stage === "PostKT").map((p) => p.id));
+  const followup = {
+    overdueLabs: overdue.filter((s) => s.serviceType === "Laboratory" || s.serviceType === "Tacro").length,
+    patientsWithOverdueLabs: new Set(overdue.filter((s) => s.serviceType === "Laboratory" || s.serviceType === "Tacro").map((s) => s.patientId)).size,
+    pastFollowups: pastFollowups.length,
+    pastPostTransplantFollowups: pastFollowups.filter((a) => postTransplantIds.has(a.patientId)).length,
+    rescheduleRequests: input.appointments.filter((a) => ids.has(a.patientId) && !a.cancelledAt && a.response === "RescheduleRequested").length
+  };
+  const recipientIds = new Set(selected.filter((p) => p.patientType === "Recipient").map((p) => p.id));
+  const claims = { pending: 0, dueSoon: 0, overdue: 0, filed: 0, missingDeadline: 0 };
+  for (const service2 of services.filter((s) => recipientIds.has(s.patientId) && (s.status === "Done" || s.status === "Superseded"))) {
+    const state = computeClaimStatus(service2.claimFiledDate, service2.claimDeadline, today);
+    if (state === "Filed") claims.filed++;
+    else {
+      claims.pending++;
+      if (state === "Overdue") claims.overdue++;
+      if (state === "DueSoon") claims.dueSoon++;
+      if (state === "None") claims.missingDeadline++;
+    }
+  }
+  return {
+    ready,
+    candidates: candidates.length,
+    blocked: blocked.size,
+    blockers: [...blockers].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count),
+    matching,
+    ethics,
+    waiting: {
+      enrollmentAverageDays: mean(enrollmentWait),
+      enrollmentSamples: enrollmentWait.length,
+      transplantAverageDays: mean(completedWait),
+      transplantSamples: completedWait.length,
+      stageUnknown: selected.length - currentWait.length,
+      stages: [...new Set(selected.map((p) => p.stage))].map((stage) => {
+        const values = currentWait.filter((p) => p.stage === stage).map((p) => p.days);
+        return { stage, averageDays: mean(values), samples: values.length };
+      })
+    },
+    monthly,
+    followup,
+    claims
+  };
+}
+
+// server/dbMetrics.ts
+async function listMetrics(status) {
+  return execute(function* () {
+    const rows2 = yield query2(`SELECT p."patientType", p.stage, p.status,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM "checklistCatalog" c
+        LEFT JOIN "patientChecklist" pc ON pc."catalogId" = c.id AND pc."patientId" = p.id
+        WHERE c.name = 'Ethics committee' AND c.active = true
+          AND (c."appliesTo" = 'Both' OR c."appliesTo" = p."patientType")
+          AND COALESCE(pc.status, 'Pending') = 'Pending'
+      ) THEN 'Pending' ELSE NULL END AS "ethicsStatus"
+      FROM patients p
+      ${status ? "WHERE p.status = ?" : ""}`, ...status ? [status] : []);
+    const patients2 = yield query2('SELECT id, "patientType", status, stage, "linkedRecipientId", "createdAt", "surgeryDate" FROM patients');
+    const checklist = yield query2(`SELECT p.id AS "patientId", c.name, c.category,
+      COALESCE(pc.status, 'Pending') AS status, c."asIndicated",
+      CASE WHEN pc.id IS NULL THEN 0 ELSE 1 END AS recorded
+      FROM patients p JOIN "checklistCatalog" c ON c.active = true
+        AND (c."appliesTo" = 'Both' OR c."appliesTo" = p."patientType")
+      LEFT JOIN "patientChecklist" pc ON pc."patientId" = p.id AND pc."catalogId" = c.id`);
+    const services = yield query2('SELECT "patientId", "serviceType", status, "dueDate", "claimDeadline", "claimFiledDate" FROM "serviceRecords"');
+    const appointments2 = yield query2('SELECT "patientId", kind, "startsAt", "cancelledAt", response FROM appointments');
+    const stageEvents = yield query2(`SELECT "patientId", "createdAt", details FROM "activityLog" WHERE action IN ('UPDATE_PATIENT', 'ENROLL_PATIENT') ORDER BY "createdAt", id`);
+    return { ...summarizeMetrics(rows2), analysis: analyzeMetrics({
+      patients: patients2,
+      checklist,
+      services,
+      appointments: appointments2,
+      stageEvents,
+      today: todayDate(),
+      status
+    }) };
+  });
+}
+
+// server/routers/dashboard.ts
 var dashboardRouter = router({
+  metrics: adminProcedure.input(z6.object({ status: z6.enum(PATIENT_STATUSES).optional() }).optional()).query(({ input }) => listMetrics(input?.status)),
   initial: adminProcedure.query(async () => {
     const [patients2, clinical] = await Promise.all([listPatients(), listClinicalDashboard()]);
     const today = todayDate();
@@ -3911,7 +4143,7 @@ var dashboardRouter = router({
 });
 
 // server/routers/notifications.ts
-import { z as z6 } from "zod";
+import { z as z7 } from "zod";
 init_db();
 var notificationsRouter = router({
   myList: patientProcedure.query(async ({ ctx }) => {
@@ -3920,7 +4152,7 @@ var notificationsRouter = router({
   myUnreadCount: patientProcedure.query(async ({ ctx }) => {
     return countUnreadNotifications(ctx.patientId);
   }),
-  markMyRead: patientProcedure.input(z6.object({ id: z6.number() })).mutation(async ({ ctx, input }) => {
+  markMyRead: patientProcedure.input(z7.object({ id: z7.number() })).mutation(async ({ ctx, input }) => {
     await markNotificationRead(input.id, ctx.patientId);
     return { success: true };
   }),
@@ -3933,7 +4165,7 @@ var notificationsRouter = router({
 // server/routers/patientPortal.ts
 init_db();
 import { TRPCError as TRPCError6 } from "@trpc/server";
-import { z as z7 } from "zod";
+import { z as z8 } from "zod";
 
 // server/dbMessages.ts
 init_db();
@@ -4119,10 +4351,10 @@ var patientPortalRouter = router({
     return getClinical(ctx.patientId);
   }),
   respondAppointment: patientProcedure.input(
-    z7.object({
-      appointmentId: z7.number().int().positive().safe(),
-      response: z7.enum(["Confirmed", "RescheduleRequested"]),
-      responseNote: z7.string().trim().max(1e3).optional()
+    z8.object({
+      appointmentId: z8.number().int().positive().safe(),
+      response: z8.enum(["Confirmed", "RescheduleRequested"]),
+      responseNote: z8.string().trim().max(1e3).optional()
     })
   ).mutation(async ({ ctx, input }) => {
     return respondToAppointment({
@@ -4135,25 +4367,25 @@ var patientPortalRouter = router({
   getMyMessages: patientProcedure.query(async ({ ctx }) => {
     return listPatientMessages(ctx.patientId);
   }),
-  acknowledgeMessage: patientProcedure.input(z7.object({ messageId: z7.number().int().positive().safe() })).mutation(async ({ ctx, input }) => {
+  acknowledgeMessage: patientProcedure.input(z8.object({ messageId: z8.number().int().positive().safe() })).mutation(async ({ ctx, input }) => {
     return acknowledgePatientMessage(ctx.patientId, input.messageId);
   }),
-  updateContact: patientProcedure.input(z7.object({ contactNumber: z7.string().max(32).nullable() })).mutation(async ({ ctx, input }) => {
+  updateContact: patientProcedure.input(z8.object({ contactNumber: z8.string().max(32).nullable() })).mutation(async ({ ctx, input }) => {
     const updated = await updatePatient(ctx.patientId, {
       contactNumber: input.contactNumber
     });
     return updated;
   }),
-  updatePhoto: patientProcedure.input(z7.object({ photoFileId: z7.number().nullable() })).mutation(async ({ ctx, input }) => {
+  updatePhoto: patientProcedure.input(z8.object({ photoFileId: z8.number().nullable() })).mutation(async ({ ctx, input }) => {
     const updated = await updatePatient(ctx.patientId, {
       photoFileId: input.photoFileId
     });
     return updated;
   }),
   parseLabDocument: patientProcedure.input(
-    z7.object({
-      fileName: z7.string().min(1).max(255).optional(),
-      base64: z7.string().min(1)
+    z8.object({
+      fileName: z8.string().min(1).max(255).optional(),
+      base64: z8.string().min(1)
     })
   ).mutation(async ({ input }) => {
     const buffer = Buffer.from(input.base64, "base64");
@@ -4161,13 +4393,13 @@ var patientPortalRouter = router({
     return parseLabBuffer2(buffer, input.fileName || "document.pdf");
   }),
   submitPatientLab: patientProcedure.input(
-    z7.object({
-      serviceDate: z7.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      note: z7.string().trim().max(1e3).optional(),
-      items: z7.array(
-        z7.object({
-          labTestId: z7.number().int().positive(),
-          value: z7.string().trim().min(1).max(100)
+    z8.object({
+      serviceDate: z8.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      note: z8.string().trim().max(1e3).optional(),
+      items: z8.array(
+        z8.object({
+          labTestId: z8.number().int().positive(),
+          value: z8.string().trim().min(1).max(100)
         })
       )
     })
@@ -4198,18 +4430,18 @@ var patientPortalRouter = router({
 });
 
 // server/routers/messages.ts
-import { z as z8 } from "zod";
+import { z as z9 } from "zod";
 var messagesRouter = router({
   list: adminProcedure.query(async () => {
     return listAdminMessages();
   }),
   create: adminProcedure.input(
-    z8.object({
-      subject: z8.string().trim().min(1, "Subject is required").max(200),
-      body: z8.string().trim().min(1, "Message content is required").max(4e3),
-      targetType: z8.enum(["All", "Recipient", "Donor", "Stage", "Specific"]),
-      targetStage: z8.string().optional(),
-      targetPatientId: z8.number().int().positive().safe().optional()
+    z9.object({
+      subject: z9.string().trim().min(1, "Subject is required").max(200),
+      body: z9.string().trim().min(1, "Message content is required").max(4e3),
+      targetType: z9.enum(["All", "Recipient", "Donor", "Stage", "Specific"]),
+      targetStage: z9.string().optional(),
+      targetPatientId: z9.number().int().positive().safe().optional()
     })
   ).mutation(async ({ ctx, input }) => {
     return createBroadcastMessage({
@@ -4224,7 +4456,7 @@ var messagesRouter = router({
 });
 
 // server/routers/automations.ts
-import { z as z9 } from "zod";
+import { z as z10 } from "zod";
 
 // server/emailService.ts
 init_db();
@@ -4613,16 +4845,16 @@ var automationsRouter = router({
     return getAutomationConfig();
   }),
   updateConfig: adminProcedure.input(
-    z9.object({
-      masterEnabled: z9.boolean(),
-      dispatchTimeManila: z9.string().regex(/^\d{2}:\d{2}$/),
-      triggers: z9.array(
-        z9.object({
-          key: z9.enum(["appointment_reminder", "overdue_lab", "weekly_digest"]),
-          label: z9.string(),
-          description: z9.string(),
-          enabled: z9.boolean(),
-          leadDays: z9.number().int().min(1).max(30)
+    z10.object({
+      masterEnabled: z10.boolean(),
+      dispatchTimeManila: z10.string().regex(/^\d{2}:\d{2}$/),
+      triggers: z10.array(
+        z10.object({
+          key: z10.enum(["appointment_reminder", "overdue_lab", "weekly_digest"]),
+          label: z10.string(),
+          description: z10.string(),
+          enabled: z10.boolean(),
+          leadDays: z10.number().int().min(1).max(30)
         })
       )
     })
@@ -4642,20 +4874,20 @@ var automationsRouter = router({
     return { success: true, stats };
   }),
   listLogs: adminProcedure.input(
-    z9.object({
-      status: z9.string().optional(),
-      search: z9.string().optional(),
-      limit: z9.number().int().min(1).max(100).default(50),
-      offset: z9.number().int().min(0).default(0)
+    z10.object({
+      status: z10.string().optional(),
+      search: z10.string().optional(),
+      limit: z10.number().int().min(1).max(100).default(50),
+      offset: z10.number().int().min(0).default(0)
     })
   ).query(async ({ input }) => {
     const items = await listEmailLogs(input);
     return { items };
   }),
   sendTestEmail: adminProcedure.input(
-    z9.object({
-      to: z9.string().email(),
-      templateName: z9.enum([
+    z10.object({
+      to: z10.string().email(),
+      templateName: z10.enum([
         "AppointmentNotice",
         "OverdueLabAlert",
         "WeeklyClinicalDigest",
@@ -4686,14 +4918,14 @@ var automationsRouter = router({
     return { success: res.status !== "failed", status: res.status, id: res.id };
   }),
   renderPreview: adminProcedure.input(
-    z9.object({
-      templateName: z9.enum([
+    z10.object({
+      templateName: z10.enum([
         "AppointmentNotice",
         "OverdueLabAlert",
         "WeeklyClinicalDigest",
         "TestNotice"
       ]),
-      sampleData: z9.record(z9.string(), z9.any()).optional()
+      sampleData: z10.record(z10.string(), z10.any()).optional()
     })
   ).query(async ({ input }) => {
     const data = input.sampleData || {
@@ -4715,7 +4947,7 @@ var automationsRouter = router({
 });
 
 // server/routers/patientImport.ts
-import { z as z10 } from "zod";
+import { z as z11 } from "zod";
 
 // server/dbPatientImport.ts
 init_adminAccess();
@@ -4874,8 +5106,8 @@ async function commitImportRows(rows2, actor, fileName) {
 }
 
 // server/routers/patientImport.ts
-var value = z10.string().max(400).nullable().optional();
-var row = z10.object({
+var value = z11.string().max(400).nullable().optional();
+var row = z11.object({
   hrn: value,
   patientType: value,
   firstName: value,
@@ -4893,14 +5125,14 @@ var row = z10.object({
   nephrologist: value,
   fellow: value,
   linkedRecipientHrn: value,
-  followupMonths: z10.union([z10.number(), z10.string().max(10)]).nullable().optional()
+  followupMonths: z11.union([z11.number(), z11.string().max(10)]).nullable().optional()
 });
-var rows = z10.array(row).min(1).max(200);
+var rows = z11.array(row).min(1).max(200);
 var patientImportRouter = router({
   /** Errors and warnings for each row. Writes nothing. */
-  check: adminProcedure.input(z10.object({ rows })).mutation(({ input }) => checkImportRows(input.rows)),
+  check: adminProcedure.input(z11.object({ rows })).mutation(({ input }) => checkImportRows(input.rows)),
   /** Saves all rows in one transaction. One wrong row stops the save of all rows. */
-  commit: adminProcedure.input(z10.object({ rows, fileName: z10.string().trim().max(255).default("") })).mutation(({ input, ctx }) => commitImportRows(input.rows, ctx.user.id, input.fileName))
+  commit: adminProcedure.input(z11.object({ rows, fileName: z11.string().trim().max(255).default("") })).mutation(({ input, ctx }) => commitImportRows(input.rows, ctx.user.id, input.fileName))
 });
 
 // server/routers.ts

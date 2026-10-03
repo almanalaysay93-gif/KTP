@@ -249,7 +249,12 @@ export const patientsRouter = router({
         ctx.user.id,
         input.id,
         "UPDATE_PATIENT",
-        { changes: Object.keys(input.data) },
+        {
+          changes: Object.keys(input.data),
+          ...(input.data.stage
+            ? { fromStage: existing.stage, toStage: input.data.stage }
+            : {}),
+        },
         ctx.req.ip,
         ctx.req.headers["user-agent"]
       );

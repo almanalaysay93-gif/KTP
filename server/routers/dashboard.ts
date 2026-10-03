@@ -2,8 +2,14 @@ import { listClinicalDashboard } from "../dbClinical";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { todayDate } from "@shared/ktp";
+import { PATIENT_STATUSES } from "@shared/ktp";
+import { z } from "zod";
+import { listMetrics } from "../dbMetrics";
 
 export const dashboardRouter = router({
+  metrics: adminProcedure
+    .input(z.object({ status: z.enum(PATIENT_STATUSES).optional() }).optional())
+    .query(({ input }) => listMetrics(input?.status)),
   initial: adminProcedure.query(async () => {
     const [patients, clinical] = await Promise.all([db.listPatients(), listClinicalDashboard()]);
     const today = todayDate();
