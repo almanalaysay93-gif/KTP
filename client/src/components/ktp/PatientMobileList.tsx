@@ -11,7 +11,7 @@ export function PatientMobileList({
 }) {
   return (
     <ul
-      className="divide-y divide-hairline md:hidden"
+      className="divide-y divide-hairline lg:hidden"
       aria-label="Patient registry"
     >
       {patients.map(patient => (

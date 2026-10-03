@@ -304,34 +304,35 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
             </div>
           </div>
 
-          <div className="overflow-x-auto border border-[#c8ccb5] rounded-lg bg-[#fbfbf7]">
+          {/* Four narrow columns so the table fits a 360 px phone: the unit sits under its value. */}
+          <div className="show-scrollbar-x overflow-x-auto border border-[#c8ccb5] rounded-lg bg-[#fbfbf7]">
             <table className="w-full text-left text-xs">
               <thead className="bg-[#e4e8d8] text-[#3e472f] border-b border-[#c8ccb5] uppercase text-[11px]">
                 <tr>
-                  <th className="py-2.5 px-3">Laboratory Test</th>
-                  <th className="py-2.5 px-3 w-32">Extracted Value</th>
-                  <th className="py-2.5 px-3">Unit</th>
-                  <th className="py-2.5 px-3">Standard Reference Range</th>
-                  <th className="py-2.5 px-3 text-right">Action</th>
+                  <th className="py-2.5 px-2">Test</th>
+                  <th className="py-2.5 px-2 w-24">Value</th>
+                  <th className="py-2.5 px-2">Usual range</th>
+                  <th className="py-2.5 px-2"><span className="sr-only">Remove</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#dce1ce]">
                 {extractedItems.map((item) => (
                   <tr key={item.id} className="hover:bg-[#f2f4ec] transition-colors">
-                    <td className="py-2.5 px-3 font-medium text-[#2c3320]">{item.testName}</td>
-                    <td className="py-2.5 px-3">
+                    <td className="py-2.5 px-2 font-medium text-[#2c3320]">{item.testName}</td>
+                    <td className="py-2.5 px-2">
                       <input
                         type="text"
+                        aria-label={`${item.testName}${item.unit ? `, ${item.unit}` : ""}`}
                         value={item.value}
                         onChange={(e) => handleValueChange(item.id, e.target.value)}
                         className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs font-mono font-bold text-[#2c3320]"
                       />
+                      {item.unit ? <span className="mt-1 block font-mono text-ink-muted">{item.unit}</span> : null}
                     </td>
-                    <td className="py-2.5 px-3 font-mono text-ink-muted">{item.unit || "-"}</td>
-                    <td className="py-2.5 px-3 text-[11px] text-[#606950]">
+                    <td className="py-2.5 px-2 text-[11px] text-[#606950]">
                       {item.normalRange}
                     </td>
-                    <td className="py-2.5 px-3 text-right">
+                    <td className="py-2.5 px-2 text-right">
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(item.id)}
@@ -354,7 +355,7 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
             </div>
           )}
 
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
             <ClayButton variant="ghost" size="sm" onClick={handleReset}>
               Discard and Choose Another File
             </ClayButton>

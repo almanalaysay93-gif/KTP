@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Pencil, Search } from "lucide-react";
 import { Link } from "wouter";
 import { AdminShell, AdminToaster } from "@/components/ktp/admin";
-import { fmtDate } from "@/components/ktp/admin/format";
+import { fmtDateCell } from "@/components/ktp/admin/format";
 import { ZBenefitDialog, Z_TYPES, type ZBenefitRow } from "@/components/ktp/admin/ZBenefitDialog";
 import { ClayButton, ClayCard, StatusChip } from "@/components/clay";
 import { MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
@@ -22,10 +22,33 @@ import { zDueState } from "@shared/zBenefit";
 const TYPES = Z_TYPES;
 const GROUP = Object.fromEntries(Z_TYPES.map(({ type, group }) => [type, group])) as Record<ServiceType, string>;
 
+/*
+ * The table needs about 950 px for its 14 columns. The width that the list gets does not follow
+ * the width of the screen (the sidebar is 80 px or 264 px), so the switch between the table and
+ * the cards is a container query, not a screen breakpoint.
+ */
+const TABLE_FITS = { table: "@min-[960px]:block", cards: "@min-[960px]:hidden" };
+/** In the table, a status chip is the word only and can break onto two lines. */
+const DENSE_CHIPS =
+  "[&_[data-status]]:h-auto [&_[data-status]]:min-h-6 [&_[data-status]]:rounded-md [&_[data-status]]:px-1.5 [&_[data-status]]:py-0.5 [&_[data-status]]:whitespace-normal [&_[data-status]_svg]:hidden";
+
+/** Short column headings for the table. The full label stays as the tooltip and the screen-reader name. */
+const shortDone = (type: ServiceType) => (type === "Meds" ? "First claim" : "Date");
+const shortClaim = (type: ServiceType, claim: string) => (type === "Laboratory" ? "Lab" : claim);
+
+function Heading({ short, full }: { short: string; full: string }) {
+  return (
+    <>
+      <span aria-hidden title={full}>{short}</span>
+      <span className="sr-only">{full}</span>
+    </>
+  );
+}
+
 /** A date that is done. */
 function Done({ date }: { date: string | null }) {
   return date ? (
-    <span className="type-data whitespace-nowrap text-ink">{fmtDate(date)}</span>
+    <span className="block type-data text-ink">{fmtDateCell(date)}</span>
   ) : (
     <span className="type-body-sm text-ink-muted">None</span>
   );
@@ -36,8 +59,8 @@ function Due({ date, today }: { date: string | null; today: string }) {
   if (!date) return <span className="type-body-sm text-ink-muted">None</span>;
   const state = zDueState(date, today);
   return (
-    <span className="inline-flex flex-col items-start gap-1">
-      <span className="type-data whitespace-nowrap text-ink">{fmtDate(date)}</span>
+    <span className="flex flex-col items-start gap-1">
+      <span className="type-data text-ink">{fmtDateCell(date)}</span>
       {state === "overdue" && <StatusChip status="overdue" />}
       {state === "soon" && <StatusChip status="due-soon" />}
     </span>
@@ -78,7 +101,7 @@ export default function ZBenefitPage() {
             skipLabel="Skip to the Z Benefit list"
           >
             <PageTransition routeKey="z-benefit" focusHeading={false}>
-              <main className="mx-auto w-full max-w-[1400px] px-4 pb-16 md:px-6 lg:px-8 lg:pb-20">
+              <main className="mx-auto w-full max-w-[1800px] px-4 pb-16 md:px-6 lg:pb-20">
                 <header className="pt-3 lg:pt-8">
                   <h1 className="type-display text-ink">Z Benefit</h1>
                   <p className="mt-1 max-w-[68ch] type-body-sm text-ink-muted">
@@ -151,9 +174,9 @@ export default function ZBenefitPage() {
                   </ClayCard>
                 ) : (
                   rows.length > 0 && (
-                    <>
-                      {/* 1024 px and wider: one table in its own scroll region. */}
-                      <ClayCard padding="none" className="mt-3 hidden min-w-0 lg:block">
+                    <div className="@container mt-3">
+                      {/* Room for all columns: one table. A date breaks before the year and a chip is the word only, so nothing scrolls sideways. */}
+                      <ClayCard padding="none" className={cn("hidden min-w-0", TABLE_FITS.table)}>
                         <div
                           id="z-benefit-table"
                           role="region"
@@ -161,81 +184,92 @@ export default function ZBenefitPage() {
                           tabIndex={0}
                           className="clay-focus-inset show-scrollbar-x overflow-x-auto rounded-[inherit]"
                         >
-                          <table className="w-full border-collapse text-left">
+                          <table className={cn("w-full border-collapse text-left", DENSE_CHIPS)}>
                             <thead className="type-label text-ink-muted">
                               <tr className="border-b border-hairline">
-                                <th scope="col" rowSpan={2} className="sticky left-0 z-10 bg-surface-1 px-4 py-3 align-bottom">
+                                <th scope="col" rowSpan={2} className="w-56 px-2 py-2 align-bottom">
                                   Patient
                                 </th>
-                                <th scope="col" rowSpan={2} className="px-3 py-3 align-bottom">Nephrologist</th>
-                                <th scope="col" rowSpan={2} className="px-3 py-3 align-bottom">Fellow in charge</th>
                                 {TYPES.map(({ type }) => (
-                                  <th key={type} scope="colgroup" colSpan={2} className="border-l border-hairline px-3 pt-3 pb-1 text-ink">
+                                  <th key={type} scope="colgroup" colSpan={2} className="border-l border-hairline px-1 pt-2 pb-1 text-ink">
                                     {GROUP[type]}
                                   </th>
                                 ))}
-                                <th scope="colgroup" colSpan={4} className="border-l border-hairline px-3 pt-3 pb-1 text-ink">
+                                <th scope="colgroup" colSpan={4} className="border-l border-hairline px-1 pt-2 pb-1 text-ink">
                                   Due date of claims
+                                </th>
+                                <th scope="col" rowSpan={2} className="border-l border-hairline px-1.5 py-2 align-bottom">
+                                  Record dates
                                 </th>
                               </tr>
                               <tr className="border-b-[1.5px] border-line-strong">
                                 {TYPES.map(({ type, done, next }) => [
-                                  <th key={`${type}-done`} scope="col" className="min-w-32 border-l border-hairline px-3 pt-1 pb-3 align-bottom">{done}</th>,
-                                  <th key={`${type}-next`} scope="col" className="min-w-32 px-3 pt-1 pb-3 align-bottom">{next}</th>,
+                                  <th key={`${type}-done`} scope="col" className="border-l border-hairline px-1 pt-1 pb-2 align-bottom">
+                                    <Heading short={shortDone(type)} full={done} />
+                                  </th>,
+                                  <th key={`${type}-next`} scope="col" className="px-1 pt-1 pb-2 align-bottom">
+                                    <Heading short="Next due" full={next} />
+                                  </th>,
                                 ])}
                                 {TYPES.map(({ type, claim }, index) => (
-                                  <th key={type} scope="col" className={cn("min-w-32 px-3 pt-1 pb-3 align-bottom", index === 0 && "border-l border-hairline")}>
-                                    {claim}
+                                  <th key={type} scope="col" className={cn("px-1 pt-1 pb-2 align-bottom", index === 0 && "border-l border-hairline")}>
+                                    <Heading short={shortClaim(type, claim)} full={`Due date of claim (${claim})`} />
                                   </th>
                                 ))}
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-hairline">
-                              {rows.map(row => (
-                                <tr key={row.patientId} className="align-top hover:bg-row-hover">
-                                  <th scope="row" className="sticky left-0 z-10 bg-surface-1 px-4 py-3 text-left font-normal">
+                            {/* One group of two rows for each recipient: the dates, then the doctors on one line under the dates. */}
+                            {rows.map(row => (
+                              <tbody key={row.patientId} className="border-t border-hairline align-top hover:bg-row-hover">
+                                <tr>
+                                  <th scope="rowgroup" rowSpan={2} className="px-2 py-2 text-left font-normal">
                                     <Link
                                       href={`/patients/${row.patientId}?tab=tracker`}
-                                      className="clay-focus inline-flex min-h-11 items-center type-body-sm font-bold whitespace-nowrap text-brick"
+                                      className="clay-focus inline-flex min-h-11 items-center type-body-sm font-bold text-brick"
                                     >
                                       {name(row)}
                                     </Link>
-                                    <span className="block type-data text-ink-muted">{row.hrn}</span>
-                                    <ClayButton
-                                      variant="secondary"
-                                      size="sm"
-                                      icon={<Pencil strokeWidth={1.75} />}
-                                      aria-label={`Record dates: ${name(row)}`}
-                                      onClick={() => setEditing(row)}
-                                      className="mt-2"
-                                    >
-                                      Record dates
-                                    </ClayButton>
+                                    <span className="block type-data whitespace-nowrap text-ink-muted">{row.hrn}</span>
                                   </th>
-                                  <td className="px-3 py-3 type-body-sm whitespace-nowrap">{row.nephrologist ?? <span className="text-ink-muted">Not set</span>}</td>
-                                  <td className="px-3 py-3 type-body-sm whitespace-nowrap">{row.fellow ?? <span className="text-ink-muted">Not set</span>}</td>
                                   {TYPES.map(({ type }) => [
-                                    <td key={`${type}-done`} className="border-l border-hairline px-3 py-3">
+                                    <td key={`${type}-done`} className="border-l border-hairline px-1 pt-2 pb-1">
                                       <Done date={type === "Meds" ? row.services[type].firstDate : row.services[type].lastDate} />
                                     </td>,
-                                    <td key={`${type}-next`} className="px-3 py-3">
+                                    <td key={`${type}-next`} className="px-1 pt-2 pb-1">
                                       <Due date={row.services[type].nextDue} today={today} />
                                     </td>,
                                   ])}
                                   {TYPES.map(({ type }, index) => (
-                                    <td key={type} className={cn("px-3 py-3", index === 0 && "border-l border-hairline")}>
+                                    <td key={type} className={cn("px-1 pt-2 pb-1", index === 0 && "border-l border-hairline")}>
                                       <Due date={row.services[type].claimDue} today={today} />
                                     </td>
                                   ))}
+                                  <td rowSpan={2} className="border-l border-hairline px-1.5 py-2">
+                                    <ClayButton
+                                      variant="icon"
+                                      size="sm"
+                                      title="Record dates"
+                                      aria-label={`Record dates: ${name(row)}`}
+                                      onClick={() => setEditing(row)}
+                                    >
+                                      <Pencil strokeWidth={1.75} />
+                                    </ClayButton>
+                                  </td>
                                 </tr>
-                              ))}
-                            </tbody>
+                                <tr>
+                                  <td colSpan={12} className="border-l border-hairline px-1 pb-2 type-caption text-ink-muted">
+                                    <span className="mr-4 inline-block">Nephrologist: {row.nephrologist ?? "Not set"}</span>
+                                    <span className="inline-block">Fellow in charge: {row.fellow ?? "Not set"}</span>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            ))}
                           </table>
                         </div>
                       </ClayCard>
 
-                      {/* Under 1024 px: one card for each recipient. */}
-                      <ul className="mt-3 space-y-4 lg:hidden">
+                      {/* Not enough room for the table: one card for each recipient. */}
+                      <ul className={cn("space-y-4", TABLE_FITS.cards)}>
                         {rows.map(row => (
                           <li key={row.patientId}>
                             <ClayCard className="min-w-0">
@@ -256,11 +290,11 @@ export default function ZBenefitPage() {
                               >
                                 Record dates
                               </ClayButton>
-                              <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 type-body-sm">
+                              <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 type-body-sm">
                                 <dt className="text-ink-muted">Nephrologist</dt>
-                                <dd>{row.nephrologist ?? "Not set"}</dd>
+                                <dd className="text-right">{row.nephrologist ?? "Not set"}</dd>
                                 <dt className="text-ink-muted">Fellow in charge</dt>
-                                <dd>{row.fellow ?? "Not set"}</dd>
+                                <dd className="text-right">{row.fellow ?? "Not set"}</dd>
                               </dl>
                               {TYPES.map(({ type, done, next, claim }) => (
                                 <dl key={type} className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 border-t border-hairline pt-3 type-body-sm">
@@ -276,7 +310,7 @@ export default function ZBenefitPage() {
                           </li>
                         ))}
                       </ul>
-                    </>
+                    </div>
                   )
                 )}
                 <ZBenefitDialog row={editing} onClose={() => setEditing(null)} />

@@ -127,10 +127,10 @@ export default function PatientsPage() {
                       <p>Could not load patients.</p>
                       <ClayButton onClick={() => patientsQuery.refetch()}>Retry</ClayButton>
                     </div>
-                  ) : patientsQuery.isLoading ? <p className="p-4 md:hidden" aria-busy="true">Loading patient registry...</p>
-                    : patients.length === 0 ? <p className="p-4 md:hidden">No patients found. Try adjusting your search or filters.</p>
+                  ) : patientsQuery.isLoading ? <p className="p-4 lg:hidden" aria-busy="true">Loading patient registry...</p>
+                    : patients.length === 0 ? <p className="p-4 lg:hidden">No patients found. Try adjusting your search or filters.</p>
                     : <PatientMobileList patients={patients} doctors={doctorsMap} />}
-                  <div className={`hidden overflow-x-auto ${patientsQuery.isError ? "" : "md:block"}`}>
+                  <div className={`show-scrollbar-x hidden overflow-x-auto ${patientsQuery.isError ? "" : "lg:block"}`}>
                     <table className="w-full text-left">
                       <thead>
                         <tr className="border-b border-hairline bg-surface-2 text-ink-muted type-label">

@@ -145,8 +145,17 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
 
       {/* Main Ledger Table */}
       <ClayCard className="overflow-hidden border border-[#c8ccb5] bg-[#fbfbf7] shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+        <div className="show-scrollbar-x overflow-x-auto">
+          {/* Fixed column widths: the table always fits its card. A long email, template, or subject is cut and the full text is in the tooltip and in the details. */}
+          <table className="w-full min-w-[820px] table-fixed text-left text-xs border-collapse">
+            <colgroup>
+              <col className="w-28" />
+              <col className="w-32" />
+              <col className="w-[22%]" />
+              <col className="w-40" />
+              <col />
+              <col className="w-28" />
+            </colgroup>
             <thead>
               <tr className="bg-[#e4e8d8] text-[#3e472f] border-b border-[#c8ccb5] font-semibold tracking-wider uppercase text-[11px]">
                 <th className="py-2.5 px-3">Status</th>
@@ -196,7 +205,7 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
                         {dateStr}
                       </td>
                       <td className="py-2.5 px-3">
-                        <div className="font-medium text-[#2c3320] truncate max-w-[200px]">
+                        <div className="font-medium text-[#2c3320] truncate" title={item.recipientEmail}>
                           {item.recipientEmail}
                         </div>
                         {item.patientHrn && (
@@ -205,13 +214,16 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
                           </div>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[#e2e7d5] text-[#3e472f] border border-[#c8ccb5]">
+                      <td className="py-2.5 px-3">
+                        <span
+                          className="inline-block max-w-full truncate align-bottom font-mono text-[11px] px-1.5 py-0.5 rounded bg-[#e2e7d5] text-[#3e472f] border border-[#c8ccb5]"
+                          title={item.templateName}
+                        >
                           {item.templateName}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 text-[#3e472f] font-normal truncate max-w-[260px]">
-                        {item.subject}
+                      <td className="py-2.5 px-3 text-[#3e472f] font-normal">
+                        <span className="line-clamp-2" title={item.subject}>{item.subject}</span>
                       </td>
                       <td className="py-2.5 px-3 text-right whitespace-nowrap">
                         <div

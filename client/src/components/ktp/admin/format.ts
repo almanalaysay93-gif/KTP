@@ -56,6 +56,10 @@ export function fmtDate(value: string | Date | null | undefined): string {
     ? `${String(p.d).padStart(2, "0")} ${MONTHS[p.m - 1]} ${p.y}`
     : "Not set";
 }
+/** Date for a table cell: the only line break is before the year, so a narrow column shows "02 Oct" above "2026". */
+export function fmtDateCell(value: string | Date | null | undefined): string {
+  return fmtDate(value).replace(/^(\d+) /, "$1 ");
+}
 export function fmtDayMonth(value: string | Date): string {
   const p = parts(value);
   return p ? `${String(p.d).padStart(2, "0")} ${MONTHS[p.m - 1]}` : "Not set";

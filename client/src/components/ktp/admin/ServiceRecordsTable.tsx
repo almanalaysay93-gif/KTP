@@ -12,7 +12,7 @@ import {
   type ServiceType,
 } from "@/pages/preview/mock";
 import { cn } from "@/lib/utils";
-import { fmtDate } from "./format";
+import { fmtDate, fmtDateCell } from "./format";
 import { CLAIM_CHIP, CLAIM_LABEL, DUE_CHIP, DUE_LABEL } from "./PatientTray";
 import type { ServiceAction } from "./ServiceActionDialog";
 import { REPEAT_REASON_LABEL } from "./TriageLists";
@@ -90,8 +90,8 @@ export function ServiceRecordsTable({ patient, records, filter, onFilterChange, 
         </div>
       </div>
 
-      <div role="region" aria-label="Service records" tabIndex={0} className="clay-table-wrap clay-focus -mx-2">
-        <table className="clay-table [&_td]:px-2 [&_th]:px-2 [&_thead_th]:whitespace-normal">
+      <div role="region" aria-label="Service records" tabIndex={0} className="clay-table-wrap clay-focus show-scrollbar-x -mx-2">
+        <table className="clay-table [&_td]:px-2 [&_td[data-num]]:whitespace-normal [&_th]:px-2 [&_thead_th]:whitespace-normal">
           <thead>
             <tr>
               <th scope="col" data-sticky="true">Service</th>
@@ -165,9 +165,9 @@ function RecordRow({
           </span>
         ) : null}
       </td>
-      <td data-num="true"><span className={strike}>{fmtDate(r.dueDate)}</span></td>
+      <td data-num="true"><span className={strike}>{fmtDateCell(r.dueDate)}</span></td>
       <td data-num={r.serviceDate ? "true" : undefined}>
-        {r.serviceDate ? <span className={strike}>{fmtDate(r.serviceDate)}</span> : <NotSet />}
+        {r.serviceDate ? <span className={strike}>{fmtDateCell(r.serviceDate)}</span> : <NotSet />}
       </td>
       <td>
         {superseded ? (
@@ -178,8 +178,8 @@ function RecordRow({
           <StatusChip status="done" />
         )}
       </td>
-      <td data-num={r.claimDeadline ? "true" : undefined}>{r.claimDeadline ? fmtDate(r.claimDeadline) : <NotSet />}</td>
-      <td data-num={r.claimFiledDate ? "true" : undefined}>{r.claimFiledDate ? fmtDate(r.claimFiledDate) : <NotSet />}</td>
+      <td data-num={r.claimDeadline ? "true" : undefined}>{r.claimDeadline ? fmtDateCell(r.claimDeadline) : <NotSet />}</td>
+      <td data-num={r.claimFiledDate ? "true" : undefined}>{r.claimFiledDate ? fmtDateCell(r.claimFiledDate) : <NotSet />}</td>
       <td>{claim && claim !== "None" ? <StatusChip status={CLAIM_CHIP[claim]} label={CLAIM_LABEL[claim]} srContext="Claim status:" /> : <NotSet />}</td>
       <td className="py-1">
         <span className="flex gap-1">
