@@ -135,6 +135,27 @@
   [data-slot="scroll-area-scrollbar"] {
     display: none !important;
   }
+  /* Opt-in for a wide table: keep the horizontal scrollbar visible. It stays in this layer
+     because an !important rule in a later layer cannot override the rules above. */
+  .show-scrollbar-x {
+    scrollbar-width: auto !important;
+  }
+  .show-scrollbar-x::-webkit-scrollbar {
+    display: block !important;
+    height: 12px !important;
+  }
+  .show-scrollbar-x::-webkit-scrollbar-track {
+    background-color: var(--sunken);
+  }
+  .show-scrollbar-x::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background-color: var(--line-strong);
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    .show-scrollbar-x {
+      scrollbar-color: var(--line-strong) var(--sunken);
+    }
+  }
   body {
     @apply bg-background text-foreground;
     min-height: 100vh;

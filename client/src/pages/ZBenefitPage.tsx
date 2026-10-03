@@ -159,7 +159,7 @@ export default function ZBenefitPage() {
                           role="region"
                           aria-label="Z Benefit list"
                           tabIndex={0}
-                          className="clay-focus-inset overflow-x-auto rounded-[inherit]"
+                          className="clay-focus-inset show-scrollbar-x overflow-x-auto rounded-[inherit]"
                         >
                           <table className="w-full border-collapse text-left">
                             <thead className="type-label text-ink-muted">
