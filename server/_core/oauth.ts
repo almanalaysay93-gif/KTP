@@ -1,14 +1,25 @@
 import { COOKIE_NAME, ONE_YEAR_MS, OAUTH_STATE_COOKIE, OAUTH_STATE_COOKIE_PLAIN, decodeOAuthState } from "@shared/const";
+import axios from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Express, Request, Response } from "express";
 import * as db from "../db";
 import { hasFullAccess } from "../adminAccess";
 import { getSessionCookieOptions } from "./cookies";
+import { ENV } from "./env";
 import { sdk } from "./sdk";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function failOAuth(res: Response, error: unknown) {
+  console.error("[OAuth] Callback failed", error);
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { error?: string; error_description?: string } | undefined;
+    console.error("[OAuth] Google token error", data?.error, data?.error_description);
+  }
+  res.redirect(302, "/login?oauth=failed");
 }
 
 export function registerOAuthRoutes(app: Express) {
@@ -33,6 +44,12 @@ export function registerOAuthRoutes(app: Express) {
     }
     res.clearCookie(OAUTH_STATE_COOKIE, { path: "/" });
     res.clearCookie(OAUTH_STATE_COOKIE_PLAIN, { path: "/" });
+
+    if (!ENV.googleClientId || !ENV.googleClientSecret) {
+      console.error("[OAuth] GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing");
+      res.redirect(302, "/login?oauth=failed");
+      return;
+    }
 
     try {
       const tokenResponse = await sdk.exchangeCodeForToken(code, state);
@@ -75,8 +92,7 @@ export function registerOAuthRoutes(app: Express) {
 
       res.redirect(302, isAdmin ? "/dashboard" : "/me");
     } catch (error) {
-      console.error("[OAuth] Callback failed", error);
-      res.status(500).json({ error: "OAuth callback failed" });
+      failOAuth(res, error);
     }
   });
 }

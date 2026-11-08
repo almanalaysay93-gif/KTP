@@ -1,4 +1,9 @@
-import { OAUTH_STATE_COOKIE, OAUTH_STATE_COOKIE_PLAIN, encodeOAuthState } from "@shared/const";
+import {
+  OAUTH_STATE_COOKIE,
+  OAUTH_STATE_COOKIE_PLAIN,
+  encodeOAuthState,
+  resolveGoogleClientId,
+} from "@shared/const";
 import { toast } from "sonner";
 
 export { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
@@ -6,9 +11,9 @@ export { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 // Start the Google OAuth login. Call this from an event handler or effect at
 // the moment you want to navigate, e.g. `onClick={() => startLogin()}`.
 export const startLogin = () => {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const clientId = resolveGoogleClientId(import.meta.env.VITE_GOOGLE_CLIENT_ID);
   if (!clientId) {
-    console.error("[OAuth] VITE_GOOGLE_CLIENT_ID is not configured.");
+    console.error("[OAuth] Google client ID is not configured.");
     toast.error("Google Client ID is not configured. Please check .env settings.");
     return;
   }

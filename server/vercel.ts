@@ -11,6 +11,7 @@ let appPromise: Promise<express.Express> | null = null;
 
 async function getApp(): Promise<express.Express> {
   const app = express();
+  app.set("trust proxy", 1);
 
   app.use((req, res, next) => {
     if (req.url.includes("%VITE_") || req.url.includes("%25VITE_")) {

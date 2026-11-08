@@ -1,0 +1,12 @@
+# Project memory
+
+- [done, 2026-11-08] OAuth callback 500 `{"error":"OAuth callback failed"}`. Cause: live bundle at ktp-beryl.vercel.app used stale client `226276580382-...`; user-stated client is `565079022798-kqtsnn59fqb4s0umj4t9nq7dijb9ojrq.apps.googleusercontent.com`. Fix: canonical client id in `shared/const.ts`, skip stale Manus id, URL-safe `state`, callback redirects to `/login?oauth=failed`. Secret for this client still required on Vercel as `GOOGLE_CLIENT_SECRET`. Google Console redirect URI: `https://ktp-beryl.vercel.app/api/oauth/callback`.
+- [stated, 2026-11-08] Google OAuth client id is `565079022798-kqtsnn59fqb4s0umj4t9nq7dijb9ojrq.apps.googleusercontent.com`.
+- [done, 2026-10-03] User rejected the poster wash. Confirmed BuildMe read: quiet field only, sign-in and admin, almost still, clay tokens. `OrganGridBackdrop` is now two off-screen washes, 8px/6px over 28s. Patient pages unchanged. Preview: http://127.0.0.1:8765/
+- [stated, 2026-10-01] User identified `https://github.com/almanalaysay93-gif/KTP.git` as the repository for Claude's work.
+- [stated, 2026-10-01] User requested a Markdown handoff for Antigravity. Handoff: `docs/ANTIGRAVITY_HANDOFF.md`.
+- [done, 2026-10-03] QA finding ZB-1 (Z Benefit desktop table clipped, no horizontal scrollbar). Cause: `client/src/index.css` hides all scrollbars globally. Fix: opt-in class `show-scrollbar-x` in the same `@layer base`, applied to the scroll region in `client/src/pages/ZBenefitPage.tsx`. Pushed to `origin/main` as `6a220fd`.
+- [done, 2026-10-03] Tables made to fit with no sideways scroll (user request). Z Benefit: 14 columns, short headings, a date breaks before the year (`fmtDateCell`), word-only chips, doctors on a line under the dates, pencil button in a "Record dates" column; table shows when its container is 960 px or wider (container query), cards below. Service records: dates break before the year. Dispatch log: fixed column widths. Patients: table from 1024 px, list below. Patient lab upload: 4 columns, fits 360 px. Checked with a headless browser and mock data at 360 to 2560 px. Pushed to `origin/main` as `93ae516`.
+- [stated, 2026-10-03] User requested a metrics page showing patient, donor, ethics, and kidney transplant counts.
+- [stated, 2026-10-03] User requested adding metrics M1-M8: readiness, blockers, waiting time, donor matching, ethics progress, monthly activity, follow-up compliance, and Z Benefit claims.
+- [stated, 2026-10-03] User authorized pushing the metrics changes and making them live.

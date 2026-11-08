@@ -1,7 +1,14 @@
+import { resolveGoogleClientId } from "@shared/const";
+
+const trimEnv = (value: string | undefined): string => (value ?? "").trim();
+
 export const ENV = {
-  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
-  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
+  googleClientId: resolveGoogleClientId(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.VITE_GOOGLE_CLIENT_ID
+  ),
+  googleClientSecret: trimEnv(process.env.GOOGLE_CLIENT_SECRET),
+  cookieSecret: trimEnv(process.env.JWT_SECRET),
   databaseUrl: process.env.DATABASE_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   ownerEmail: process.env.OWNER_EMAIL ?? process.env.ADMIN_EMAIL ?? "",

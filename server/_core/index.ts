@@ -31,6 +31,7 @@ async function findAvailablePort(startPort = 3000): Promise<number> {
 
 async function startServer() {
   const app = express();
+  app.set("trust proxy", 1);
   const server = createServer(app);
 
   // Catch malformed/analytics placeholder URLs gracefully
