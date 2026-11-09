@@ -43,6 +43,8 @@ const children: ChildProcess[] = [];
 let database: EmbeddedPostgres | undefined;
 let lockHeld = false;
 let stopping = false;
+let startupStage = "configuration";
+const diagnostics = process.env.KTP_INSTALLER_DIAGNOSTICS === "1";
 let childrenShutdown: Promise<void> | undefined;
 let databaseStartup: Promise<void> | undefined;
 let databaseStarted = false;
@@ -307,7 +309,10 @@ async function main() {
       "-c",
       "log_statement=none",
     ],
-    onLog: () => {},
+    onLog: message => {
+      if (diagnostics && !databaseStarted)
+        console.error("[Database bootstrap]", message);
+    },
     onError: () => {},
   });
   const originalStop = database.stop.bind(database);
@@ -348,12 +353,15 @@ async function main() {
   try {
     await access(path.join(data, "database/PG_VERSION"));
   } catch {
+    startupStage = "database-initialization";
     await database.initialise();
   }
   ensureRunning();
+  startupStage = "database-start";
   databaseStartup = database.start();
   await databaseStartup;
   databaseStarted = true;
+  startupStage = "database-administration";
   const admin = database.getPgClient("postgres", "127.0.0.1");
   await admin.connect();
   try {
@@ -365,6 +373,7 @@ async function main() {
     await admin.end();
   }
   // Import only after local configuration is installed: .env cannot select a cloud DB.
+  startupStage = "schema-initialization";
   const db = await import("../server/db");
   if (!(await db.getDb()))
     throw new StartupError("Local database initialization failed.");
@@ -375,12 +384,14 @@ async function main() {
     connection as unknown as { $client: { end(): Promise<void> } }
   ).$client.end();
   await db.getBatchClient()?.end();
+  startupStage = "rust-start";
   const rust = child(executable, []);
   await waitForService(
     `http://127.0.0.1:${rustPort}/health/ready`,
     rust,
     "Local Rust API did not become ready."
   );
+  startupStage = "web-start";
   const node = development
     ? child(
         process.execPath,
@@ -420,6 +431,21 @@ process.on("disconnect", () => stop());
 main().catch(error => {
   // Closing the desktop during startup is cancellation, not a startup failure.
   if (stopping) return;
+  if (diagnostics) {
+    const engineBootstrap = [
+      "database-initialization",
+      "database-start",
+    ].includes(startupStage);
+    const code =
+      typeof (error as NodeJS.ErrnoException)?.code === "string"
+        ? (error as NodeJS.ErrnoException).code
+        : "BOOTSTRAP_FAILED";
+    console.error(
+      "[Startup diagnostic]",
+      startupStage,
+      engineBootstrap && error instanceof Error ? error.message : code
+    );
+  }
   const message =
     error instanceof StartupError
       ? error.message

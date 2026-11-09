@@ -40,6 +40,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src/rust-backend -> target'
+          cache-on-failure: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Electron runtime
@@ -62,6 +63,7 @@ jobs:
       - name: Test bundled local backend and restart persistence
         env:
           KTP_TEST_PACKAGED: '1'
+          KTP_INSTALLER_DIAGNOSTICS: '1'
         run: pnpm test:local
       - name: Build Windows installer
         run: pnpm exec electron-builder --config config/electron-builder.cjs --win nsis --x64 --publish never
