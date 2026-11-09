@@ -9,10 +9,10 @@ import { registerStorageProxy } from "./storageProxy";
 import { registerPatientImportRoute } from "../patientImportRoute";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { serveStatic, setupVite } from "./vite";
+import { serveStatic } from "./static";
 
 function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const server = net.createServer();
     server.listen(port, "127.0.0.1", () => {
       server.close(() => resolve(true));
@@ -67,6 +67,7 @@ async function startServer() {
 
   // Development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
+    const { setupVite } = await import("./vite");
     await setupVite(app, server);
   } else {
     serveStatic(app);

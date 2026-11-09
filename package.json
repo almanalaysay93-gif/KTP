@@ -8,7 +8,7 @@
     "test:rust": "cargo test --locked --manifest-path src/rust-backend/Cargo.toml",
     "test:rust:integration": "cargo build --locked --manifest-path src/rust-backend/Cargo.toml && tsx scripts/test-rust-backend.ts",
     "dev": "cross-env KTP_LOCAL_DEV=1 node --import tsx scripts/run-local.ts",
-    "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist && node -e \"const fs=require('fs'); fs.mkdirSync('dist/data',{recursive:true}); if (fs.existsSync('server/data/seedData.json')) fs.copyFileSync('server/data/seedData.json','dist/data/seedData.json');\"",
+    "build": "vite build && node scripts/build-server.mjs && node -e \"const fs=require('fs'); fs.mkdirSync('dist/data',{recursive:true}); if (fs.existsSync('server/data/seedData.json')) fs.copyFileSync('server/data/seedData.json','dist/data/seedData.json');\"",
     "start": "node --import tsx scripts/run-local.ts",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
