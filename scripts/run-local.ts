@@ -27,6 +27,13 @@ const packaged = Boolean(
 );
 const development = process.env.KTP_LOCAL_DEV === "1" && !packaged;
 const execFileAsync = promisify(execFile);
+async function pgControl(args: string[], timeout: number): Promise<void> {
+  const resolveNative = createRequire(import.meta.resolve("embedded-postgres"));
+  const native = await import(
+    pathToFileURL(resolveNative.resolve("@embedded-postgres/windows-x64")).href
+  );
+  await execFileAsync(native.pg_ctl, args, { windowsHide: true, timeout });
+}
 class StartupError extends Error {}
 const defaultData =
   process.platform === "win32"
@@ -322,18 +329,16 @@ async function main() {
       await closeChildren();
       await databaseStartup?.catch(() => {});
       if (process.platform === "win32") {
-        if (!databaseStarted) return;
+        if (!databaseStarted) {
+          try {
+            await access(path.join(data, "database/postmaster.pid"));
+          } catch {
+            return;
+          }
+        }
         // embedded-postgres uses taskkill /f on Windows. pg_ctl instead asks the
         // server to stop and flush its persistent cluster before the app exits.
-        const resolveNative = createRequire(
-          import.meta.resolve("embedded-postgres")
-        );
-        const binaryModule = resolveNative.resolve(
-          "@embedded-postgres/windows-x64"
-        );
-        const binaries = await import(pathToFileURL(binaryModule).href);
-        await execFileAsync(
-          binaries.pg_ctl,
+        await pgControl(
           [
             "stop",
             "-D",
@@ -344,7 +349,7 @@ async function main() {
             "-t",
             "10",
           ],
-          { windowsHide: true, timeout: 12_000 }
+          12_000
         );
       } else {
         await originalStop();
@@ -358,7 +363,26 @@ async function main() {
   }
   ensureRunning();
   startupStage = "database-start";
-  databaseStartup = database.start();
+  // pg_ctl creates a restricted token on Windows; postgres.exe itself refuses
+  // elevated tokens. Redirecting its daemon output avoids inherited pipe leaks.
+  databaseStartup =
+    process.platform === "win32"
+      ? pgControl(
+          [
+            "start",
+            "-D",
+            path.join(data, "database"),
+            "-l",
+            "NUL",
+            "-w",
+            "-t",
+            "30",
+            "-o",
+            `-p ${databasePort} -h 127.0.0.1 -c unix_socket_directories= -c log_statement=none`,
+          ],
+          35_000
+        )
+      : database.start();
   await databaseStartup;
   databaseStarted = true;
   startupStage = "database-administration";
