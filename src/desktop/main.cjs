@@ -24,7 +24,12 @@ async function stop() {
   if (stopped) return stopped;
   stopped = new Promise(resolve => {
     clearTimeout(readyTimer);
-    if (!backend || backend.exitCode !== null || backend.signalCode !== null)
+    if (
+      !backend ||
+      !backend.pid ||
+      backend.exitCode !== null ||
+      backend.signalCode !== null
+    )
       return resolve();
     const timer = setTimeout(() => {
       backend.kill();
@@ -34,8 +39,12 @@ async function stop() {
       clearTimeout(timer);
       resolve();
     });
-    if (backend.connected) backend.send({ type: "ktp:shutdown" });
-    else backend.kill();
+    // Disconnected workers already run their own graceful cleanup handler.
+    try {
+      if (backend.connected) backend.send({ type: "ktp:shutdown" }, () => {});
+    } catch {
+      /* A concurrent disconnect still triggers worker cleanup. */
+    }
   });
   return stopped;
 }

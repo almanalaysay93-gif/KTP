@@ -17,6 +17,8 @@ import path from "node:path";
 import EmbeddedPostgres from "embedded-postgres";
 import { asyncExitHook, gracefulExit } from "exit-hook";
 import { promisify } from "node:util";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 
 const root =
   process.env.KTP_APP_ROOT || path.resolve(import.meta.dirname, "..");
@@ -318,7 +320,13 @@ async function main() {
         if (!databaseStarted) return;
         // embedded-postgres uses taskkill /f on Windows. pg_ctl instead asks the
         // server to stop and flush its persistent cluster before the app exits.
-        const binaries = await import("@embedded-postgres/windows-x64");
+        const resolveNative = createRequire(
+          import.meta.resolve("embedded-postgres")
+        );
+        const binaryModule = resolveNative.resolve(
+          "@embedded-postgres/windows-x64"
+        );
+        const binaries = await import(pathToFileURL(binaryModule).href);
         await execFileAsync(
           binaries.pg_ctl,
           [

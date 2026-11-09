@@ -58,6 +58,9 @@ async function readCredentials(): Promise<Credentials | null> {
   const path = join(await directory(), "credentials.json");
   let handle;
   try {
+    // O_NOFOLLOW is not available on Windows; reject reparse links explicitly.
+    if ((await lstat(path)).isSymbolicLink())
+      throw new LocalError(503, "Local authentication is unavailable");
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) {
     if (fileCode(error) === "ENOENT") return null;
@@ -245,13 +248,9 @@ export function registerLocalAuthRoutes(app: Express): void {
         await work(req, res);
       } catch (error) {
         const known = error instanceof LocalError;
-        res
-          .status(known ? error.status : 503)
-          .json({
-            error: known
-              ? error.message
-              : "Local authentication is unavailable",
-          });
+        res.status(known ? error.status : 503).json({
+          error: known ? error.message : "Local authentication is unavailable",
+        });
       }
     };
   app.get(

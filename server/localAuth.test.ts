@@ -145,10 +145,12 @@ describe("private local password authentication", () => {
       hash: expect.stringMatching(/^[a-f0-9]{128}$/),
       revision: expect.stringMatching(/^[a-f0-9]{32}$/),
     });
-    expect((await stat(data)).mode & 0o777).toBe(0o700);
-    expect((await stat(join(data, "credentials.json"))).mode & 0o777).toBe(
-      0o600
-    );
+    if (process.platform !== "win32") {
+      expect((await stat(data)).mode & 0o777).toBe(0o700);
+      expect((await stat(join(data, "credentials.json"))).mode & 0o777).toBe(
+        0o600
+      );
+    }
     expect(await readdir(data)).toEqual(["credentials.json"]);
     expect(await readLocalCredentialRevision()).toBe(saved.revision);
     expect(mocks.upsert).toHaveBeenCalledWith(
