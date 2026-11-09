@@ -74,10 +74,14 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem release/KTP-Setup-*-x64.exe | Select-Object -First 1
-          $installed = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          Write-Host "Installing $($setup.Name)"
+          $installed = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -PassThru
+          if (-not $installed.WaitForExit(600000)) { throw 'Installer exceeded 10 minutes' }
+          Write-Host "Installer exited: $($installed.ExitCode)"
           if ($installed.ExitCode -ne 0) { throw "Installer failed: $($installed.ExitCode)" }
           $app = Join-Path $env:LOCALAPPDATA 'Programs/KTP/KTP.exe'
           if (-not (Test-Path $app)) { throw 'Installed KTP executable is missing' }
+          Write-Host 'Starting installed desktop smoke test'
           node scripts/installer/smoke-desktop.mjs $app
           if ($LASTEXITCODE -ne 0) { throw 'Installed desktop smoke test failed' }
       - name: Verify uninstall preserves the local data directory
