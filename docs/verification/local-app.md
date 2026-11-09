@@ -52,7 +52,8 @@ The full OCR regression used the existing temporary RapidOCR environment and a
 
 ## Boundaries
 
-This is a localhost browser app, not a native desktop installer. The React UI,
+This snapshot verified the localhost browser app. A subsequent desktop installer
+is covered by [Windows installer verification](windows-installer.md). The React UI,
 password gateway, document/OCR services and some storage/orchestration work still
 use Node/Python alongside Rust. Installation/build needs internet access; normal
 production startup uses installed local binaries. The UI password does not encrypt

@@ -7,8 +7,9 @@ PostgreSQL or Python installations on the target computer.
 
 ## Install and use
 
-Download the `KTP-Windows-Installer` artifact from the repository's successful
-**Windows installer** GitHub Actions run. Unzip it, then run
+Download the [verified Windows installer artifact](https://github.com/almanalaysay93-gif/KTP/actions/runs/42629792584/artifacts/13681550933),
+or the `KTP-Windows-Installer` artifact from a newer successful **Windows installer**
+GitHub Actions run. Unzip it, then run
 `KTP-Setup-1.0.0-x64.exe`. Open **KTP** from the desktop or Start menu and create
 your local password. An existing local workspace uses its existing password.
 
@@ -79,3 +80,5 @@ it, runs the installed application with system runtimes removed from PATH, and
 verifies uninstall preserves a local data marker. Only the installer, digest
 and synthetic first-run screenshot are uploaded; databases and credentials are
 never uploaded. Artifacts are retained for 30 days.
+
+Build evidence and checksums: [Windows installer verification](verification/windows-installer.md).
