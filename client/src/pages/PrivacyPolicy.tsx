@@ -50,7 +50,7 @@ export default function PrivacyPolicy() {
                 <li>Clinical Status: Patient type (Recipient or Donor), clinical stage, surgery date, and care team assignments.</li>
                 <li>Laboratory Records: Blood chemistry, hematology, therapeutic drug monitoring levels, urinalysis, and infectious disease markers.</li>
                 <li>Evaluation Milestones: Pre-transplant workup items, imaging studies, medical clearances, and PhilHealth Z Package status.</li>
-                <li>Contact Information: Account email and mobile phone number used for care coordination notices.</li>
+                <li>Contact Information: Optional email address and mobile phone number used for care coordination.</li>
               </ul>
             </section>
 
@@ -69,14 +69,14 @@ export default function PrivacyPolicy() {
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">4. Access Controls and Security Safeguards</h2>
               <p className="text-muted-foreground">
-                Access to health records is strictly controlled. Patients can access only their own individual record after identity verification through Google OAuth and explicit privacy consent. Donors cannot access recipient records, and recipients cannot access donor records. Administrative access is restricted to authorized KT unit clinical staff through authenticated sessions.
+                Access to patient records uses the local workspace password. The workspace administrator controls who can use that password and is responsible for securing the device and any backups. Records are stored on the device running KTP. Patient email addresses are optional contact details.
               </p>
             </section>
 
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">5. Inquiries and Rights</h2>
               <p className="text-muted-foreground">
-                Patients may review their recorded health information or request corrections through the patient portal or by contacting the SPMC Kidney Transplant Institute clinical coordinator directly.
+                Patients may request a review of their recorded health information or ask for corrections by contacting the SPMC Kidney Transplant Institute clinical coordinator directly.
               </p>
             </section>
           </CardContent>

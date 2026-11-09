@@ -271,6 +271,18 @@ describe("Patient Access, Routing, Consent, and Isolation", () => {
   })
 
   describe("3. Patient Isolation", () => {
+    it("shares only the hotline with enrolled consented patients", async () => {
+      const user = await createUser("google-settings-patient", "settings.patient@example.invalid")
+      const patient = await db.createPatient({ hrn: "SETTINGS-PATIENT", patientType: "Recipient", firstName: "Synthetic", lastName: "Settings", accountEmail: user.email!, linkedUserId: user.id, stage: "Phase1", status: "Active", consentVersion: 1 })
+      await db.setSetting("emergencyHotlineText", "Synthetic hotline 123")
+      await db.setSetting("contactEmail", "private@example.invalid")
+      const caller = appRouter.createCaller(createPatientContext(user, patient.id))
+      expect(await caller.settings.getPatientSettings()).toEqual({ emergencyHotlineText: "Synthetic hotline 123" })
+      await expect(caller.settings.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
+      await db.setSetting("consentVersion", "2")
+      await expect(caller.settings.getPatientSettings()).rejects.toMatchObject({ code: "FORBIDDEN", message: "CONSENT_REQUIRED" })
+    })
+
     it("prevents patient from accessing another patient's data", async () => {
       const p1 = await db.createPatient({
         hrn: "HRN-010",

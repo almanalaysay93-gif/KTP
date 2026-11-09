@@ -145,7 +145,7 @@ export function PatientImportRow({
           {input("suffix", "Suffix", { maxLength: 32 })}
           {select("sex", "Sex", [["M", "Male"], ["F", "Female"]], "Not set")}
           {input("birthDate", "Birth date", { type: "date", max: todayDate(), value: DATE.test(text("birthDate")) ? text("birthDate") : "" })}
-          {input("accountEmail", "Gmail account (optional)", { type: "email", maxLength: 320, hint: "The patient signs in with it." })}
+          {input("accountEmail", "Email address (optional)", { type: "email", maxLength: 320, hint: "Contact details for care coordination." })}
           {input("contactNumber", "Contact number", { type: "tel", maxLength: 32 })}
           {select("stage", "Stage", stages.map(stage => [stage, STAGE_ADMIN_LABEL[stage]]), "Orientation (default)")}
           {input("surgeryDate", text("patientType") === "Donor" ? "Donation date" : "Transplant date", { type: "date", value: DATE.test(text("surgeryDate")) ? text("surgeryDate") : "" })}

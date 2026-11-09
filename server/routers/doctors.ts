@@ -3,6 +3,8 @@ import { z } from "zod";
 import * as db from "../db";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { DOCTOR_ROLES } from "@shared/ktp";
+import { rustBackendEnabled } from "../rustBackend";
+import { rustDoctors, rustDoctor, rustDoctorWrite } from "../rustAdmin";
 
 export const doctorsRouter = router({
   list: protectedProcedure
@@ -14,13 +16,15 @@ export const doctorsRouter = router({
         })
         .optional()
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustDoctors(ctx.req,input);
       return db.listDoctors(input);
     }),
 
   getById: adminProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustDoctor(ctx.req,input.id);
       const doc = await db.getDoctorById(input.id);
       if (!doc) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Doctor not found" });
@@ -36,7 +40,8 @@ export const doctorsRouter = router({
         active: z.boolean().default(true),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx,input }) => {
+      if (rustBackendEnabled()) return rustDoctorWrite(ctx.req,"createDoctor",input);
       return db.createDoctor(input);
     }),
 
@@ -49,7 +54,8 @@ export const doctorsRouter = router({
         active: z.boolean().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx,input }) => {
+      if (rustBackendEnabled()) return rustDoctorWrite(ctx.req,"updateDoctor",input);
       const { id, ...data } = input;
       const updated = await db.updateDoctor(id, data);
       if (!updated) {

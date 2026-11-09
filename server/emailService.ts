@@ -181,7 +181,7 @@ export async function sendEmail({
   templateName: string;
   patientId?: number | null;
 }): Promise<{ id: number; status: "sent" | "failed" | "mock" }> {
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = process.env.KTP_LOCAL_MODE === "1" ? undefined : process.env.RESEND_API_KEY;
   let status: "sent" | "failed" | "mock" = "mock";
   let errorMessage: string | null = null;
 

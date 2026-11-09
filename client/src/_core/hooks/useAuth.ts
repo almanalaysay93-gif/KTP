@@ -17,9 +17,7 @@ type UseAuthOptions = {
 
 export function useAuth(options?: UseAuthOptions) {
   // Login is started via startLogin() in the effect below, only when we actually
-  // navigate — never during render. startLogin() mints a one-time nonce + writes
-  // the state cookie, so calling it per render would overwrite the cookie and
-  // desync it from an in-flight login's `state`.
+  // navigate — never during render. startLogin() opens the local password screen;
   const { redirectOnUnauthenticated = false, redirectPath } = options ?? {};
   const isPreview = typeof window !== "undefined" && window.location.pathname.startsWith("/preview");
   const queryEnabled = options?.enabled ?? !isPreview;
@@ -81,7 +79,7 @@ export function useAuth(options?: UseAuthOptions) {
     if (typeof window === "undefined") return;
     if (redirectPath && window.location.pathname === redirectPath) return;
 
-    // Navigate at this moment only. startLogin() mints the nonce + cookie itself.
+    // Navigate at this moment only. startLogin() opens the local password screen.
     if (redirectPath) {
       window.location.href = redirectPath;
     } else {

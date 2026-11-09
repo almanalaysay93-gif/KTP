@@ -111,12 +111,12 @@ export default function PatientProfilePage() {
           <ClayCard className="p-6">
             <h3 className="type-headline text-ink">Contact Details</h3>
             <p className="type-body-sm text-ink-muted">
-              You can update your mobile number directly. To change your registered Gmail, contact the KT unit.
+              You can update your mobile number directly. To change your contact email address, contact the KT unit.
             </p>
 
             <form onSubmit={handleSaveContact} className="mt-4 flex flex-col gap-4">
               <div>
-                <label className="type-label text-ink-muted">Registered Gmail</label>
+                <label className="type-label text-ink-muted">Contact email address</label>
                 <div className="mt-1 flex items-center gap-2 text-ink type-body">
                   <Mail className="size-4 text-ink-muted" />
                   <span>{patient?.accountEmail}</span>

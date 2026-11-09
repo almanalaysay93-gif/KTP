@@ -32,9 +32,8 @@ export async function execute<T>(make: () => Program<T>): Promise<T> {
       return step.value;
     }).immediate();
   }
-  if (!await getDb()) throw new Error("Database unavailable");
+  await prepareClinicalCatalog();
   const client = getBatchClient()!;
-  await ensureCatalog();
   return await client.begin(async (transaction) => {
     const program = make();
     let step = program.next();
@@ -139,7 +138,7 @@ export async function addService(input: AddService, actor: number) {
   });
 }
 
-function labFlag(value: string, lowRaw: unknown, highRaw: unknown): "Low" | "Normal" | "High" | null {
+export function labFlag(value: string, lowRaw: unknown, highRaw: unknown): "Low" | "Normal" | "High" | null {
   const numeric = Number(value);
   const bound = (raw: unknown) => raw == null || String(raw).trim() === "" || !Number.isFinite(Number(raw)) ? null : Number(raw);
   const low = bound(lowRaw), high = bound(highRaw);
@@ -370,7 +369,7 @@ export async function respondToAppointment(input: {
   id: number;
   response: "Confirmed" | "RescheduleRequested";
   responseNote?: string;
-}) {
+}, actorUserId: number) {
   return execute(function* () {
     yield* patient(input.patientId);
     const [row] = yield query(
@@ -381,7 +380,7 @@ export async function respondToAppointment(input: {
       input.patientId
     );
     if (!row) fail("Appointment missing or cancelled", "CONFLICT");
-    yield* audit(input.patientId, input.patientId, `clinical.appointment.respond.${input.response}`, row.id);
+    yield* audit(actorUserId, input.patientId, `clinical.appointment.respond.${input.response}`, row.id);
     return { id: input.id, response: input.response };
   });
 }
@@ -411,6 +410,12 @@ export async function listAllAppointments() {
 }
 
 let catalogReady: Promise<void> | undefined;
+// Rust reads use the same one-time catalog synchronization as Node clinical reads.
+export async function prepareClinicalCatalog(): Promise<void> {
+  if (!await getDb()) throw new Error("Database unavailable");
+  await ensureCatalog();
+}
+
 function ensureCatalog(): Promise<void> {
   return catalogReady ??= getBatchClient()!.begin(async tx => {
     await tx.unsafe('LOCK TABLE "labTests", "checklistCatalog" IN SHARE ROW EXCLUSIVE MODE');

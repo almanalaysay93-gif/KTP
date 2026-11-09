@@ -39,7 +39,7 @@ export function closeSqliteDb(): void {
 }
 
 /**
- * Databases made before the Gmail account became optional have NOT NULL on patients.accountEmail.
+ * Databases made before the Email address became optional have NOT NULL on patients.accountEmail.
  * SQLite cannot drop NOT NULL from a column, so the table is made again with the same rows and indexes.
  */
 export function allowPatientWithoutEmail(db: Database.Database) {

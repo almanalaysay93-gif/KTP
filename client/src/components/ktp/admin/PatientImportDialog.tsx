@@ -17,7 +17,7 @@ import { PatientImportRow, type ImportEntry } from "./PatientImportRow";
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
 const TEMPLATE_COLUMNS = [
-  "HRN", "Last Name", "First Name", "Middle Name", "Suffix", "Type", "Sex", "Birth Date", "Gmail", "Contact Number",
+  "HRN", "Last Name", "First Name", "Middle Name", "Suffix", "Type", "Sex", "Birth Date", "Email", "Contact Number",
   "Stage", "Transplant Date", "Risk", "Follow-up", "Status", "Nephrologist", "Fellow", "Recipient HRN",
 ];
 const FIELDS: (keyof ImportRow)[] = [
@@ -241,8 +241,7 @@ function ImportBody({ onClose, onImported }: { onClose: () => void; onImported: 
             </p>
             <p className="text-ink-muted">
               Each patient needs an HRN, a name, and a type (Recipient or Donor). A donor needs the HRN of the
-              linked recipient. A Gmail account is optional: without it, the patient cannot sign in to the patient
-              portal.
+              linked recipient. Email is optional and is recorded as contact information.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">

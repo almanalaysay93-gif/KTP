@@ -15,12 +15,15 @@ import { patientImportRouter } from "./routers/patientImport";
 import * as db from "./db";
 import { hasFullAccess } from "./adminAccess";
 import type { Patient } from "../drizzle/schema";
+import { rustBackendEnabled } from "./rustBackend";
+import { rustAuthMe, rustConsentNotice, rustAcceptConsent } from "./rustPortal";
 
 export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(async ({ ctx }) => {
       if (!ctx.user) return null;
+      if (rustBackendEnabled()) return rustAuthMe(ctx.req);
 
       const isAdmin = hasFullAccess(ctx.user.email);
       let patient: Patient | null = null;
@@ -53,7 +56,8 @@ export const appRouter = router({
       };
     }),
 
-    getConsentNotice: publicProcedure.query(async () => {
+    getConsentNotice: publicProcedure.query(async ({ ctx }) => {
+      if (rustBackendEnabled()) return rustConsentNotice(ctx.req);
       const consentNoticeText =
         (await db.getSetting("consentNoticeText")) ??
         "By accessing the KTP portal, you consent to the collection and processing of your health information under Republic Act No. 10173 (Data Privacy Act of 2012) for kidney transplant monitoring and care coordination.";
@@ -65,6 +69,7 @@ export const appRouter = router({
     }),
 
     acceptConsent: patientBaseProcedure.mutation(async ({ ctx }) => {
+      if (rustBackendEnabled()) return rustAcceptConsent(ctx.req);
       const currentVersion = (await db.getSetting("consentVersion")) ?? "1";
       const verNum = parseInt(currentVersion, 10) || 1;
 

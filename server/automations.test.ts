@@ -1,8 +1,29 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { appRouter } from "./routers";
-import { renderEmailTemplate } from "./emailService";
+import { renderEmailTemplate, sendEmail } from "./emailService";
 
 describe("Clinical Email Automations and Dispatch System", () => {
+  it("never uses a provider key in local mode, including production builds", async () => {
+    const outbound = vi.fn();
+    vi.stubGlobal("fetch", outbound);
+    vi.stubEnv("KTP_LOCAL_MODE", "1");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RESEND_API_KEY", "synthetic-key-must-not-be-used");
+    try {
+      const result = await sendEmail({
+        to: "local-test@example.invalid",
+        templateName: "TestNotice",
+        subject: "Synthetic local test",
+        html: "<p>Local test</p>",
+        text: "Local test",
+      });
+      expect(result.status).toBe("mock");
+      expect(outbound).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
   const adminCaller = appRouter.createCaller({
     user: {
       id: 1,
@@ -64,7 +85,9 @@ describe("Clinical Email Automations and Dispatch System", () => {
 
     const reloaded = await adminCaller.automations.getConfig();
     expect(reloaded.dispatchTimeManila).toBe("07:30");
-    const apptTrigger = reloaded.triggers.find(t => t.key === "appointment_reminder");
+    const apptTrigger = reloaded.triggers.find(
+      t => t.key === "appointment_reminder"
+    );
     expect(apptTrigger?.leadDays).toBe(3);
   });
 
@@ -101,7 +124,9 @@ describe("Clinical Email Automations and Dispatch System", () => {
       upcomingVisits: 12,
       evalCount: 15,
     });
-    expect(digest.subject).toContain("Weekly Kidney Transplant Clinical Digest");
+    expect(digest.subject).toContain(
+      "Weekly Kidney Transplant Clinical Digest"
+    );
     expect(digest.html).toContain("45");
     expect(digest.html).toContain("7");
     expect(digest.html).toContain("12");
@@ -140,7 +165,9 @@ describe("Clinical Email Automations and Dispatch System", () => {
     const logs = await adminCaller.automations.listLogs({ limit: 10 });
     expect(logs.items.length).toBeGreaterThanOrEqual(1);
 
-    const testLog = logs.items.find(l => l.recipientEmail === "test-eval@spmcdvo.net");
+    const testLog = logs.items.find(
+      l => l.recipientEmail === "test-eval@spmcdvo.net"
+    );
     expect(testLog).toBeDefined();
     expect(testLog?.templateName).toBe("TestNotice");
   });

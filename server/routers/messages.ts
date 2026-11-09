@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import { createBroadcastMessage, listAdminMessages } from "../dbMessages";
+import { rustBackendEnabled } from "../rustBackend";
+import { rustAdminMessages, rustBroadcast } from "../rustAdmin";
 
 export const messagesRouter = router({
-  list: adminProcedure.query(async () => {
+  list: adminProcedure.query(async ({ctx}) => {
+    if (rustBackendEnabled()) return rustAdminMessages(ctx.req);
     return listAdminMessages();
   }),
 
@@ -15,9 +18,11 @@ export const messagesRouter = router({
         targetType: z.enum(["All", "Recipient", "Donor", "Stage", "Specific"]),
         targetStage: z.string().optional(),
         targetPatientId: z.number().int().positive().safe().optional(),
-      })
+      }).refine(input => input.targetType !== "Stage" || !!input.targetStage?.trim(), "Choose a stage for the broadcast")
+        .refine(input => input.targetType !== "Specific" || !!input.targetPatientId, "Choose a patient for the broadcast")
     )
     .mutation(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustBroadcast(ctx.req,input);
       return createBroadcastMessage({
         senderUserId: ctx.user.id,
         subject: input.subject,

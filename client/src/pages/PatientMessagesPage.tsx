@@ -16,7 +16,7 @@ import { trpc } from "@/lib/trpc";
 export default function PatientMessagesPage() {
   const [, navigate] = useLocation();
   const { toast, show, dismiss } = usePatientToast();
-  const settingsQuery = trpc.settings.getAll.useQuery();
+  const settingsQuery = trpc.settings.getPatientSettings.useQuery();
   const hotline = settingsQuery.data?.emergencyHotlineText ?? "KT Unit Hotline: 0917-000-0000";
 
   useEffect(() => {

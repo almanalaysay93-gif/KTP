@@ -5,6 +5,8 @@ import superjson from "superjson";
 import * as db from "../db";
 import type { TrpcContext } from "./context";
 import type { Patient } from "../../drizzle/schema";
+import { rustBackendEnabled } from "../rustBackend";
+import { rustPatientAccess } from "../rustPortal";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -76,6 +78,11 @@ export const patientBaseProcedure = baseProcedure.use(
       throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
     }
 
+    if (rustBackendEnabled()) {
+      const access = await rustPatientAccess(ctx.req);
+      return next({ ctx: { ...ctx, user: ctx.user, patientId: access.patient.id, patient: access.patient, rustConsentRequired: access.consentRequired as boolean | undefined } });
+    }
+
     let patient = await db.getPatientByLinkedUserId(ctx.user.id);
     if (!patient && ctx.user.email) {
       patient = await db.autoLinkPatientByEmail(ctx.user.id, ctx.user.email);
@@ -96,6 +103,7 @@ export const patientBaseProcedure = baseProcedure.use(
         user: ctx.user,
         patientId: patient.id,
         patient,
+        rustConsentRequired: undefined as boolean | undefined,
       },
     });
   })
@@ -109,6 +117,12 @@ export const patientProcedure = patientBaseProcedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
     const patient = (ctx as any).patient as Patient;
+
+    const rustConsentRequired = (ctx as typeof ctx & { rustConsentRequired?: boolean }).rustConsentRequired;
+    if (rustConsentRequired !== undefined) {
+      if (rustConsentRequired) throw new TRPCError({ code: "FORBIDDEN", message: "CONSENT_REQUIRED" });
+      return next({ ctx: { ...ctx, patientId: patient.id, patient } });
+    }
 
     const currentConsentVersion = await db.getSetting("consentVersion");
     const requiredVersion = currentConsentVersion ? parseInt(currentConsentVersion, 10) : 1;

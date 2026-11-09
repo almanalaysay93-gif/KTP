@@ -69,6 +69,9 @@ export async function createBroadcastMessage(input: {
   targetStage?: string;
   targetPatientId?: number;
 }): Promise<{ id: number; recipientCount: number }> {
+  if ((input.targetType === "Stage" && !input.targetStage?.trim()) || (input.targetType === "Specific" && !input.targetPatientId)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a broadcast target" });
+  }
   return execute(function* () {
     let patientSql = "SELECT id FROM patients WHERE status = 'Active'";
     const patientArgs: unknown[] = [];
@@ -184,13 +187,16 @@ export async function acknowledgePatientMessage(
   messageId: number
 ): Promise<{ success: boolean }> {
   return execute(function* () {
-    yield query(
-      'UPDATE "messageRecipients" SET "readAt" = CURRENT_TIMESTAMP WHERE "messageId" = ? AND "patientId" = ? AND "readAt" IS NULL',
+    const [recipient] = yield query(
+      'UPDATE "messageRecipients" SET "readAt" = COALESCE("readAt", CURRENT_TIMESTAMP) WHERE "messageId" = ? AND "patientId" = ? RETURNING id',
       messageId,
       patientId
     );
+    if (!recipient) throw new TRPCError({ code: "NOT_FOUND", message: "Message not found" });
     yield query(
-      'INSERT INTO "messageAcknowledgments" ("messageId", "patientId") VALUES (?, ?)',
+      'INSERT INTO "messageAcknowledgments" ("messageId", "patientId") SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM "messageAcknowledgments" WHERE "messageId" = ? AND "patientId" = ?)',
+      messageId,
+      patientId,
       messageId,
       patientId
     );

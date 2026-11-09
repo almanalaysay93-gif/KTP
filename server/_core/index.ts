@@ -4,6 +4,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
+import { registerLocalAuthRoutes } from "../localAuth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerPatientImportRoute } from "../patientImportRoute";
 import { appRouter } from "../routers";
@@ -13,7 +14,7 @@ import { serveStatic, setupVite } from "./vite";
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = net.createServer();
-    server.listen(port, () => {
+    server.listen(port, "127.0.0.1", () => {
       server.close(() => resolve(true));
     });
     server.on("error", () => resolve(false));
@@ -52,6 +53,7 @@ async function startServer() {
 
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  registerLocalAuthRoutes(app);
   registerPatientImportRoute(app);
 
   // tRPC API
@@ -77,7 +79,7 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
+  server.listen(port, "127.0.0.1", () => {
     console.log(`KTP server running on http://localhost:${port}/`);
   });
 }

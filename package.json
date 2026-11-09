@@ -4,14 +4,18 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
-    "build:vercel-api": "esbuild server/vercel.ts --platform=node --packages=external --bundle --format=esm --outfile=api/index.js",
+    "dev:rust": "cargo run --locked --manifest-path src/rust-backend/Cargo.toml",
+    "test:rust": "cargo test --locked --manifest-path src/rust-backend/Cargo.toml",
+    "test:rust:integration": "cargo build --locked --manifest-path src/rust-backend/Cargo.toml && tsx scripts/test-rust-backend.ts",
+    "dev": "cross-env KTP_LOCAL_DEV=1 node --import tsx scripts/run-local.ts",
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist && node -e \"const fs=require('fs'); fs.mkdirSync('dist/data',{recursive:true}); if (fs.existsSync('server/data/seedData.json')) fs.copyFileSync('server/data/seedData.json','dist/data/seedData.json');\"",
-    "start": "NODE_ENV=production drizzle-kit migrate && NODE_ENV=production node dist/index.js",
+    "start": "node --import tsx scripts/run-local.ts",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate"
+    "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "local": "cargo build --locked --manifest-path src/rust-backend/Cargo.toml && pnpm build && node --import tsx scripts/run-local.ts",
+    "test:local": "node --import tsx scripts/test-local-app.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
@@ -58,8 +62,10 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.2",
     "drizzle-orm": "^0.44.5",
+    "embedded-postgres": "17.11.0-beta.19",
     "embla-carousel-react": "^8.6.0",
     "exceljs": "^4.4.0",
+    "exit-hook": "5.1.0",
     "express": "^4.21.2",
     "framer-motion": "^12.23.22",
     "input-otp": "^1.4.2",

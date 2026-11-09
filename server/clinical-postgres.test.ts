@@ -72,7 +72,7 @@ describe("clinical PostgreSQL transactions", () => {
   it("checks and saves an imported patient list through real PostgreSQL syntax", async () => {
     const recipient = { hrn: "PG-IMPORT-1", patientType: "Recipient", firstName: "Synthetic", lastName: "Recipient", accountEmail: "PG.Import1@example.invalid", stage: "PostKT", surgeryDate: "2026-08-01", birthDate: "1980-03-04", sex: "M" };
     const donor = { hrn: "PG-IMPORT-2", patientType: "Donor", firstName: "Synthetic", lastName: "Donor", accountEmail: "pg.import2@example.invalid", stage: "Phase2", linkedRecipientHrn: "PG-IMPORT-1" };
-    expect(await checkImportRows([{ ...recipient, hrn: "PG-TEST", accountEmail: "PG@example.invalid" }])).toEqual([{ errors: ["HRN PG-TEST is already enrolled.", "Gmail account is already enrolled."], warnings: [] }]);
+    expect(await checkImportRows([{ ...recipient, hrn: "PG-TEST", accountEmail: "PG@example.invalid" }])).toEqual([{ errors: ["HRN PG-TEST is already enrolled.", "Email address is already enrolled."], warnings: [] }]);
     await expect(commitImportRows([recipient, { ...donor, linkedRecipientHrn: "NONE" }], 1, "list.xlsx")).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect((await state.pg.query(`SELECT count(*)::int AS n FROM patients WHERE hrn LIKE 'PG-IMPORT-%'`)).rows).toEqual([{ n: 0 }]);
     expect(await commitImportRows([donor, recipient], 1, "list.xlsx")).toMatchObject({ count: 2 });
@@ -89,7 +89,7 @@ describe("clinical PostgreSQL transactions", () => {
     expect(zAfter.XrayUsd).toEqual({ firstDate: "2026-09-09", lastDate: "2026-09-09", nextDue: "2026-12-10", claimDue: null });
     expect(zAfter.Tacro).toMatchObject({ nextDue: "2026-10-15" });
     expect(zRows[0].services.Laboratory).toEqual({ firstDate: "2026-09-02", lastDate: "2026-09-04", nextDue: "2026-09-01", claimDue: "2026-10-01" });
-    // Two patients with no Gmail account do not collide on the unique e-mail index. An older database drops NOT NULL with this statement.
+    // Two patients with no Email address do not collide on the unique e-mail index. An older database drops NOT NULL with this statement.
     await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" SET NOT NULL`);
     await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" DROP NOT NULL`);
     await state.pg.exec(`ALTER TABLE patients ALTER COLUMN "accountEmail" DROP NOT NULL`);

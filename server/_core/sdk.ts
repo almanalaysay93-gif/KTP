@@ -1,156 +1,20 @@
-import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
-import { randomBytes } from "crypto";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
-import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 import { ENV } from "./env";
-
-// Utility function
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
-
 export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+  credentialRevision?: string;
 };
-
-export type ExchangeTokenResponse = {
-  accessToken: string;
-  tokenType: string;
-  expiresIn: number;
-  refreshToken?: string;
-  scope: string;
-  idToken: string;
-};
-
-export type GetUserInfoResponse = {
-  openId: string;
-  name: string;
-  email?: string | null;
-  loginMethod?: string | null;
-};
-
-const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
-
-type GoogleTokenResponse = {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  refresh_token?: string;
-  scope: string;
-  id_token: string;
-};
-
-type GoogleUserInfoResponse = {
-  sub: string;
-  name?: string;
-  email?: string;
-  email_verified?: boolean;
-};
-
-class OAuthService {
-  constructor(private client: ReturnType<typeof axios.create>) {
-    if (!ENV.googleClientId || !ENV.googleClientSecret) {
-      console.error(
-        "[OAuth] ERROR: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not configured!"
-      );
-    }
-  }
-
-  private decodeState(state: string): string {
-    return decodeOAuthState(state).redirectUri;
-  }
-
-  async getTokenByCode(
-    code: string,
-    state: string
-  ): Promise<ExchangeTokenResponse> {
-    const { data } = await this.client.post<GoogleTokenResponse>(
-      GOOGLE_TOKEN_URL,
-      new URLSearchParams({
-        client_id: ENV.googleClientId,
-        client_secret: ENV.googleClientSecret,
-        code,
-        redirect_uri: this.decodeState(state),
-        grant_type: "authorization_code",
-      }),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
-
-    return {
-      accessToken: data.access_token,
-      tokenType: data.token_type,
-      expiresIn: data.expires_in,
-      refreshToken: data.refresh_token,
-      scope: data.scope,
-      idToken: data.id_token,
-    };
-  }
-
-  async getUserInfoByToken(
-    token: ExchangeTokenResponse
-  ): Promise<GetUserInfoResponse> {
-    const { data } = await this.client.get<GoogleUserInfoResponse>(
-      GOOGLE_USERINFO_URL,
-      { headers: { Authorization: `Bearer ${token.accessToken}` } }
-    );
-
-    if (data.email_verified !== true) {
-      throw ForbiddenError("Google email is not verified");
-    }
-
-    return {
-      openId: data.sub,
-      name: data.name || data.email || data.sub,
-      email: data.email ?? null,
-      loginMethod: "google",
-    };
-  }
-}
-
-const createOAuthHttpClient = (): AxiosInstance =>
-  axios.create({
-    timeout: AXIOS_TIMEOUT_MS,
-  });
-
 class SDKServer {
-  private readonly client: AxiosInstance;
-  private readonly oauthService: OAuthService;
-
-  constructor(client: AxiosInstance = createOAuthHttpClient()) {
-    this.client = client;
-    this.oauthService = new OAuthService(this.client);
-  }
-
-  /**
-   * Exchange OAuth authorization code for access token
-   * @example
-   * const tokenResponse = await sdk.exchangeCodeForToken(code, state);
-   */
-  async exchangeCodeForToken(
-    code: string,
-    state: string
-  ): Promise<ExchangeTokenResponse> {
-    return this.oauthService.getTokenByCode(code, state);
-  }
-
-  /**
-   * Get user information using access token
-   * @example
-   * const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
-   */
-  async getUserInfo(accessToken: string): Promise<GetUserInfoResponse> {
-    return this.oauthService.getUserInfoByToken({
-      accessToken,
-    } as ExchangeTokenResponse);
-  }
-
   private parseCookies(cookieHeader: string | undefined) {
     if (!cookieHeader) {
       return new Map<string, string>();
@@ -161,10 +25,16 @@ class SDKServer {
   }
 
   private getSessionSecret() {
-    if (ENV.isProduction && !ENV.cookieSecret) {
-      throw new Error("FATAL: JWT_SECRET environment variable is missing in production!");
+    if (
+      (ENV.isProduction || process.env.KTP_LOCAL_MODE === "1") &&
+      !ENV.cookieSecret
+    ) {
+      throw new Error(
+        "FATAL: JWT_SECRET environment variable is missing in production!"
+      );
     }
-    const secret = ENV.cookieSecret || "skti-default-jwt-secret-key-32-chars-min!";
+    const secret =
+      ENV.cookieSecret || "skti-default-jwt-secret-key-32-chars-min!";
     return new TextEncoder().encode(secret);
   }
 
@@ -175,13 +45,18 @@ class SDKServer {
    */
   async createSessionToken(
     openId: string,
-    options: { expiresInMs?: number; name?: string } = {}
+    options: {
+      expiresInMs?: number;
+      name?: string;
+      credentialRevision?: string;
+    } = {}
   ): Promise<string> {
     return this.signSession(
       {
         openId,
-        appId: ENV.googleClientId || "skti-app",
+        appId: "ktp-local",
         name: options.name || "User",
+        credentialRevision: options.credentialRevision,
       },
       options
     );
@@ -200,6 +75,9 @@ class SDKServer {
       openId: payload.openId,
       appId: payload.appId || "skti-app",
       name: payload.name || "User",
+      ...(payload.credentialRevision
+        ? { credentialRevision: payload.credentialRevision }
+        : {}),
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -246,6 +124,23 @@ class SDKServer {
       throw ForbiddenError("Invalid session cookie");
     }
 
+    if (process.env.KTP_LOCAL_MODE === "1") {
+      const { readLocalCredentialRevision } = await import("../localAuth");
+      const { payload } = await jwtVerify(
+        sessionToken!,
+        this.getSessionSecret(),
+        { algorithms: ["HS256"] }
+      );
+      const revision = await readLocalCredentialRevision();
+      if (
+        session.openId !== "ktp-local-admin" ||
+        !revision ||
+        payload.credentialRevision !== revision
+      ) {
+        throw ForbiddenError("Invalid local session");
+      }
+    }
+
     // One round trip: stamps lastSignedIn, enforces the email allowlist, and returns
     // the post-update row. A missing row means the session references a user
     // that no longer exists, which stays a hard rejection.
@@ -258,8 +153,5 @@ class SDKServer {
     return user;
   }
 }
-
-/** Result of `sdk.authenticateRequest`. */
 export type AuthenticatedUser = User;
-
 export const sdk = new SDKServer();

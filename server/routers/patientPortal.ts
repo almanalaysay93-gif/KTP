@@ -2,11 +2,15 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "../db";
 import * as clinical from "../dbClinical";
+import { submitPatientLab } from "../dbPatientLabs";
 import { acknowledgePatientMessage, listPatientMessages } from "../dbMessages";
 import { patientProcedure, router } from "../_core/trpc";
+import { rustBackendEnabled } from "../rustBackend";
+import { rustPortalProfile, rustClinical, rustPortalMessages, rustRespondAppointment, rustAcknowledgeMessage, rustUpdateContact, rustSubmitPatientLab } from "../rustPortal";
 
 export const patientPortalRouter = router({
   getMyProfile: patientProcedure.query(async ({ ctx }) => {
+    if (rustBackendEnabled()) return rustPortalProfile(ctx.req);
     const patient = await db.getPatientById(ctx.patientId);
     if (!patient) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Patient profile not found" });
@@ -40,6 +44,10 @@ export const patientPortalRouter = router({
   }),
 
   getMyClinical: patientProcedure.query(async ({ ctx }) => {
+    if (rustBackendEnabled()) {
+      await clinical.prepareClinicalCatalog();
+      return rustClinical(ctx.req);
+    }
     return clinical.getClinical(ctx.patientId);
   }),
 
@@ -52,27 +60,34 @@ export const patientPortalRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) {
+        await clinical.prepareClinicalCatalog();
+        return rustRespondAppointment(ctx.req, input);
+      }
       return clinical.respondToAppointment({
         patientId: ctx.patientId,
         id: input.appointmentId,
         response: input.response,
         responseNote: input.responseNote,
-      });
+      }, ctx.user!.id);
     }),
 
   getMyMessages: patientProcedure.query(async ({ ctx }) => {
+    if (rustBackendEnabled()) return rustPortalMessages(ctx.req);
     return listPatientMessages(ctx.patientId);
   }),
 
   acknowledgeMessage: patientProcedure
     .input(z.object({ messageId: z.number().int().positive().safe() }))
     .mutation(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustAcknowledgeMessage(ctx.req, input.messageId);
       return acknowledgePatientMessage(ctx.patientId, input.messageId);
     }),
 
   updateContact: patientProcedure
     .input(z.object({ contactNumber: z.string().max(32).nullable() }))
     .mutation(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustUpdateContact(ctx.req, input.contactNumber);
       const updated = await db.updatePatient(ctx.patientId, {
         contactNumber: input.contactNumber,
       });
@@ -108,36 +123,20 @@ export const patientPortalRouter = router({
         note: z.string().trim().max(1000).optional(),
         items: z.array(
           z.object({
-            labTestId: z.number().int().positive(),
+            labTestId: z.number().int().positive().safe(),
             value: z.string().trim().min(1).max(100),
           })
-        ),
+        ).min(1).max(100),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const res = await clinical.recordResult(
-        {
-          patientId: ctx.patientId,
-          serviceRecordId: 0,
-          serviceDate: input.serviceDate,
-          label: "Patient self-uploaded lab report",
-          nurseApproved: false,
-          approvedByNurse: "Pending Verification",
-          note: input.note ? `[Patient Upload] ${input.note}` : "[Patient Upload] Pending clinical verification",
-          results: input.items,
-        } as any,
-        ctx.user?.id ?? 0
-      );
-
-      await db.logActivity(
-        ctx.user?.id ?? 0,
-        ctx.patientId,
-        "PATIENT_UPLOAD_LAB",
-        { serviceDate: input.serviceDate, testCount: input.items.length },
-        ctx.req.ip,
-        ctx.req.headers["user-agent"]
-      );
-
-      return { success: true, recordId: res?.id };
+      if (rustBackendEnabled()) {
+        await clinical.prepareClinicalCatalog();
+        return rustSubmitPatientLab(ctx.req, input);
+      }
+      return submitPatientLab({ ...input, patientId: ctx.patientId }, ctx.user!.id, {
+        ip: ctx.req.ip,
+        userAgent: ctx.req.headers["user-agent"],
+      });
     }),
 });

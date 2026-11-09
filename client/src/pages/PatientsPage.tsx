@@ -184,7 +184,7 @@ export default function PatientsPage() {
                                         {patient.lastName}, {patient.firstName} {patient.suffix ?? ""}
                                         </Link>
                                       </p>
-                                      <p className="text-ink-muted type-body-sm">{patient.accountEmail ?? "No Gmail account"}</p>
+                                      <p className="text-ink-muted type-body-sm">{patient.accountEmail ?? "No email address"}</p>
                                     </div>
                                   </div>
                                 </td>

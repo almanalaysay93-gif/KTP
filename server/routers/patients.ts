@@ -3,6 +3,8 @@ import { z } from "zod";
 import * as db from "../db";
 import { adminProcedure, router } from "../_core/trpc";
 import { hasFullAccess } from "../adminAccess";
+import { rustBackendEnabled, rustListPatients, rustPatientProfile } from "../rustBackend";
+import { rustPatientWrite, rustPatientActivity } from "../rustPatients";
 import {
   DONOR_STAGES,
   PATIENT_STATUSES,
@@ -22,12 +24,12 @@ const patientInputSchema = z.object({
   sex: z.enum(["M", "F"]).nullable().optional(),
   birthDate: z.string().nullable().optional(),
   contactNumber: z.string().max(32).nullable().optional(),
-  // Optional. A patient with no Gmail account has no access to the patient portal.
+  // Optional. A patient with no Email address has no access to the patient portal.
   accountEmail: z
-    .union([z.literal(""), z.string().trim().email("Gmail account is not a valid e-mail address").max(320)])
+    .union([z.literal(""), z.string().trim().email("Email address is not a valid e-mail address").max(320)])
     .nullable()
     .optional()
-    // Not sent: no change (an update keeps the saved value). Empty: no Gmail account.
+    // Not sent: no change (an update keeps the saved value). Empty: no Email address.
     .transform(value => (value === undefined ? undefined : value || null)),
   nephrologistId: z.number().nullable().optional(),
   fellowId: z.number().nullable().optional(),
@@ -48,7 +50,7 @@ function validatePatientBusinessRules(
   if (data.accountEmail && hasFullAccess(data.accountEmail)) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Patient Gmail cannot be on the admin email allowlist",
+      message: "Patient email cannot be on the admin email allowlist",
     });
   }
 
@@ -98,7 +100,8 @@ export const patientsRouter = router({
         })
         .optional()
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustListPatients(ctx.req, input);
       return db.listPatients(input);
     }),
 
@@ -110,6 +113,7 @@ export const patientsRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustPatientProfile(ctx.req, input);
       const patient = await db.getPatientById(input.id);
       if (!patient) {
         if (input.allowMissing) {
@@ -151,6 +155,7 @@ export const patientsRouter = router({
   create: adminProcedure
     .input(patientInputSchema)
     .mutation(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustPatientWrite(ctx.req,"create",input);
       validatePatientBusinessRules(input);
 
       // Check unique HRN
@@ -164,7 +169,7 @@ export const patientsRouter = router({
       if (existingEmail) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "A patient with this Gmail account is already enrolled",
+          message: "A patient with this Email address is already enrolled",
         });
       }
 
@@ -201,6 +206,7 @@ export const patientsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustPatientWrite(ctx.req,"update",input);
       const existing = await db.getPatientById(input.id);
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Patient not found" });
@@ -227,7 +233,7 @@ export const patientsRouter = router({
         if (dupEmail && dupEmail.id !== input.id) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "A patient with this Gmail account is already enrolled",
+            message: "A patient with this Email address is already enrolled",
           });
         }
       }
@@ -271,6 +277,7 @@ export const patientsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustPatientWrite(ctx.req,"archive",input);
       const existing = await db.getPatientById(input.id);
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Patient not found" });
@@ -292,7 +299,8 @@ export const patientsRouter = router({
 
   activityLogs: adminProcedure
     .input(z.object({ patientId: z.number().int().positive().safe(), limit: z.number().optional() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustPatientActivity(ctx.req,input);
       return db.listActivityLogs(input.patientId, input.limit ?? 50);
     }),
 });

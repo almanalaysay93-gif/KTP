@@ -79,11 +79,11 @@ describe("patient import check and save", () => {
       { ...donor, linkedRecipientHrn: "NOT-THERE" },
     ] });
     expect(bad.errors).toEqual([
-      "HRN is missing.", "Type must be Recipient or Donor.", "First name is missing.", "Gmail account is not a valid e-mail address.",
+      "HRN is missing.", "Type must be Recipient or Donor.", "First name is missing.", "Email address is not a valid e-mail address.",
       "Sex must be M or F.", "Birth date is in the future.", "Surgery date is necessary for stage PostKT.", "Follow-up interval must be 1, 2, or 3 months.",
     ]);
     expect(noStage).toEqual({ errors: [], warnings: ["No stage. Orientation is used.", 'Nephrologist "Dr. Nobody" is not in the doctor list. The field stays empty.'] });
-    expect(duplicateA.errors).toEqual(["HRN IMPORT-TEST-4 occurs more than one time in this list.", "Gmail account occurs more than one time in this list."]);
+    expect(duplicateA.errors).toEqual(["HRN IMPORT-TEST-4 occurs more than one time in this list.", "Email address occurs more than one time in this list."]);
     expect(duplicateB.errors).toHaveLength(2);
     expect(loneDonor.errors).toEqual(["Linked recipient HRN NOT-THERE is not a recipient in the registry or in this list."]);
     expect(saved()).toHaveLength(0);
@@ -101,20 +101,20 @@ describe("patient import check and save", () => {
     expect(JSON.parse(logs[0].details)).toMatchObject({ hrn: "IMPORT-TEST-1", file: "patients.xlsx" });
     // A second import of the same list is refused.
     const again = await admin.check({ rows: [recipient] });
-    expect(again[0].errors).toEqual(["HRN IMPORT-TEST-1 is already enrolled.", "Gmail account is already enrolled."]);
+    expect(again[0].errors).toEqual(["HRN IMPORT-TEST-1 is already enrolled.", "Email address is already enrolled."]);
   });
-  it("saves patients with no Gmail account, with a note that they have no portal access", async () => {
+  it("saves patients with no Email address, with a note that they have no portal access", async () => {
     const rows = [{ ...recipient, accountEmail: "" }, { ...recipient, hrn: "IMPORT-TEST-5", accountEmail: null }];
     expect(await admin.check({ rows })).toEqual([
-      { errors: [], warnings: ["No Gmail account. The patient cannot sign in to the patient portal."] },
-      { errors: [], warnings: ["No Gmail account. The patient cannot sign in to the patient portal."] },
+      { errors: [], warnings: ["No email contact provided."] },
+      { errors: [], warnings: ["No email contact provided."] },
     ]);
     expect(await admin.commit({ rows })).toMatchObject({ count: 2 });
     expect(saved().map(row => [row.hrn, row.accountEmail])).toEqual([["IMPORT-TEST-1", null], ["IMPORT-TEST-5", null]]);
-    // A list with a Gmail account that is enrolled is still refused.
+    // A list with a Email address that is enrolled is still refused.
     getSqliteDb().prepare("UPDATE patients SET accountEmail = ? WHERE hrn = ?").run("taken@example.invalid", "IMPORT-TEST-1");
     const [taken] = await admin.check({ rows: [{ ...recipient, hrn: "IMPORT-TEST-6", accountEmail: "Taken@example.invalid" }] });
-    expect(taken.errors).toEqual(["Gmail account is already enrolled."]);
+    expect(taken.errors).toEqual(["Email address is already enrolled."]);
   });
   it("saves no patient when one row of the list is wrong", async () => {
     await expect(admin.commit({ rows: [recipient, { ...donor, lastName: "" }] })).rejects.toThrow("No patient was saved. Patient 2 (HRN IMPORT-TEST-2): Last name is missing.");
@@ -123,10 +123,10 @@ describe("patient import check and save", () => {
   });
 });
 
-describe("patient with no Gmail account", () => {
+describe("patient with no Email address", () => {
   const patients = patientsRouter.createCaller(ctx("almanalaysay93@gmail.com"));
   const base = { patientType: "Recipient" as const, firstName: "Synthetic", lastName: "NoEmail", stage: "Phase1" };
-  it("enrols two patients with no Gmail account, and an update of another field keeps a saved Gmail account", async () => {
+  it("enrols two patients with no Email address, and an update of another field keeps a saved Email address", async () => {
     const first = await patients.create({ ...base, hrn: "IMPORT-TEST-7" });
     const second = await patients.create({ ...base, hrn: "IMPORT-TEST-8", accountEmail: "" });
     const third = await patients.create({ ...base, hrn: "IMPORT-TEST-9", accountEmail: "keep@example.invalid" });

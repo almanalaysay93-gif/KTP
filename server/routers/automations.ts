@@ -1,5 +1,14 @@
 import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
+import { rustBackendEnabled } from "../rustBackend";
+import {
+  rustAutomationConfig,
+  rustAutomationLogs,
+  rustAutomationPreview,
+  rustAutomationSweep,
+  rustAutomationTest,
+  rustAutomationUpdate,
+} from "../rustAutomations";
 import {
   getAutomationConfig,
   listEmailLogs,
@@ -10,7 +19,8 @@ import {
 } from "../emailService";
 
 export const automationsRouter = router({
-  getConfig: adminProcedure.query(async () => {
+  getConfig: adminProcedure.query(async ({ ctx }) => {
+    if (rustBackendEnabled()) return rustAutomationConfig(ctx.req);
     return getAutomationConfig();
   }),
 
@@ -21,7 +31,11 @@ export const automationsRouter = router({
         dispatchTimeManila: z.string().regex(/^\d{2}:\d{2}$/),
         triggers: z.array(
           z.object({
-            key: z.enum(["appointment_reminder", "overdue_lab", "weekly_digest"]),
+            key: z.enum([
+              "appointment_reminder",
+              "overdue_lab",
+              "weekly_digest",
+            ]),
             label: z.string(),
             description: z.string(),
             enabled: z.boolean(),
@@ -30,7 +44,8 @@ export const automationsRouter = router({
         ),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (rustBackendEnabled()) return rustAutomationUpdate(ctx.req, input);
       const current = await getAutomationConfig();
       const updated = {
         ...current,
@@ -42,7 +57,8 @@ export const automationsRouter = router({
       return { success: ok };
     }),
 
-  runManualSweep: adminProcedure.mutation(async () => {
+  runManualSweep: adminProcedure.mutation(async ({ ctx }) => {
+    if (rustBackendEnabled()) return rustAutomationSweep(ctx.req);
     const stats = await runEmailAutomationSweep();
     return { success: true, stats };
   }),
@@ -56,7 +72,8 @@ export const automationsRouter = router({
         offset: z.number().int().min(0).default(0),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (rustBackendEnabled()) return rustAutomationLogs(ctx.req, input);
       const items = await listEmailLogs(input);
       return { items };
     }),
@@ -73,7 +90,8 @@ export const automationsRouter = router({
         ]),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (rustBackendEnabled()) return rustAutomationTest(ctx.req, input);
       const { subject, html, text } = renderEmailTemplate(input.templateName, {
         patientName: "Sample Test Patient",
         hrn: "KTP-2026-TEST",
@@ -96,7 +114,11 @@ export const automationsRouter = router({
         templateName: input.templateName,
       });
 
-      return { success: res.status !== "failed", status: res.status, id: res.id };
+      return {
+        success: res.status !== "failed",
+        status: res.status,
+        id: res.id,
+      };
     }),
 
   renderPreview: adminProcedure
@@ -111,7 +133,8 @@ export const automationsRouter = router({
         sampleData: z.record(z.string(), z.any()).optional(),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (rustBackendEnabled()) return rustAutomationPreview(ctx.req, input);
       const data = input.sampleData || {
         patientName: "Juan Dela Cruz",
         hrn: "KTP-2026-0001",
@@ -126,7 +149,10 @@ export const automationsRouter = router({
         evalCount: 9,
       };
 
-      const { subject, html, text } = renderEmailTemplate(input.templateName, data);
+      const { subject, html, text } = renderEmailTemplate(
+        input.templateName,
+        data
+      );
       return { subject, html, text };
     }),
 });

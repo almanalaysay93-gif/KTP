@@ -20,7 +20,7 @@ export default function PatientHome() {
   const { user, logout } = useAuth();
   const { toast, show, dismiss } = usePatientToast();
   const profileQuery = trpc.patientPortal.getMyProfile.useQuery();
-  const settingsQuery = trpc.settings.getAll.useQuery();
+  const settingsQuery = trpc.settings.getPatientSettings.useQuery();
 
   useEffect(() => {
     document.title = "Home | KTP";

@@ -74,11 +74,11 @@ function* planRows(rows: ImportRow[]): Program<Plan[]> {
     for (const [label, value, limit] of [["First name", row.firstName, 128], ["Middle name", row.middleName, 128], ["Last name", row.lastName, 128], ["Suffix", row.suffix, 32], ["Contact number", row.contactNumber, 32]] as const)
       if (text(value).length > limit) errors.push(`${label} is longer than ${limit} characters.`);
 
-    if (!email) warnings.push("No Gmail account. The patient cannot sign in to the patient portal.");
-    else if (!EMAIL.test(email) || email.length > 320) errors.push("Gmail account is not a valid e-mail address.");
-    else if (hasFullAccess(email)) errors.push("Gmail account is on the admin list. A patient cannot use it.");
-    else if (savedEmails.has(email)) errors.push("Gmail account is already enrolled.");
-    else if ((emailCount.get(email) ?? 0) > 1) errors.push("Gmail account occurs more than one time in this list.");
+    if (!email) warnings.push("No email contact provided.");
+    else if (!EMAIL.test(email) || email.length > 320) errors.push("Email address is not a valid e-mail address.");
+    else if (hasFullAccess(email)) errors.push("Email address is on the admin list. A patient cannot use it.");
+    else if (savedEmails.has(email)) errors.push("Email address is already enrolled.");
+    else if ((emailCount.get(email) ?? 0) > 1) errors.push("Email address occurs more than one time in this list.");
 
     if (!text(row.stage)) warnings.push("No stage. Orientation is used.");
     if ((patientType === "Recipient" || patientType === "Donor") && !isValidStageForPatientType(stage, patientType))

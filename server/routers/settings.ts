@@ -1,10 +1,21 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { adminProcedure, publicProcedure, router } from "../_core/trpc";
+import { adminProcedure, patientProcedure, publicProcedure, router } from "../_core/trpc";
 import * as db from "../db";
+import { rustBackendEnabled } from "../rustBackend";
+import { rustPortalSettings } from "../rustPortal";
+import { rustAdminSettings, rustSettingsWrite } from "../rustAdmin";
+import { rustConsentNotice } from "../rustPortal";
 
 export const settingsRouter = router({
-  getAll: adminProcedure.query(async () => {
+  getPatientSettings: patientProcedure.query(async ({ ctx }) => {
+    if (rustBackendEnabled()) return rustPortalSettings(ctx.req);
+    return {
+      emergencyHotlineText: (await db.getSetting("emergencyHotlineText")) ?? "KT Unit Hotline: 0917-000-0000 | Hospital Trunk: (082) 227-2731 loc 4100",
+    };
+  }),
+  getAll: adminProcedure.query(async ({ctx}) => {
+    if (rustBackendEnabled()) return rustAdminSettings(ctx.req);
     const all = await db.getAllSettings();
     return {
       appTitle: all.appTitle ?? "KTP",
@@ -19,7 +30,8 @@ export const settingsRouter = router({
     };
   }),
 
-  getConsentNotice: publicProcedure.query(async () => {
+  getConsentNotice: publicProcedure.query(async ({ctx}) => {
+    if (rustBackendEnabled()) return rustConsentNotice(ctx.req);
     const consentNoticeText =
       (await db.getSetting("consentNoticeText")) ??
       "By accessing the KTP portal, you consent to the collection and processing of your health information under Republic Act No. 10173 (Data Privacy Act of 2012) for kidney transplant monitoring and care coordination.";
@@ -42,6 +54,7 @@ export const settingsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (rustBackendEnabled()) return rustSettingsWrite(ctx.req,input);
       if (input.emergencyHotlineText !== undefined) {
         await db.setSetting("emergencyHotlineText", input.emergencyHotlineText);
       }

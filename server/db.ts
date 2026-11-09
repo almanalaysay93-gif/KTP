@@ -53,8 +53,9 @@ async function ensureSchema(client: ReturnType<typeof postgres>) {
     }
     // Databases made before lab phases have no phase column on serviceRecords.
     await client`ALTER TABLE "ktp"."serviceRecords" ADD COLUMN IF NOT EXISTS "phase" varchar(16)`;
-    // A patient with no Gmail account is allowed: that patient has no portal access.
+    // A patient with no Email address is allowed: that patient has no portal access.
     await client`ALTER TABLE "ktp"."patients" ALTER COLUMN "accountEmail" DROP NOT NULL`;
+    if (process.env.KTP_LOCAL_MODE !== "1") {
     // Seed default doctors if missing
     for (const doc of SEED_DOCTORS) {
       await client`
@@ -84,6 +85,7 @@ async function ensureSchema(client: ReturnType<typeof postgres>) {
       `;
     }
     await seedClinicalDataPg(client);
+    }
   } catch (error) {
     console.error("[Database] Auto-migration check failed:", error);
     _schemaEnsured = false;

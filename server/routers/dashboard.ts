@@ -1,17 +1,25 @@
-import { listClinicalDashboard } from "../dbClinical";
+import { listClinicalDashboard, prepareClinicalCatalog } from "../dbClinical";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { todayDate } from "@shared/ktp";
 import { PATIENT_STATUSES } from "@shared/ktp";
 import { z } from "zod";
 import { listMetrics } from "../dbMetrics";
+import { rustBackendEnabled, rustMetrics } from "../rustBackend";
 
 export const dashboardRouter = router({
   metrics: adminProcedure
     .input(z.object({ status: z.enum(PATIENT_STATUSES).optional() }).optional())
-    .query(({ input }) => listMetrics(input?.status)),
+    .query(async ({ ctx, input }) => {
+      if (!rustBackendEnabled()) return listMetrics(input?.status);
+      await prepareClinicalCatalog();
+      return rustMetrics(ctx.req, input);
+    }),
   initial: adminProcedure.query(async () => {
-    const [patients, clinical] = await Promise.all([db.listPatients(), listClinicalDashboard()]);
+    const [patients, clinical] = await Promise.all([
+      db.listPatients(),
+      listClinicalDashboard(),
+    ]);
     const today = todayDate();
 
     // Stage & type counts

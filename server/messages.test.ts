@@ -77,6 +77,16 @@ describe("messages and appointment responses", () => {
     expect(adminListAfter[0].acknowledgedCount).toBe(1);
   });
 
+  it("rejects another patient's message and makes acknowledgment retries idempotent", async () => {
+    const other = await adminCaller.messages.create({ subject: "Private", body: "Other patient's message", targetType: "Specific", targetPatientId: 11 });
+    const p10 = patientCaller(10);
+    await expect(p10.patientPortal.acknowledgeMessage({ messageId: other.id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const own = await adminCaller.messages.create({ subject: "Own", body: "Own message", targetType: "Specific", targetPatientId: 10 });
+    await p10.patientPortal.acknowledgeMessage({ messageId: own.id });
+    await p10.patientPortal.acknowledgeMessage({ messageId: own.id });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM messageAcknowledgments WHERE patientId = 10').get()).toEqual({ n: 1 });
+  });
+
   it("records patient appointment confirmation and reschedule requests", async () => {
     // 1. Admin adds appointment
     const appt = await adminCaller.clinical.addAppointment({
@@ -111,5 +121,7 @@ describe("messages and appointment responses", () => {
     const rescheduled = await p10.patientPortal.getMyClinical();
     expect(rescheduled.appointments[0].response).toBe("RescheduleRequested");
     expect(rescheduled.appointments[0].responseNote).toBe("Please move to afternoon");
+    const audit = db.prepare("SELECT actorUserId, patientId FROM activityLog WHERE action = 'clinical.appointment.respond.Confirmed'").get();
+    expect(audit).toEqual({ actorUserId: 110, patientId: 10 });
   });
 });

@@ -310,21 +310,21 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
                     </div>
                   </ClayCard>
 
-                  {/* Section 3: Contact & Google Account */}
+                  {/* Section 3: Contact Details */}
                   <ClayCard className="p-6">
-                    <h2 className="type-headline text-ink">Contact & Portal Access</h2>
+                    <h2 className="type-headline text-ink">Contact Details</h2>
                     <div className="mt-4 grid gap-4 sm:grid-cols-2">
                       <div>
-                        <label className="type-label text-ink">Enrolled Gmail account (optional)</label>
+                        <label className="type-label text-ink">Email address (optional)</label>
                         <input
                           type="email"
                           value={accountEmail}
                           onChange={(e) => setAccountEmail(e.target.value)}
-                          placeholder="patient@gmail.com"
+                          placeholder="patient@example.com"
                           className="mt-1 w-full rounded-md border border-hairline bg-surface-2 px-3 py-2 type-body text-ink outline-none"
                         />
                         <p className="mt-1 type-body-sm text-ink-muted">
-                          Used for Google single sign-on to patient portal. Without it, the patient has no portal access.
+                          Optional contact address for care coordination.
                         </p>
                       </div>
                       <div>

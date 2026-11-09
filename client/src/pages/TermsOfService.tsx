@@ -36,28 +36,28 @@ export default function TermsOfService() {
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">1. Acceptance of Terms</h2>
               <p className="text-muted-foreground">
-                By accessing or using the Kidney Transplant Patient Tracker (KTP), patients, clinical coordinators, and nephrologists agree to adhere to these Terms of Service and hospital clinical guidelines. This system is intended strictly for official transplant care coordination within the Southern Philippines Medical Center.
+                By accessing or using the Kidney Transplant Patient Tracker (KTP), authorized clinic staff agree to adhere to these Terms of Service and hospital clinical guidelines. This system is intended strictly for official transplant care coordination within the Southern Philippines Medical Center.
               </p>
             </section>
 
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">2. Authorized Use and Account Responsibility</h2>
               <p className="text-muted-foreground">
-                Patients authenticate using their enrolled Google account after clinic registration. Users are responsible for maintaining the security of their accounts and devices. Users must promptly notify clinic staff if they suspect unauthorized access.
+                Access uses the password configured for this local workspace. The workspace administrator is responsible for limiting password access, securing the device, and maintaining backups. Users must promptly notify the administrator if they suspect unauthorized access.
               </p>
             </section>
 
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">3. Clinical Information Accuracy</h2>
               <p className="text-muted-foreground">
-                Clinical records, laboratory entries, and appointment dates are maintained by authorized clinic personnel. Patients must keep their contact information updated to receive timely notifications regarding critical lab tests and medication supply claim deadlines.
+                Clinical records, laboratory entries, and appointment dates are maintained by authorized clinic personnel. Clinic staff should keep patient contact details current for care coordination.
               </p>
             </section>
 
             <section className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">4. System Availability and Emergency Care</h2>
               <p className="text-muted-foreground">
-                KTP provides tracking and coordination services. It is not an emergency response dispatch. In medical emergencies, patients must immediately contact the KT Unit 24/7 hotline or report to the nearest hospital emergency department.
+                KTP runs on the device where it is installed and provides tracking and coordination services. It is not an emergency response dispatch. In medical emergencies, patients must immediately contact the KT Unit 24/7 hotline or report to the nearest hospital emergency department.
               </p>
             </section>
 
