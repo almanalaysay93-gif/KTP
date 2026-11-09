@@ -2,7 +2,8 @@
 
 The user's confirmed direction is a local app with a local password, without
 Supabase or Google signup. This supersedes the earlier OAuth migration stage.
-The current source remains uncommitted; no remote resources were contacted,
+This report records the pre-publication verification snapshot; commit and
+push status are recorded in Git history. No hosted data resources were contacted,
 changed or deleted, and no hosted patient data was imported.
 
 ## Delivered

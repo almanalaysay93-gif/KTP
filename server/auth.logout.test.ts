@@ -84,4 +84,38 @@ describe("sdk session token handling", () => {
     expect(garbage.redirectUri).toBe("");
     expect(garbage.nonce).toBeUndefined();
   });
+
+  it("round-trips url-safe oauth state and skips the stale Google client id", async () => {
+    const {
+      decodeOAuthState,
+      encodeOAuthState,
+      GOOGLE_OAUTH_CLIENT_ID,
+      resolveGoogleClientId,
+    } = await import("../shared/const");
+
+    const encoded = encodeOAuthState({
+      redirectUri: "https://ktp-beryl.vercel.app/api/oauth/callback",
+      nonce: "test-nonce-123",
+    });
+    expect(encoded).not.toMatch(/[+/=]/);
+    expect(decodeOAuthState(encoded).redirectUri).toBe(
+      "https://ktp-beryl.vercel.app/api/oauth/callback"
+    );
+
+    const legacy = btoa(
+      JSON.stringify({
+        redirectUri: "https://ktp-beryl.vercel.app/api/oauth/callback",
+        nonce: "legacy",
+      })
+    );
+    expect(decodeOAuthState(legacy).nonce).toBe("legacy");
+
+    expect(
+      resolveGoogleClientId(
+        "226276580382-7pcmo7mv3ofhbe6uqmoqenbtubpoidp1.apps.googleusercontent.com",
+        "  "
+      )
+    ).toBe(GOOGLE_OAUTH_CLIENT_ID);
+    expect(GOOGLE_OAUTH_CLIENT_ID).toContain("565079022798-");
+  });
 });
