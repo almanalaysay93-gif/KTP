@@ -1,5 +1,6 @@
 # Project memory
 
+- [stated, 2026-11-09] User updated Google OAuth client id to `565079022798-haff9j241nlt1eg8rgmd7tnllhskadv6.apps.googleusercontent.com`.
 - [done, 2026-11-08] OAuth callback 500 `{"error":"OAuth callback failed"}`. Cause: live bundle at ktp-beryl.vercel.app used stale client `226276580382-...`; user-stated client is `565079022798-kqtsnn59fqb4s0umj4t9nq7dijb9ojrq.apps.googleusercontent.com`. Fix: canonical client id in `shared/const.ts`, skip stale Manus id, URL-safe `state`, callback redirects to `/login?oauth=failed`. Secret for this client still required on Vercel as `GOOGLE_CLIENT_SECRET`. Google Console redirect URI: `https://ktp-beryl.vercel.app/api/oauth/callback`.
 - [stated, 2026-11-08] Google OAuth client id is `565079022798-kqtsnn59fqb4s0umj4t9nq7dijb9ojrq.apps.googleusercontent.com`.
 - [done, 2026-10-03] User rejected the poster wash. Confirmed BuildMe read: quiet field only, sign-in and admin, almost still, clay tokens. `OrganGridBackdrop` is now two off-screen washes, 8px/6px over 28s. Patient pages unchanged. Preview: http://127.0.0.1:8765/

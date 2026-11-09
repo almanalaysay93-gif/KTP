@@ -7,7 +7,7 @@ export const NOT_ADMIN_ERR_MSG = 'You do not have required permission (10002)';
 // Public Google OAuth web client. Token exchange still needs GOOGLE_CLIENT_SECRET
 // for this same client. Skip the stale Manus/template id if it is still in Vercel env.
 export const GOOGLE_OAUTH_CLIENT_ID =
-  "565079022798-kqtsnn59fqb4s0umj4t9nq7dijb9ojrq.apps.googleusercontent.com";
+  "565079022798-haff9j241nlt1eg8rgmd7tnllhskadv6.apps.googleusercontent.com";
 const STALE_GOOGLE_CLIENT_ID_PREFIX = "226276580382-";
 
 export function resolveGoogleClientId(
