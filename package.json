@@ -15,7 +15,10 @@
     "test": "vitest run",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "local": "cargo build --locked --manifest-path src/rust-backend/Cargo.toml && pnpm build && node --import tsx scripts/run-local.ts",
-    "test:local": "node --import tsx scripts/test-local-app.ts"
+    "test:local": "node --import tsx scripts/test-local-app.ts",
+    "build:installer:runtime": "node scripts/installer/build-runtime.mjs",
+    "installer:windows": "cross-env RUSTFLAGS=\"-C target-feature=+crt-static\" cargo build --locked --release --target x86_64-pc-windows-msvc --manifest-path src/rust-backend/Cargo.toml && pnpm build && node scripts/installer/build-runtime.mjs && electron-builder --config config/electron-builder.cjs --win nsis --x64 --publish never",
+    "installer:python": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installer/prepare-python.ps1"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
@@ -112,6 +115,8 @@
     "autoprefixer": "^10.4.20",
     "cross-env": "^10.1.0",
     "drizzle-kit": "^0.31.4",
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0",
     "esbuild": "^0.25.0",
     "pnpm": "^10.15.1",
     "postcss": "^8.4.47",
@@ -131,5 +136,6 @@
     "overrides": {
       "tailwindcss>nanoid": "3.3.7"
     }
-  }
+  },
+  "main": "src/desktop/main.cjs"
 }

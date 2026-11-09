@@ -1,0 +1,23 @@
+# CPython 3.12 / Windows x64. Binary wheels only; no target-machine installer.
+# OCR versions match the verified KTP OCR environment.
+openpyxl==3.1.5
+pypdf==6.18.0
+rapidocr-onnxruntime==1.4.4
+PyMuPDF==1.26.6
+Pillow==13.0.0
+
+# Pin the complete runtime dependency set, including Windows-only support.
+numpy==2.3.5
+opencv-python==5.0.0.93
+onnxruntime==1.31.1
+shapely==2.2.0
+pyclipper==1.4.0
+PyYAML==6.0.3
+six==1.17.0
+tqdm==4.70.1
+flatbuffers==25.12.19
+packaging==26.3
+protobuf==7.36.2
+et_xmlfile==2.0.0
+colorama==0.4.6
+msvc-runtime==14.51.36231; sys_platform == "win32"

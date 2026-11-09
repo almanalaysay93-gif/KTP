@@ -1,5 +1,5 @@
 /** Start the database, Rust API and browser app together on this computer. */
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
   mkdir,
@@ -16,8 +16,16 @@ import os from "node:os";
 import path from "node:path";
 import EmbeddedPostgres from "embedded-postgres";
 import { asyncExitHook, gracefulExit } from "exit-hook";
+import { promisify } from "node:util";
 
-const root = path.resolve(import.meta.dirname, "..");
+const root =
+  process.env.KTP_APP_ROOT || path.resolve(import.meta.dirname, "..");
+const packaged = Boolean(
+  process.env.KTP_APP_ROOT || process.env.KTP_BACKEND_PATH
+);
+const development = process.env.KTP_LOCAL_DEV === "1" && !packaged;
+const execFileAsync = promisify(execFile);
+class StartupError extends Error {}
 const defaultData =
   process.platform === "win32"
     ? path.join(process.env.LOCALAPPDATA || os.homedir(), "KTP")
@@ -33,11 +41,36 @@ const children: ChildProcess[] = [];
 let database: EmbeddedPostgres | undefined;
 let lockHeld = false;
 let stopping = false;
+let childrenShutdown: Promise<void> | undefined;
+let databaseStartup: Promise<void> | undefined;
+let databaseStarted = false;
+
+function notify(message: {
+  type: "ktp:ready" | "ktp:error";
+  url?: string;
+  message?: string;
+}) {
+  if (process.connected) {
+    try {
+      process.send?.(message, () => {});
+    } catch {}
+  }
+}
+
+function ensureRunning() {
+  if (stopping) throw new StartupError("KTP startup was cancelled.");
+}
 
 async function freePort(preferred = 0): Promise<number> {
   const server = createServer();
   server.listen(preferred, "127.0.0.1");
-  await once(server, "listening");
+  try {
+    await once(server, "listening");
+  } catch (error) {
+    if (preferred && (error as NodeJS.ErrnoException).code === "EADDRINUSE")
+      return freePort();
+    throw error;
+  }
   const port = (server.address() as { port: number }).port;
   await new Promise<void>(resolve => server.close(() => resolve()));
   return port;
@@ -54,7 +87,9 @@ async function acquireLock() {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     const pid = Number(await readFile(file, "utf8"));
     if (!Number.isInteger(pid) || pid <= 0)
-      throw new Error("Local app lock needs inspection: " + file);
+      throw new StartupError(
+        "The local app lock needs inspection before KTP can start."
+      );
     try {
       process.kill(pid, 0);
     } catch (probe) {
@@ -64,19 +99,27 @@ async function acquireLock() {
       }
       throw probe;
     }
-    throw new Error("KTP is already running for this data folder.");
+    throw new StartupError("KTP is already running for this data folder.");
   }
 }
 
-function child(command: string, args: string[]) {
+function child(command: string, args: string[], nodeRuntime = false) {
+  ensureRunning();
   const processChild = spawn(command, args, {
     cwd: root,
-    env: process.env,
+    env: nodeRuntime
+      ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
+      : process.env,
     stdio: "inherit",
+    windowsHide: true,
   });
   children.push(processChild);
   processChild.once("error", () => {
     console.error("Local service could not start.");
+    notify({
+      type: "ktp:error",
+      message: "A local KTP service could not start.",
+    });
     void stop(1);
   });
   return processChild;
@@ -87,27 +130,60 @@ function stop(code = 0) {
 }
 
 async function closeServices() {
-  if (stopping) return;
-  stopping = true;
-  for (const processChild of [...children].reverse()) {
-    if (
-      processChild.exitCode !== null ||
-      processChild.signalCode !== null ||
-      !processChild.pid
-    )
-      continue;
-    const exited = once(processChild, "exit");
-    processChild.kill("SIGTERM");
-    const timer = setTimeout(() => processChild.kill("SIGKILL"), 5000);
-    await exited.catch(() => {});
-    clearTimeout(timer);
-  }
-  // embedded-postgres registers database shutdown with this same exit-hook.
-  // Its hook and this service cleanup are both awaited before process exit.
+  await closeChildren();
+  await database?.stop();
   if (lockHeld) await unlink(path.join(data, "app.lock")).catch(() => {});
 }
 
+function closeChildren(): Promise<void> {
+  childrenShutdown ??= (async () => {
+    stopping = true;
+    for (const processChild of [...children].reverse()) {
+      if (
+        processChild.exitCode !== null ||
+        processChild.signalCode !== null ||
+        !processChild.pid
+      )
+        continue;
+      const exited = once(processChild, "exit");
+      processChild.kill("SIGTERM");
+      const timer = setTimeout(() => processChild.kill("SIGKILL"), 5000);
+      await exited.catch(() => {});
+      clearTimeout(timer);
+    }
+  })();
+  return childrenShutdown;
+}
+
+async function waitForService(
+  url: string,
+  service: ChildProcess,
+  message: string
+) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    ensureRunning();
+    if (service.exitCode !== null || service.signalCode !== null) break;
+    try {
+      if (
+        (
+          await fetch(url, {
+            redirect: "error",
+            signal: AbortSignal.timeout(1000),
+          })
+        ).status === 200
+      )
+        return;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new StartupError(message);
+}
+
 async function main() {
+  if (!path.isAbsolute(root))
+    throw new StartupError("The application resource path must be absolute.");
+  process.chdir(root);
   await mkdir(data, { recursive: true, mode: 0o700 });
   const folder = await lstat(data);
   if (
@@ -115,7 +191,7 @@ async function main() {
     folder.isSymbolicLink() ||
     (typeof process.getuid === "function" && folder.uid !== process.getuid())
   ) {
-    throw new Error(
+    throw new StartupError(
       "Local data folder must be a directory owned by the current user."
     );
   }
@@ -127,7 +203,7 @@ async function main() {
     secrets = JSON.parse(await readFile(configFile, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-      throw new Error("Local instance configuration cannot be read.");
+      throw new StartupError("Local instance configuration cannot be read.");
     secrets = {
       databasePassword: randomBytes(32).toString("hex"),
       sessionSecret: randomBytes(48).toString("hex"),
@@ -142,17 +218,24 @@ async function main() {
     typeof secrets.sessionSecret !== "string" ||
     secrets.sessionSecret.length < 32
   ) {
-    throw new Error(
+    throw new StartupError(
       "Invalid local instance configuration; refusing to reset existing data."
     );
   }
-  const webPort = await freePort(Number(process.env.PORT || 3000));
+  const preferredPort = Number(process.env.PORT ?? (packaged ? 0 : 3000));
+  if (
+    !Number.isInteger(preferredPort) ||
+    preferredPort < 0 ||
+    preferredPort > 65535
+  )
+    throw new StartupError("Invalid local application port.");
+  const webPort = await freePort(preferredPort);
   const databasePort = await freePort();
   const rustPort = await freePort();
   Object.assign(process.env, {
     KTP_LOCAL_MODE: "1",
     LOCAL_APP_DATA_DIR: data,
-    NODE_ENV: process.env.KTP_LOCAL_DEV === "1" ? "development" : "production",
+    NODE_ENV: development ? "development" : "production",
     DATABASE_URL: `postgres://ktp:${secrets.databasePassword}@127.0.0.1:${databasePort}/ktp`,
     JWT_SECRET: secrets.sessionSecret,
     RUST_BIND_ADDR: `127.0.0.1:${rustPort}`,
@@ -166,12 +249,16 @@ async function main() {
     S3_BUCKET_NAME: "",
     OPENROUTER_API_KEY: "",
   });
-  const executable = path.join(
-    root,
-    "src/rust-backend/target/debug",
-    process.platform === "win32" ? "ktp-backend.exe" : "ktp-backend"
-  );
-  if (process.env.KTP_LOCAL_DEV === "1") {
+  const executable =
+    process.env.KTP_BACKEND_PATH ||
+    path.join(
+      root,
+      "src/rust-backend/target/debug",
+      process.platform === "win32" ? "ktp-backend.exe" : "ktp-backend"
+    );
+  if (!path.isAbsolute(executable))
+    throw new StartupError("The Rust service path must be absolute.");
+  if (development) {
     const build = child("cargo", [
       "build",
       "--locked",
@@ -180,17 +267,25 @@ async function main() {
     ]);
     const [buildCode] = await once(build, "exit");
     if (buildCode !== 0)
-      throw new Error(
+      throw new StartupError(
         "Rust build failed. Install the stable Rust toolchain and retry."
       );
   } else {
     await access(executable).catch(() => {
-      throw new Error("Run pnpm local once to build the Rust application.");
+      throw new StartupError(
+        packaged
+          ? "The installed Rust service is missing. Reinstall KTP."
+          : "Run pnpm local once to build the Rust application."
+      );
     });
   }
-  if (process.env.KTP_LOCAL_DEV !== "1") {
+  if (!development) {
     await access(path.join(root, "dist/index.js")).catch(() => {
-      throw new Error("Run pnpm build once before starting the local app.");
+      throw new StartupError(
+        packaged
+          ? "The installed application is incomplete. Reinstall KTP."
+          : "Run pnpm build once before starting the local app."
+      );
     });
   }
   database = new EmbeddedPostgres({
@@ -213,12 +308,44 @@ async function main() {
     onLog: () => {},
     onError: () => {},
   });
+  const originalStop = database.stop.bind(database);
+  let databaseShutdown: Promise<void> | undefined;
+  database.stop = () =>
+    (databaseShutdown ??= (async () => {
+      await closeChildren();
+      await databaseStartup?.catch(() => {});
+      if (process.platform === "win32") {
+        if (!databaseStarted) return;
+        // embedded-postgres uses taskkill /f on Windows. pg_ctl instead asks the
+        // server to stop and flush its persistent cluster before the app exits.
+        const binaries = await import("@embedded-postgres/windows-x64");
+        await execFileAsync(
+          binaries.pg_ctl,
+          [
+            "stop",
+            "-D",
+            path.join(data, "database"),
+            "-m",
+            "fast",
+            "-w",
+            "-t",
+            "10",
+          ],
+          { windowsHide: true, timeout: 12_000 }
+        );
+      } else {
+        await originalStop();
+      }
+    })());
   try {
     await access(path.join(data, "database/PG_VERSION"));
   } catch {
     await database.initialise();
   }
-  await database.start();
+  ensureRunning();
+  databaseStartup = database.start();
+  await databaseStartup;
+  databaseStarted = true;
   const admin = database.getPgClient("postgres", "127.0.0.1");
   await admin.connect();
   try {
@@ -232,7 +359,7 @@ async function main() {
   // Import only after local configuration is installed: .env cannot select a cloud DB.
   const db = await import("../server/db");
   if (!(await db.getDb()))
-    throw new Error("Local database initialization failed.");
+    throw new StartupError("Local database initialization failed.");
   const { prepareClinicalCatalog } = await import("../server/dbClinical");
   await prepareClinicalCatalog();
   const connection = await db.getDb();
@@ -241,37 +368,55 @@ async function main() {
   ).$client.end();
   await db.getBatchClient()?.end();
   const rust = child(executable, []);
-  let ready = false;
-  for (let attempt = 0; attempt < 150; attempt++) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${rustPort}/health/ready`)).ok) {
-        ready = true;
-        break;
-      }
-    } catch {}
-    if (rust.exitCode !== null) break;
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  if (!ready) throw new Error("Local Rust API did not become ready.");
-  const node =
-    process.env.KTP_LOCAL_DEV === "1"
-      ? child(process.execPath, [
+  await waitForService(
+    `http://127.0.0.1:${rustPort}/health/ready`,
+    rust,
+    "Local Rust API did not become ready."
+  );
+  const node = development
+    ? child(
+        process.execPath,
+        [
           path.join(root, "node_modules/tsx/dist/cli.mjs"),
           "server/_core/index.ts",
-        ])
-      : child(process.execPath, ["dist/index.js"]);
+        ],
+        true
+      )
+    : child(process.execPath, [path.join(root, "dist/index.js")], true);
   for (const processChild of [rust, node])
     processChild.once("exit", code => {
       if (!stopping) void stop(code || 1);
     });
-  console.log(`Local KTP: http://127.0.0.1:${webPort}/login`);
+  const url = `http://127.0.0.1:${webPort}/login`;
+  await waitForService(
+    `http://127.0.0.1:${webPort}/api/local-auth/status`,
+    node,
+    "Local application did not become ready."
+  );
+  notify({ type: "ktp:ready", url });
+  console.log(`Local KTP: ${url}`);
   console.log(`Data stays in: ${data}`);
 }
 
-asyncExitHook(closeServices, { wait: 15_000 });
+asyncExitHook(closeServices, { wait: 30_000 });
+process.on("message", message => {
+  if (
+    message &&
+    typeof message === "object" &&
+    "type" in message &&
+    message.type === "ktp:shutdown"
+  )
+    stop();
+});
+process.on("disconnect", () => stop());
 main().catch(error => {
-  console.error(
-    error instanceof Error ? error.message : "Local startup failed."
-  );
+  // Closing the desktop during startup is cancellation, not a startup failure.
+  if (stopping) return;
+  const message =
+    error instanceof StartupError
+      ? error.message
+      : "KTP could not start its local services. Close other KTP windows and try again.";
+  notify({ type: "ktp:error", message });
+  console.error(message);
   void stop(1);
 });

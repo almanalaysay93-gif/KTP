@@ -1,0 +1,109 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-installer.yml'
+      - 'config/**'
+      - 'src/**'
+      - 'server/**'
+      - 'client/**'
+      - 'scripts/**'
+      - 'shared/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      RUSTFLAGS: '-C target-feature=+crt-static'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'src/rust-backend -> target'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Electron runtime
+        run: node node_modules/electron/install.js
+      - name: Prepare bundled Python and offline OCR
+        shell: pwsh
+        run: |
+          ./scripts/installer/prepare-python.ps1 -HostPython "$env:pythonLocation/python.exe"
+          "KTP_PYTHON=$((Resolve-Path build/installer/python/python.exe).Path)" >> $env:GITHUB_ENV
+      - name: Check application and packaging boundaries
+        run: pnpm check
+      - name: Test packaged parser and local authentication boundaries
+        run: pnpm exec vitest run server/localAuth.test.ts server/packagedParsers.test.ts server/desktop-policy.test.ts --testTimeout=30000
+      - name: Build Rust service with static C runtime
+        run: cargo build --locked --release --target x86_64-pc-windows-msvc --manifest-path src/rust-backend/Cargo.toml
+      - name: Build application
+        run: pnpm build
+      - name: Prepare installer runtime
+        run: node scripts/installer/build-runtime.mjs
+      - name: Test bundled local backend and restart persistence
+        env:
+          KTP_TEST_PACKAGED: '1'
+        run: pnpm test:local
+      - name: Build Windows installer
+        run: pnpm exec electron-builder --config config/electron-builder.cjs --win nsis --x64 --publish never
+      - name: Smoke test packaged desktop without system runtimes
+        shell: pwsh
+        run: node scripts/installer/smoke-desktop.mjs (Join-Path (Get-Location) 'release/win-unpacked/KTP.exe')
+      - name: Install and verify the installed app
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem release/KTP-Setup-*-x64.exe | Select-Object -First 1
+          $installed = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { throw "Installer failed: $($installed.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs/KTP/KTP.exe'
+          if (-not (Test-Path $app)) { throw 'Installed KTP executable is missing' }
+          node scripts/installer/smoke-desktop.mjs $app
+          if ($LASTEXITCODE -ne 0) { throw 'Installed desktop smoke test failed' }
+      - name: Verify uninstall preserves the local data directory
+        shell: pwsh
+        run: |
+          $data = Join-Path $env:LOCALAPPDATA 'KTP'
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $sentinel = Join-Path $data 'installer-retention-test.txt'
+          'Synthetic installer data-retention test' | Set-Content $sentinel
+          $uninstaller = Join-Path $env:LOCALAPPDATA 'Programs/KTP/Uninstall KTP.exe'
+          $result = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($result.ExitCode -ne 0) { throw "Uninstaller failed: $($result.ExitCode)" }
+          if (-not (Test-Path $sentinel)) { throw 'Uninstall removed user data' }
+      - name: Record installer digest
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release/KTP-Setup-*-x64.exe | Select-Object -First 1
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content -Encoding utf8 release/SHA256SUMS.txt
+          "Windows installer: $($installer.Name)" >> $env:GITHUB_STEP_SUMMARY
+          "SHA-256: $hash" >> $env:GITHUB_STEP_SUMMARY
+          'Unsigned per-user installer. Saved KTP data stays outside the installation folder.' >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KTP-Windows-Installer
+          path: |
+            release/KTP-Setup-*-x64.exe
+            release/SHA256SUMS.txt
+            release/smoke/*.png
+          if-no-files-found: error
+          retention-days: 30

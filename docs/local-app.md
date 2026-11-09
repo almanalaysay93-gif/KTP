@@ -3,7 +3,9 @@
 KTP runs on this computer with a local password, its own PostgreSQL database,
 the Rust API, and the existing React interface. It needs no Supabase account,
 Google account, OAuth credentials, or externally hosted database. This is a
-localhost application opened in your browser, not a packaged desktop installer.
+localhost application. Source launches open in your browser; the Windows installer
+opens the same workspace in a desktop window. See [installer.md](installer.md)
+for the click-to-install version, bundled runtimes and data retention.
 
 ## First launch
 

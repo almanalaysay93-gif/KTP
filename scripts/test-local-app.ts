@@ -13,27 +13,41 @@ await once(probe, "listening");
 const port = (probe.address() as { port: number }).port;
 await new Promise<void>(resolve => probe.close(() => resolve()));
 const origin = `http://127.0.0.1:${port}`;
+const repository = path.resolve(import.meta.dirname, "..");
+const packaged = process.env.KTP_TEST_PACKAGED === "1";
 const password = "SyntheticOnly#LocalPassword2026";
 let service: ChildProcess | undefined;
 let log = "";
 async function start() {
   service = spawn(
     process.execPath,
-    ["--import", "tsx", "scripts/run-local.ts"],
+    packaged
+      ? ["dist/run-local.mjs"]
+      : ["--import", "tsx", "scripts/run-local.ts"],
     {
-      cwd: path.resolve(import.meta.dirname, ".."),
+      cwd: repository,
       env: {
         ...process.env,
         LOCAL_APP_DATA_DIR: data,
         PORT: String(port),
         KTP_LOCAL_DEV: "0",
+        ...(packaged
+          ? {
+              KTP_APP_ROOT: repository,
+              KTP_BACKEND_PATH: path.join(
+                repository,
+                "build/installer/bin",
+                process.platform === "win32" ? "ktp-backend.exe" : "ktp-backend"
+              ),
+            }
+          : {}),
         // A stale cloud configuration must never be selected by this launcher.
         DATABASE_URL:
           "postgres://ignored:ignored@cloud-must-not-be-used.invalid/ignored",
         RUST_BACKEND_URL: "https://cloud-must-not-be-used.invalid",
         RESEND_API_KEY: "synthetic-must-be-disabled",
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
     }
   );
   service.stdout!.on("data", chunk => {
@@ -54,7 +68,8 @@ async function start() {
 async function stop() {
   if (!service || service.exitCode !== null) return;
   const exited = once(service, "exit");
-  service.kill("SIGTERM");
+  if (service.connected) service.send({ type: "ktp:shutdown" });
+  else service.kill("SIGTERM");
   await exited;
 }
 const request = (

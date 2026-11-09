@@ -222,3 +222,6 @@ __pycache__/
 
 .vercel
 scripts/backups/
+
+# Desktop installer artifacts (never include local workspace data)
+release/
