@@ -65,7 +65,7 @@ export function LabValuesTable({ patientId, tests, data, caption }: LabValuesTab
                     <span className="text-ink-muted">No range</span>
                   )}
                 </td>
-                <td className="whitespace-normal! min-w-56 py-2">
+                <td className="min-w-56">
                   <span className="block">{record?.label ?? "Not set"}</span>
                   {p.superseded ? (
                     <span className="type-caption block text-superseded">

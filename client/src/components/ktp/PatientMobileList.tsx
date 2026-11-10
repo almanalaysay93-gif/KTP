@@ -25,7 +25,7 @@ export function PatientMobileList({
               size={40}
               decorative
             />
-            <span className="min-w-0 break-words font-semibold text-brick">
+            <span className="min-w-0 break-words font-semibold text-brick-text">
               {patient.lastName}, {patient.firstName} {patient.suffix ?? ""}
             </span>
           </Link>

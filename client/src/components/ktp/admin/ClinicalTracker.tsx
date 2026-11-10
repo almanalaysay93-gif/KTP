@@ -106,7 +106,7 @@ export function ClinicalTracker({
                 required
               />
               {suggestedDate && (
-                <div className="flex items-center justify-between rounded-md bg-olive-tint/60 px-2 py-0.5 text-xs text-olive">
+                <div className="flex items-center justify-between rounded-md bg-brick-tint/60 px-2 py-0.5 text-xs text-brick-text">
                   <span>Guide tier: <strong>{suggestedDate}</strong></span>
                   <button
                     type="button"
@@ -305,13 +305,13 @@ function ServiceCard({
               }}
             >
               {canEnterLabs && (
-                <div className="rounded-sm border border-line-strong/30 bg-ground-elevated p-3">
+                <div className="rounded-sm border border-line-strong/30 bg-surface-1 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="type-body-sm font-bold text-ink">Auto-fill from lab document</p>
                       <p className="text-xs text-ink-muted">Upload digital PDF or photo of laboratory result.</p>
                     </div>
-                    <label className="clay-focus inline-flex cursor-pointer items-center gap-2 rounded-sm border border-line-strong bg-ground px-3 py-2 text-xs font-semibold text-ink shadow-sm transition hover:bg-ground-elevated disabled:opacity-50">
+                    <label className="clay-focus inline-flex cursor-pointer items-center gap-2 rounded-sm border border-line-strong bg-ground px-3 py-2 text-xs font-semibold text-ink shadow-sm transition hover:bg-surface-2 disabled:opacity-50">
                       {ocrLoading ? <Loader2 className="size-4 animate-spin" /> : <FileUp className="size-4" />}
                       <span>{ocrLoading ? "Scanning document..." : "Upload lab report"}</span>
                       <input
@@ -329,12 +329,12 @@ function ServiceCard({
                     </p>
                   )}
                   {ocrMessage && (
-                    <div className="mt-2 rounded bg-olive-tint/60 px-2.5 py-1.5 text-xs font-medium text-olive">
+                    <div className="mt-2 rounded bg-done-bg px-2.5 py-1.5 text-xs font-medium text-done">
                       {ocrMessage}
                     </div>
                   )}
                   {ocrError && (
-                    <div className="mt-2 rounded bg-overdue-tint/60 px-2.5 py-1.5 text-xs font-medium text-overdue">
+                    <div className="mt-2 rounded bg-overdue-bg/60 px-2.5 py-1.5 text-xs font-medium text-overdue">
                       {ocrError}
                     </div>
                   )}

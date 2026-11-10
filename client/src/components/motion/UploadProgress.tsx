@@ -60,7 +60,7 @@ export const UploadProgress = forwardRef<HTMLDivElement, UploadProgressProps>(fu
           className={cn(
             "h-full rounded-full transition-all",
             isComplete
-              ? "bg-olive"
+              ? "bg-done"
               : isError
                 ? "bg-brick"
                 : "bg-peach",
@@ -85,19 +85,19 @@ export const UploadProgress = forwardRef<HTMLDivElement, UploadProgressProps>(fu
           </span>
         )}
         {phase === "transcribing" && (
-          <span className="text-olive flex items-center gap-1 font-medium">
+          <span className="text-brick-text flex items-center gap-1 font-medium">
             <Sparkles className="size-3 shrink-0" />
             Analyzing lab report structure and extracting clinical values...
           </span>
         )}
         {phase === "complete" && (
-          <span className="text-olive flex items-center gap-1 font-medium">
+          <span className="text-done flex items-center gap-1 font-medium">
             <CheckCircle2 className="size-3.5 shrink-0" />
             Document verified and parsed successfully
           </span>
         )}
         {phase === "error" && (
-          <span className="text-brick font-medium">
+          <span className="text-brick-text font-medium">
             {errorText || "Upload processing error"}
           </span>
         )}

@@ -143,7 +143,7 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
     return <div className="flex min-h-dvh flex-col items-start gap-4 bg-ground p-6">
       <h1 className="type-title">{!editId ? "Invalid patient ID" : "Could not load patient record"}</h1>
       {editId ? <ClayButton onClick={() => existingQuery.refetch()}>Retry</ClayButton> : null}
-      <Link href="/patients" className="clay-focus inline-flex min-h-11 items-center text-brick">Back to patients</Link>
+      <Link href="/patients" className="clay-focus inline-flex min-h-11 items-center text-brick-text">Back to patients</Link>
     </div>;
   }
   if (editId && existingQuery.isLoading) return <p className="p-6">Loading patient record...</p>;
@@ -189,7 +189,7 @@ export default function PatientEnrollPage({ id }: { id?: string }) {
                 <PatientEditTabs patientId={editId} patientType={patientType}>
                 <form id="patient-form" onSubmit={handleSubmit} className="mt-8 flex flex-col gap-6">
                   {errorMsg && (
-                    <div className="rounded-lg bg-brick-tint p-4 type-body-sm text-brick">
+                    <div className="rounded-lg bg-brick-tint p-4 type-body-sm text-brick-text">
                       {errorMsg}
                     </div>
                   )}

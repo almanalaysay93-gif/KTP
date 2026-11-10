@@ -104,7 +104,7 @@ export default function AdminCalendarPage() {
                 {/* Header */}
                 <header className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
-                    <CalendarDays className="size-6 text-olive" />
+                    <CalendarDays className="size-6 text-brick-text" />
                     <h1 className="type-display text-ink">Unit Clinic Calendar</h1>
                   </div>
                   <p className="type-body-sm text-ink-muted">
@@ -119,12 +119,12 @@ export default function AdminCalendarPage() {
                     <p className="font-mono text-2xl font-bold text-ink">{totalCount}</p>
                   </ClayCard>
                   <ClayCard className="p-4">
-                    <p className="type-caption text-olive font-medium">Confirmed by Patient</p>
-                    <p className="font-mono text-2xl font-bold text-olive">{confirmedCount}</p>
+                    <p className="type-caption text-done font-medium">Confirmed by Patient</p>
+                    <p className="font-mono text-2xl font-bold text-done">{confirmedCount}</p>
                   </ClayCard>
                   <ClayCard className={`p-4 ${rescheduleCount > 0 ? "border-l-4 border-l-brick" : ""}`}>
-                    <p className="type-caption text-brick font-medium">Reschedule Requested</p>
-                    <p className="font-mono text-2xl font-bold text-brick">{rescheduleCount}</p>
+                    <p className="type-caption text-brick-text font-medium">Reschedule Requested</p>
+                    <p className="font-mono text-2xl font-bold text-brick-text">{rescheduleCount}</p>
                   </ClayCard>
                   <ClayCard className="p-4">
                     <p className="type-caption text-ink-muted">Pending Response</p>
@@ -181,7 +181,7 @@ export default function AdminCalendarPage() {
                 {/* Error State */}
                 {appointmentsQuery.isError && (
                   <ClayCard className="p-8 text-center text-ink">
-                    <p className="type-headline text-brick">Failed to load appointments</p>
+                    <p className="type-headline text-brick-text">Failed to load appointments</p>
                     <p className="mt-2 type-body-sm text-ink-muted">Please retry.</p>
                     <div className="mt-4 flex justify-center">
                       <ClayButton onClick={() => appointmentsQuery.refetch()}>Retry</ClayButton>
@@ -280,7 +280,7 @@ export default function AdminCalendarPage() {
 
                               {/* Reschedule Note */}
                               {isReschedule && appt.responseNote && (
-                                <div className="mt-2 rounded-xl bg-brick-tint/60 p-3 type-body-sm text-brick">
+                                <div className="mt-2 rounded-xl bg-brick-tint/60 p-3 type-body-sm text-brick-text">
                                   <strong>Patient Reschedule Request:</strong> {appt.responseNote}
                                 </div>
                               )}
@@ -289,12 +289,12 @@ export default function AdminCalendarPage() {
                             {/* Response Badge & Action */}
                             <div className="flex flex-col items-start gap-2 sm:items-end">
                               {isConfirmed && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-olive-tint px-3 py-1 font-medium text-olive type-body-sm">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-done-bg px-3 py-1 font-medium text-done type-body-sm">
                                   <CheckCircle2 className="size-4" /> Confirmed
                                 </span>
                               )}
                               {isReschedule && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-brick-tint px-3 py-1 font-medium text-brick type-body-sm">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-brick-tint px-3 py-1 font-medium text-brick-text type-body-sm">
                                   Reschedule Requested
                                 </span>
                               )}
@@ -306,7 +306,7 @@ export default function AdminCalendarPage() {
 
                               <Link
                                 href={`/patients/${appt.patientId}?tab=appointments`}
-                                className="clay-focus text-xs font-medium text-olive hover:underline"
+                                className="clay-focus text-xs font-medium text-brick-text hover:underline"
                               >
                                 Manage in Patient Profile &rarr;
                               </Link>

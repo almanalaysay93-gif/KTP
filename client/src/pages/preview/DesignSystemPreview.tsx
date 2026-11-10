@@ -401,7 +401,7 @@ export default function DesignSystemPreview() {
                     <a href="#cards" className="flex items-center gap-4">
                       <ClayAvatar size={56} kind="recipient" name="Villacorta, Analyn" decorative />
                       <span className="min-w-0 flex-1"><span className="type-title block">Villacorta, Analyn F.</span><span className="type-data text-ink-muted">HRN-2026-0147 · Post-KT day 154</span></span>
-                      <ArrowRight aria-hidden {...I} className="size-5 text-brick" />
+                      <ArrowRight aria-hidden {...I} className="size-5 text-brick-text" />
                     </a>
                   </ClayCard>
                   <ClayCard>

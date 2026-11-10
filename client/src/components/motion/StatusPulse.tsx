@@ -2,7 +2,7 @@ import { type ReactNode } from "react";
 import { useMotionMode } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
-export type StatusPulseTone = "olive" | "amber" | "brick" | "blue" | "neutral";
+export type StatusPulseTone = "done" | "due" | "brick" | "info" | "neutral";
 
 export interface StatusPulseProps {
   active?: boolean;
@@ -13,25 +13,25 @@ export interface StatusPulseProps {
 }
 
 const TONE_CLASSES: Record<StatusPulseTone, { dot: string; ring: string; text: string }> = {
-  olive: {
-    dot: "bg-olive",
-    ring: "text-olive ring-olive/40",
-    text: "text-olive",
+  done: {
+    dot: "bg-done",
+    ring: "text-done ring-done/40",
+    text: "text-done",
   },
-  amber: {
-    dot: "bg-amber-600",
-    ring: "text-amber-600 ring-amber-500/40",
-    text: "text-amber-700",
+  due: {
+    dot: "bg-due-soon",
+    ring: "text-due-soon ring-due-soon/40",
+    text: "text-due-soon",
   },
   brick: {
     dot: "bg-brick",
-    ring: "text-brick ring-brick/40",
-    text: "text-brick",
+    ring: "text-brick-text ring-brick/40",
+    text: "text-brick-text",
   },
-  blue: {
-    dot: "bg-sky-600",
-    ring: "text-sky-600 ring-sky-500/40",
-    text: "text-sky-700",
+  info: {
+    dot: "bg-info",
+    ring: "text-info ring-info/40",
+    text: "text-info",
   },
   neutral: {
     dot: "bg-ink-muted",
@@ -46,14 +46,14 @@ const TONE_CLASSES: Record<StatusPulseTone, { dot: string; ring: string; text: s
  */
 export function StatusPulse({
   active = true,
-  tone = "olive",
+  tone = "done",
   children,
   className,
   dotOnly = false,
 }: StatusPulseProps) {
   const mode = useMotionMode();
   const isReduced = mode === "reduced";
-  const colors = TONE_CLASSES[tone] ?? TONE_CLASSES.olive;
+  const colors = TONE_CLASSES[tone] ?? TONE_CLASSES.done;
 
   if (!active || isReduced) {
     if (dotOnly) {

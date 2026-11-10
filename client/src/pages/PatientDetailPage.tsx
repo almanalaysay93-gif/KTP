@@ -121,7 +121,7 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
         ) : null}
         <Link
           href="/patients"
-          className="clay-focus inline-flex min-h-11 items-center text-brick"
+          className="clay-focus inline-flex min-h-11 items-center text-brick-text"
         >
           Back to patients
         </Link>
@@ -165,10 +165,10 @@ function PatientContent({ rawId }: { rawId: string | undefined }) {
       >
         <main
           id="patient-detail"
-          className="mx-auto w-full max-w-[1120px] px-4 pb-16 md:px-6 lg:px-8 lg:pb-20"
+          className="mx-auto w-full min-w-0 max-w-[1800px] px-4 pb-16 md:px-6 lg:pb-20"
         >
           {/* Header Back & Actions */}
-          <div className="flex items-center justify-between pt-4 lg:pt-8">
+          <div className="flex items-center justify-between pt-3 lg:pt-8">
             <button
               type="button"
               onClick={() => navigate("/patients")}

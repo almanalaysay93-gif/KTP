@@ -71,7 +71,7 @@ export function PatientHeader({
         <div className="flex flex-wrap items-center gap-3">
           <Link
             href={backHref}
-            className="clay-focus -ml-2 inline-flex min-h-11 items-center gap-1 rounded-md px-2 type-button text-brick hover:bg-sunken/60"
+            className="clay-focus -ml-2 inline-flex min-h-11 items-center gap-1 rounded-md px-2 type-button text-brick-text hover:bg-sunken/60"
           >
             <ChevronLeft aria-hidden className="size-5" strokeWidth={1.75} />
             Back to patients
@@ -187,7 +187,7 @@ export function PatientHeader({
                   aria-label={undefined}
                 />
                 <span className="flex flex-col">
-                  <span className="type-body font-bold text-brick">
+                  <span className="type-body font-bold text-brick-text">
                     {patientDisplayName(linked)}
                   </span>
                   <span className="type-data text-ink-muted">{linked.hrn}</span>

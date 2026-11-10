@@ -9,8 +9,8 @@ import {
   BellButton,
   useAdminToast,
 } from "@/components/ktp/admin";
-import { ClayAvatar, ClayButton, ClayCard, ClayInput, StatusChip } from "@/components/clay";
-import { MotionClayButton, MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
+import { ClayButton, ClayCard, ClayInput, StatusChip } from "@/components/clay";
+import { CountUp, MotionClayButton, MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
 import { PatientImportButton } from "@/components/ktp/admin/PatientImportDialog";
 import { trpc } from "@/lib/trpc";
 import { type PatientType, type PatientStatus, PATIENT_TYPES, PATIENT_STATUSES } from "@shared/ktp";
@@ -62,12 +62,12 @@ export default function PatientsPage() {
             }
           >
             <PageTransition routeKey="patients" focusHeading={false}>
-              <main className="mx-auto w-full max-w-[1120px] px-4 pb-16 md:px-6 lg:px-8 lg:pb-20">
+              <main className="mx-auto w-full max-w-[1800px] px-4 pb-16 md:px-6 lg:pb-20">
                 <header className="flex flex-col gap-4 pt-3 lg:flex-row lg:items-end lg:justify-between lg:pt-8">
                   <div>
                     <h1 className="type-display text-ink">Patients</h1>
                     <p className="type-body-sm text-ink-muted">
-                      {patients.length} enrolled {patients.length === 1 ? "record" : "records"}
+                      <CountUp value={patients.length} /> enrolled {patients.length === 1 ? "record" : "records"}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
@@ -91,7 +91,7 @@ export default function PatientsPage() {
                       placeholder="Search by name or HRN..."
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      className="w-full rounded-md border border-hairline bg-surface-2 py-2 pl-9 pr-3 type-body-sm text-ink outline-none focus:border-olive"
+                      className="w-full rounded-md border border-hairline bg-surface-2 py-2 pl-9 pr-3 type-body-sm text-ink outline-none focus:border-brick"
                     />
                   </div>
 
@@ -121,7 +121,7 @@ export default function PatientsPage() {
                 </div>
 
                 {/* Patient Table */}
-                <div id="patients-table" className="mt-6 overflow-hidden rounded-2xl border border-hairline bg-surface-1">
+                <div id="patients-table" className="mt-6 max-lg:overflow-hidden max-lg:rounded-2xl max-lg:border max-lg:border-hairline max-lg:bg-surface-1">
                   {patientsQuery.isError ? (
                     <div role="alert" className="flex flex-col items-start gap-3 p-4">
                       <p>Could not load patients.</p>
@@ -130,29 +130,28 @@ export default function PatientsPage() {
                   ) : patientsQuery.isLoading ? <p className="p-4 lg:hidden" aria-busy="true">Loading patient registry...</p>
                     : patients.length === 0 ? <p className="p-4 lg:hidden">No patients found. Try adjusting your search or filters.</p>
                     : <PatientMobileList patients={patients} doctors={doctorsMap} />}
-                  <div className={`show-scrollbar-x hidden overflow-x-auto ${patientsQuery.isError ? "" : "lg:block"}`}>
-                    <table className="w-full text-left">
+                  <div className={`clay-table-wrap show-scrollbar-x hidden ${patientsQuery.isError ? "" : "lg:block"}`}>
+                    <table className="clay-table">
                       <thead>
-                        <tr className="border-b border-hairline bg-surface-2 text-ink-muted type-label">
-                          <th className="px-4 py-3">Patient</th>
-                          <th className="px-4 py-3">HRN</th>
-                          <th className="px-4 py-3">Type</th>
-                          <th className="px-4 py-3">Stage</th>
-                          <th className="px-4 py-3">Nephrologist</th>
-                          <th className="px-4 py-3">Fellow</th>
-                          <th className="px-4 py-3 text-right">Status</th>
+                        <tr>
+                          <th scope="col">Patient</th>
+                          <th scope="col">Type</th>
+                          <th scope="col">Stage</th>
+                          <th scope="col">Nephrologist</th>
+                          <th scope="col">Fellow</th>
+                          <th scope="col" className="text-right">Status</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-hairline">
+                      <tbody>
                         {patientsQuery.isLoading ? (
                           <tr>
-                            <td colSpan={7} className="px-4 py-8 text-center text-ink-muted type-body-sm">
+                            <td colSpan={6} className="px-4 py-8 text-center text-ink-muted type-body-sm">
                               Loading patient registry...
                             </td>
                           </tr>
                         ) : patients.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="px-4 py-12 text-center text-ink-muted">
+                            <td colSpan={6} className="px-4 py-12 text-center text-ink-muted">
                               <p className="type-headline">No patients found</p>
                               <p className="mt-1 type-body-sm">Try adjusting your search or filters.</p>
                             </td>
@@ -170,48 +169,35 @@ export default function PatientsPage() {
                               <tr
                                 key={patient.id}
                                 onClick={() => navigate(`/patients/${patient.id}`)}
-                                className="cursor-pointer transition-colors hover:bg-surface-2/60"
+                                className="cursor-pointer transition-colors"
                               >
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-3">
-                                    <ClayAvatar
-                                      name={`${patient.firstName} ${patient.lastName}`}
-                                      size={40}
-                                    />
-                                    <div>
-                                      <p className="font-semibold text-ink type-body">
-                                        <Link href={`/patients/${patient.id}`} className="clay-focus inline-flex min-h-11 items-center">
-                                        {patient.lastName}, {patient.firstName} {patient.suffix ?? ""}
-                                        </Link>
-                                      </p>
-                                      <p className="text-ink-muted type-body-sm">{patient.accountEmail ?? "No email address"}</p>
-                                    </div>
-                                  </div>
+                                <td>
+                                  <Link href={`/patients/${patient.id}`} className="clay-focus inline-flex items-center type-body-sm font-bold text-brick-text">
+                                    {patient.lastName}, {patient.firstName} {patient.suffix ?? ""}
+                                  </Link>
+                                  <span className="block type-data text-ink-muted">{patient.hrn}</span>
                                 </td>
-                                <td className="px-4 py-3 font-mono text-ink-muted type-body-sm">
-                                  {patient.hrn}
-                                </td>
-                                <td className="px-4 py-3 text-ink type-body-sm">
+                                <td>
                                   <span
                                     className={`inline-flex rounded-full px-2 py-0.5 type-label ${
                                       patient.patientType === "Recipient"
-                                        ? "bg-brick-tint text-brick"
-                                        : "bg-olive-tint text-olive"
+                                        ? "bg-brick-tint text-brick-text"
+                                        : "bg-sage-tint text-sage-deep"
                                     }`}
                                   >
                                     {patient.patientType}
                                   </span>
                                 </td>
-                                <td className="px-4 py-3 font-medium text-ink type-body-sm">
+                                <td className="font-medium">
                                   {patient.stage}
                                 </td>
-                                <td className="px-4 py-3 text-ink-muted type-body-sm">{nephrologist}</td>
-                                <td className="px-4 py-3 text-ink-muted type-body-sm">{fellow}</td>
-                                <td className="px-4 py-3 text-right">
+                                <td className="text-ink-muted">{nephrologist}</td>
+                                <td className="text-ink-muted">{fellow}</td>
+                                <td className="text-right">
                                   <span
                                     className={`inline-flex rounded-full px-2 py-0.5 type-label ${
                                       patient.status === "Active"
-                                        ? "bg-olive-tint text-olive"
+                                        ? "bg-done-bg text-done"
                                         : "bg-ink-muted/10 text-ink-muted"
                                     }`}
                                   >

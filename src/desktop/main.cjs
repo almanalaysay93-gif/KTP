@@ -94,7 +94,7 @@ async function start() {
     minHeight: 640,
     show: !smoke,
     title: "KTP",
-    backgroundColor: "#e2e5d5",
+    backgroundColor: "#d8cbb3",
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
@@ -112,7 +112,7 @@ async function start() {
   await window.loadURL(
     "data:text/html;charset=utf-8," +
       encodeURIComponent(
-        '<!doctype html><html><head><meta charset="utf-8"><title>KTP</title></head><body style="background:#e2e5d5;color:#333e22;font:20px system-ui;display:grid;place-items:center;height:90vh"><p>Starting your local KTP workspace…</p></body></html>'
+        '<!doctype html><html><head><meta charset="utf-8"><title>KTP</title></head><body style="background:#d8cbb3;color:#1e1e1c;font:20px system-ui;display:grid;place-items:center;height:90vh"><p>Starting your local KTP workspace…</p></body></html>'
       )
   );
   backend = fork(path.join(root, "dist", "run-local.mjs"), [], {

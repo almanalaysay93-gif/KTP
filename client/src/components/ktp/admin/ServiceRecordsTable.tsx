@@ -91,7 +91,7 @@ export function ServiceRecordsTable({ patient, records, filter, onFilterChange, 
       </div>
 
       <div role="region" aria-label="Service records" tabIndex={0} className="clay-table-wrap clay-focus show-scrollbar-x -mx-2">
-        <table className="clay-table [&_td]:px-2 [&_td[data-num]]:whitespace-normal [&_th]:px-2 [&_thead_th]:whitespace-normal">
+        <table className="clay-table">
           <thead>
             <tr>
               <th scope="col" data-sticky="true">Service</th>
@@ -149,7 +149,7 @@ function RecordRow({
   return (
     <tr data-superseded={superseded || undefined}>
       <th scope="row" data-sticky="true" className="font-bold">{label}</th>
-      <td className="whitespace-normal! min-w-28 py-2">
+      <td className="min-w-28">
         <span className="block">{r.label}</span>
         <span className="type-caption block text-ink-muted">
           <span className="sr-only">Source: </span>
@@ -181,7 +181,7 @@ function RecordRow({
       <td data-num={r.claimDeadline ? "true" : undefined}>{r.claimDeadline ? fmtDateCell(r.claimDeadline) : <NotSet />}</td>
       <td data-num={r.claimFiledDate ? "true" : undefined}>{r.claimFiledDate ? fmtDateCell(r.claimFiledDate) : <NotSet />}</td>
       <td>{claim && claim !== "None" ? <StatusChip status={CLAIM_CHIP[claim]} label={CLAIM_LABEL[claim]} srContext="Claim status:" /> : <NotSet />}</td>
-      <td className="py-1">
+      <td>
         <span className="flex gap-1">
           {r.status === "Planned" ? (
             <RowButton Icon={ClipboardPen} label="Record result" aria={`Record result: ${r.label}, due ${fmtDate(r.dueDate)}`} onClick={() => onAction({ kind: "result", patient, record: r })} />
@@ -210,7 +210,7 @@ function RowButton({ Icon, label, aria, onClick }: { Icon: LucideIcon; label: st
         type="button"
         aria-label={aria}
         onClick={onClick}
-        className="clay-focus-inset clay-press inline-flex size-11 cursor-pointer items-center justify-center rounded-md text-brick transition-colors duration-(--dur-color) hover:bg-sunken/60"
+        className="clay-focus-inset clay-press inline-flex size-11 cursor-pointer items-center justify-center rounded-md text-brick-text transition-colors duration-(--dur-color) hover:bg-sunken/60"
       >
         <Icon aria-hidden className="size-5" strokeWidth={1.75} />
       </button>

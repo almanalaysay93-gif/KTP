@@ -4,8 +4,8 @@
   "description": "Kidney Transplant Institute Patient Registry and Tracker",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#e2e5d5",
+  "background_color": "#d8cbb3",
+  "theme_color": "#1e1e1c",
   "icons": [
     {
       "src": "/branding/ots-mark.png",

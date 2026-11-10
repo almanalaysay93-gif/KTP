@@ -113,7 +113,7 @@ export default function PatientCalendarPage() {
           {/* Error State */}
           {clinicalQuery.isError && (
             <ClayCard className="p-8 text-center text-ink">
-              <p className="type-headline text-brick">Failed to load schedule</p>
+              <p className="type-headline text-brick-text">Failed to load schedule</p>
               <p className="mt-2 type-body-sm text-ink-muted">Please check your connection and try again.</p>
               <div className="mt-4 flex justify-center">
                 <ClayButton onClick={() => clinicalQuery.refetch()}>Retry</ClayButton>
@@ -189,7 +189,7 @@ export default function PatientCalendarPage() {
                         {/* Status Chip */}
                         <div>
                           {appt.response === "Confirmed" && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-olive-tint px-3 py-1 font-medium text-olive type-body-sm">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-done-bg px-3 py-1 font-medium text-done type-body-sm">
                               <CheckCircle2 className="size-4" /> Confirmed
                             </span>
                           )}

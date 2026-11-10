@@ -121,7 +121,7 @@ export default function Dashboard() {
             }
           >
             <PageTransition routeKey="dashboard" focusHeading={false}>
-              <main className="mx-auto w-full max-w-[1120px] px-4 pb-16 md:px-6 lg:px-8 lg:pb-20">
+              <main className="mx-auto w-full max-w-[1800px] px-4 pb-16 md:px-6 lg:pb-20">
                 <header className="flex flex-col gap-4 pt-3 lg:flex-row lg:items-end lg:justify-between lg:pt-8">
                   <div className="flex flex-col gap-1">
                     <p className="type-body-sm text-ink-muted">

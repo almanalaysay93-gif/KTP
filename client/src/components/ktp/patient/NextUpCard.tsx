@@ -92,7 +92,7 @@ function SeeAllDates({ href }: { href: string }) {
   return (
     <a
       href={href}
-      className="clay-press clay-ghost clay-focus type-button inline-flex h-12 items-center gap-2 rounded-md px-3 text-brick no-underline transition-colors duration-(--dur-color) hover:bg-sunken/60 [&_svg]:size-5"
+      className="clay-press clay-ghost clay-focus type-button inline-flex h-12 items-center gap-2 rounded-md px-3 text-brick-text no-underline transition-colors duration-(--dur-color) hover:bg-sunken/60 [&_svg]:size-5"
     >
       See all dates
       <ArrowDown aria-hidden strokeWidth={1.75} />

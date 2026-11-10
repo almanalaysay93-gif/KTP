@@ -121,8 +121,8 @@ export function EmailAutomationPanel() {
       <ClayCard className="p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <StatusPulse active={masterEnabled} tone={masterEnabled ? "olive" : "neutral"}>
-              <div className="flex size-10 items-center justify-center rounded-xl bg-olive-tint text-olive">
+            <StatusPulse active={masterEnabled} tone={masterEnabled ? "done" : "neutral"}>
+              <div className="flex size-10 items-center justify-center rounded-xl bg-brick-tint text-brick-text">
                 <Bell className="size-5" />
               </div>
             </StatusPulse>
@@ -140,7 +140,7 @@ export function EmailAutomationPanel() {
                 type="checkbox"
                 checked={masterEnabled}
                 onChange={e => setMasterEnabled(e.target.checked)}
-                className="size-4 rounded border-line-strong text-olive focus:ring-olive"
+                className="size-4 rounded border-line-strong text-brick focus:ring-brick"
               />
               <span>Master Dispatch {masterEnabled ? "Active" : "Paused"}</span>
             </label>
@@ -148,13 +148,13 @@ export function EmailAutomationPanel() {
         </div>
 
         {error && (
-          <div className="mt-4 rounded border border-brick/30 bg-brick/10 p-3 text-xs text-brick">
+          <div className="mt-4 rounded border border-brick/30 bg-brick/10 p-3 text-xs text-brick-text">
             {error}
           </div>
         )}
 
         {sweepResult && (
-          <div className="mt-4 flex items-center gap-2 rounded border border-olive/30 bg-olive-tint p-3 text-xs font-semibold text-olive">
+          <div className="mt-4 flex items-center gap-2 rounded border border-done/30 bg-done-bg p-3 text-xs font-semibold text-done">
             <Check className="size-4" /> {sweepResult}
           </div>
         )}
@@ -176,9 +176,9 @@ export function EmailAutomationPanel() {
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2">
                   {isAppt ? (
-                    <Calendar className="size-4 text-olive" />
+                    <Calendar className="size-4 text-brick-text" />
                   ) : isLab ? (
-                    <FlaskConical className="size-4 text-brick" />
+                    <FlaskConical className="size-4 text-brick-text" />
                   ) : (
                     <Mail className="size-4 text-ink-muted" />
                   )}
@@ -188,7 +188,7 @@ export function EmailAutomationPanel() {
                   type="checkbox"
                   checked={trigger.enabled}
                   onChange={() => handleToggleTrigger(trigger.key)}
-                  className="size-4 rounded border-line-strong text-olive"
+                  className="size-4 rounded border-line-strong text-brick"
                   title="Enable or disable trigger"
                 />
               </div>
@@ -197,7 +197,7 @@ export function EmailAutomationPanel() {
                 {trigger.description}
               </p>
 
-              <div className="mt-3 flex items-center justify-between border-t border-line pt-2 text-[11px]">
+              <div className="mt-3 flex items-center justify-between border-t border-hairline pt-2 text-[11px]">
                 <span className="text-ink-muted">Lead time:</span>
                 <div className="flex items-center gap-1">
                   <input
@@ -223,7 +223,7 @@ export function EmailAutomationPanel() {
       <div className="grid gap-4 sm:grid-cols-2">
         <ClayCard className="p-4 space-y-3">
           <div className="flex items-center gap-2">
-            <Clock className="size-4 text-olive" />
+            <Clock className="size-4 text-brick-text" />
             <h4 className="font-bold text-xs text-ink">Schedule and Manual Trigger</h4>
           </div>
           <p className="text-xs text-ink-muted">
@@ -260,7 +260,7 @@ export function EmailAutomationPanel() {
 
         <ClayCard className="p-4 space-y-3">
           <div className="flex items-center gap-2">
-            <Send className="size-4 text-olive" />
+            <Send className="size-4 text-brick-text" />
             <h4 className="font-bold text-xs text-ink">Send Test Notice</h4>
           </div>
           <p className="text-xs text-ink-muted">
@@ -295,9 +295,9 @@ export function EmailAutomationPanel() {
       </div>
 
       {/* Save Settings Bar */}
-      <div className="flex items-center justify-end gap-3 border-t border-line pt-4">
+      <div className="flex items-center justify-end gap-3 border-t border-hairline pt-4">
         {saveSuccess && (
-          <span className="flex items-center gap-1 text-xs font-semibold text-olive">
+          <span className="flex items-center gap-1 text-xs font-semibold text-done">
             <Check className="size-3.5" /> Settings saved successfully
           </span>
         )}

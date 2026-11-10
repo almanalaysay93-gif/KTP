@@ -100,7 +100,7 @@ export default function AdminMessagesPage() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <header className="flex flex-col gap-1">
                     <div className="flex items-center gap-2">
-                      <MessageSquare className="size-6 text-olive" />
+                      <MessageSquare className="size-6 text-brick-text" />
                       <h1 className="type-display text-ink">Broadcast Messages</h1>
                     </div>
                     <p className="type-body-sm text-ink-muted">
@@ -118,10 +118,10 @@ export default function AdminMessagesPage() {
 
                 {/* Compose Form */}
                 {showCompose && (
-                  <ClayCard className="p-5 sm:p-6 border-l-4 border-l-olive bg-surface-1">
+                  <ClayCard className="p-5 sm:p-6 border-l-4 border-l-brick bg-surface-1">
                     <form onSubmit={handleSend} className="flex flex-col gap-4">
                       <div className="flex items-center gap-2">
-                        <Megaphone className="size-5 text-olive" />
+                        <Megaphone className="size-5 text-brick-text" />
                         <h2 className="type-headline text-ink">New Patient Announcement</h2>
                       </div>
 
@@ -235,7 +235,7 @@ export default function AdminMessagesPage() {
                   {/* Error */}
                   {messagesQuery.isError && (
                     <ClayCard className="p-8 text-center text-ink">
-                      <p className="type-headline text-brick">Failed to load broadcast history</p>
+                      <p className="type-headline text-brick-text">Failed to load broadcast history</p>
                       <div className="mt-4 flex justify-center">
                         <ClayButton onClick={() => messagesQuery.refetch()}>Retry</ClayButton>
                       </div>
@@ -294,7 +294,7 @@ export default function AdminMessagesPage() {
                                     <Eye className="size-4 text-ink-muted" />
                                     {msg.readCount} read
                                   </span>
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-olive-tint px-3 py-1 type-body-sm font-medium text-olive">
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-done-bg px-3 py-1 type-body-sm font-medium text-done">
                                     <CheckCircle2 className="size-4" />
                                     {msg.acknowledgedCount} acknowledged ({ackPercent}%)
                                   </span>

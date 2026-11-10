@@ -78,7 +78,7 @@ export default function PatientProfilePage() {
           </header>
 
           {successMsg && (
-            <div className="rounded-lg bg-olive-tint p-4 type-body-sm text-olive">
+            <div className="rounded-lg bg-done-bg p-4 type-body-sm text-done">
               Contact number updated successfully.
             </div>
           )}
@@ -96,7 +96,7 @@ export default function PatientProfilePage() {
                 </h2>
                 <div className="mt-1 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                   <span className="font-mono type-body-sm text-ink-muted">HRN: {patient?.hrn}</span>
-                  <span className="inline-flex rounded-full bg-olive-tint px-2 py-0.5 type-label text-olive">
+                  <span className={`inline-flex rounded-full px-2 py-0.5 type-label ${patient?.patientType === "Recipient" ? "bg-brick-tint text-brick-text" : "bg-sage-tint text-sage-deep"}`}>
                     {patient?.patientType}
                   </span>
                   <span className="inline-flex rounded-full bg-sunken px-2 py-0.5 type-label text-ink">
@@ -190,7 +190,7 @@ export default function PatientProfilePage() {
           {/* Data Privacy Status */}
           <ClayCard className="p-6">
             <div className="flex items-center gap-3">
-              <div className="flex size-8 items-center justify-center rounded-full bg-olive-tint text-olive">
+              <div className="flex size-8 items-center justify-center rounded-full bg-done-bg text-done">
                 <ShieldCheck className="size-5" />
               </div>
               <div>

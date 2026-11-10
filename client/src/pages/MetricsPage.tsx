@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AdminShell, AdminToaster } from "@/components/ktp/admin";
-import { MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
+import { CountUp, MotionRoot, OrganGridBackdrop, PageTransition } from "@/components/motion";
 import { ADMIN_HREFS } from "@/lib/ktpAdminRoutes";
 import { STAGE_ADMIN_LABEL } from "@/lib/ktpLabels";
 import { trpc } from "@/lib/trpc";
@@ -28,11 +28,11 @@ export default function MetricsPage() {
           <OrganGridBackdrop />
           <AdminShell current="metrics" hrefs={ADMIN_HREFS} hideUnavailable mobileTitle="Metrics" skipTo="metrics" skipLabel="Skip to metrics">
             <PageTransition routeKey="metrics" focusHeading={false}>
-              <main id="metrics" tabIndex={-1} className="mx-auto w-full max-w-[1120px] px-4 pb-16 pt-3 outline-none md:px-6 lg:px-8 lg:pt-8">
+              <main id="metrics" tabIndex={-1} className="mx-auto w-full max-w-[1800px] px-4 pb-16 pt-3 outline-none md:px-6 lg:pt-8">
                 <header className="flex flex-wrap items-end justify-between gap-4">
                   <div><h1 className="type-display">Metrics</h1><p className="type-body-sm mt-2 text-ink-muted">Patient and donor counts from current records.</p></div>
                   <label className="type-body-sm flex items-center gap-3">Patient status
-                    <select value={status} onChange={e => setStatus(e.target.value as PatientStatus | "All")} className="clay-focus rounded-lg border border-hairline bg-surface-1 px-3 py-2">
+                    <select value={status} onChange={e => setStatus(e.target.value as PatientStatus | "All")} className="clay-focus clay-2 min-h-11 cursor-pointer appearance-none rounded-2xl border-0 bg-surface-2 bg-[url('data:image/svg+xml;utf8,<svg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%2216%22%20height=%2216%22%20viewBox=%220%200%2024%2024%22%20fill=%22none%22%20stroke=%22%231e1e1c%22%20stroke-width=%222.5%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22><path%20d=%22m6%209%206%206%206-6%22/></svg>')] bg-[length:16px] bg-[right_1rem_center] bg-no-repeat py-2 pl-5 pr-11 type-body-sm font-medium text-ink outline-none">
                       <option value="All">All statuses</option>
                       {PATIENT_STATUSES.map(value => <option key={value}>{value}</option>)}
                     </select>
@@ -45,15 +45,31 @@ export default function MetricsPage() {
                   {data.total === 0 && <p role="status" className="mt-4">No patients match this status.</p>}
                   <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {cards.map(([label, value, description]) => <section key={label} className="clay-1 rounded-2xl bg-surface-1 p-5">
-                      <h2 className="type-body-sm font-bold">{label}</h2><p className="type-display mt-3 tabular-nums">{value.toLocaleString()}</p><p className="type-caption mt-2 text-ink-muted">{description}</p>
+                      <h2 className="type-body-sm font-bold">{label}</h2><p className="type-display mt-3 tabular-nums"><CountUp value={value} /></p><p className="type-caption mt-2 text-ink-muted">{description}</p>
                     </section>)}
                   </div>
-                  <section className="clay-1 mt-6 rounded-2xl bg-surface-1 p-4 sm:p-6" aria-labelledby="stages-heading">
+                  <section className="mt-6" aria-labelledby="stages-heading">
                     <h2 id="stages-heading" className="type-headline">Patients by stage</h2>
-                    <table className="type-body-sm mt-4 w-full table-fixed text-left">
-                      <thead><tr className="border-b border-hairline"><th className="w-1/2 py-3">Stage</th><th className="py-3 text-right">Recipients</th><th className="py-3 text-right">Donors</th></tr></thead>
-                      <tbody>{data.stages.map(row => <tr key={row.stage} className="border-b border-hairline last:border-0"><th scope="row" className="py-3 pr-3 font-normal break-words">{STAGE_ADMIN_LABEL[row.stage]}</th><td className="py-3 text-right tabular-nums">{row.recipients}</td><td className="py-3 text-right tabular-nums">{row.donors}</td></tr>)}</tbody>
-                    </table>
+                    <div className="clay-table-wrap mt-4">
+                      <table className="clay-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Stage</th>
+                            <th scope="col" className="text-right">Recipients</th>
+                            <th scope="col" className="text-right">Donors</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.stages.map(row => (
+                            <tr key={row.stage}>
+                              <th scope="row" className="font-normal">{STAGE_ADMIN_LABEL[row.stage]}</th>
+                              <td data-num="true" className="text-right"><CountUp value={row.recipients} align="end" /></td>
+                              <td data-num="true" className="text-right"><CountUp value={row.donors} align="end" /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </section>
                   <MetricsAnalysis data={data.analysis} />
                 </> : null}

@@ -11,7 +11,7 @@ import {
   Send,
   User,
 } from "lucide-react";
-import { ClayButton, ClayCard, ClayInput } from "@/components/clay";
+import { ClayButton, ClayInput } from "@/components/clay";
 import { trpc } from "@/lib/trpc";
 
 interface DispatchLogTableProps {
@@ -58,29 +58,29 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
     switch (status) {
       case "sent":
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-[#4f5b3a]/15 text-[#333e22] border border-[#8b9474]/50">
-            <CheckCircle2 className="w-3 h-3 text-[#4f5b3a]" />
+          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 type-label bg-done-bg text-done border border-done/40">
+            <CheckCircle2 className="size-3.5 text-done" />
             Sent
           </span>
         );
       case "mock_sent":
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-[#3b5971]/15 text-[#203647] border border-[#7d9cb3]/50">
-            <Mail className="w-3 h-3 text-[#3b5971]" />
+          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 type-label bg-info-bg text-info border border-info/40">
+            <Mail className="size-3.5 text-info" />
             Mock Sent
           </span>
         );
       case "failed":
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-[#ae3c30]/15 text-[#82241b] border border-[#ae3c30]/40">
-            <AlertCircle className="w-3 h-3 text-[#ae3c30]" />
+          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 type-label bg-overdue-bg text-overdue border border-overdue/40">
+            <AlertCircle className="size-3.5 text-overdue" />
             Failed
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-[#b47d1e]/15 text-[#6c480a] border border-[#d8aa58]/50">
-            <Clock className="w-3 h-3 text-[#b47d1e]" />
+          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 type-label bg-due-soon-bg text-due-soon border border-due-soon/40">
+            <Clock className="size-3.5 text-due-soon" />
             Queued
           </span>
         );
@@ -90,32 +90,32 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
   return (
     <div className="space-y-4">
       {/* Search and Filters Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 rounded-lg bg-[#e8ebde]/70 border border-[#c8ccb5]">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 rounded-lg bg-surface-1 border border-hairline">
         <div className="flex items-center gap-2 flex-1 max-w-md">
           <div className="relative w-full">
-            <Search className="w-4 h-4 text-[#606950] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-4 h-4 text-ink-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               placeholder="Search recipient, HRN, subject..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-md bg-[#fbfbf7] border border-[#c8ccb5] focus:outline-none focus:ring-1 focus:ring-[#4f5b3a] text-[#2c3320]"
+              className="w-full pl-9 pr-3 py-2 type-body-sm rounded-md bg-surface-2 border border-hairline focus:outline-none focus:ring-1 focus:ring-brick text-ink"
             />
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1 bg-[#dce1ce] p-1 rounded-md border border-[#c8ccb5] text-xs">
-            <Filter className="w-3.5 h-3.5 text-[#606950] ml-1 mr-0.5" />
+          <div className="flex items-center gap-1 bg-ground p-1 rounded-md border border-hairline">
+            <Filter className="w-3.5 h-3.5 text-ink-muted ml-1 mr-0.5" />
             {(["all", "sent", "mock_sent", "failed"] as const).map(pill => (
               <button
                 key={pill}
                 type="button"
                 onClick={() => setStatusFilter(pill)}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded type-body-sm transition-colors ${
                   statusFilter === pill
-                    ? "bg-[#4f5b3a] text-[#fbfbf7] shadow-sm"
-                    : "text-[#4b543b] hover:bg-[#cfd5be]"
+                    ? "bg-brick text-on-brick shadow-sm"
+                    : "text-ink-muted hover:bg-sunken"
                 }`}
               >
                 {pill === "all"
@@ -133,21 +133,20 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
             type="button"
             onClick={() => logsQuery.refetch()}
             disabled={logsQuery.isFetching}
-            className="p-1.5 rounded-md border border-[#c8ccb5] bg-[#fbfbf7] hover:bg-[#eef1e6] text-[#4b543b] transition-colors"
+            className="p-1.5 rounded-md border border-hairline bg-surface-2 hover:bg-row-hover text-ink-muted transition-colors"
             title="Refresh logs"
           >
             <RefreshCw
-              className={`w-4 h-4 ${logsQuery.isFetching ? "animate-spin text-[#4f5b3a]" : ""}`}
+              className={`w-4 h-4 ${logsQuery.isFetching ? "animate-spin text-brick-text" : ""}`}
             />
           </button>
         </div>
       </div>
 
-      {/* Main Ledger Table */}
-      <ClayCard className="overflow-hidden border border-[#c8ccb5] bg-[#fbfbf7] shadow-sm">
+      {/* Main Ledger Table: an opaque clay card. Long emails, templates and subjects wrap inside their column. */}
+      <div className="clay-table-wrap">
         <div className="show-scrollbar-x overflow-x-auto">
-          {/* Fixed column widths: the table always fits its card. A long email, template, or subject is cut and the full text is in the tooltip and in the details. */}
-          <table className="w-full min-w-[820px] table-fixed text-left text-xs border-collapse">
+          <table className="clay-table min-w-[820px] table-fixed">
             <colgroup>
               <col className="w-28" />
               <col className="w-32" />
@@ -157,26 +156,26 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
               <col className="w-28" />
             </colgroup>
             <thead>
-              <tr className="bg-[#e4e8d8] text-[#3e472f] border-b border-[#c8ccb5] font-semibold tracking-wider uppercase text-[11px]">
-                <th className="py-2.5 px-3">Status</th>
-                <th className="py-2.5 px-3">Timestamp (UTC/Local)</th>
-                <th className="py-2.5 px-3">Recipient</th>
-                <th className="py-2.5 px-3">Template</th>
-                <th className="py-2.5 px-3">Subject</th>
-                <th className="py-2.5 px-3 text-right">Actions</th>
+              <tr>
+                <th scope="col">Status</th>
+                <th scope="col">Timestamp (UTC/Local)</th>
+                <th scope="col">Recipient</th>
+                <th scope="col">Template</th>
+                <th scope="col">Subject</th>
+                <th scope="col" className="text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#dce1ce]">
+            <tbody>
               {logsQuery.isLoading ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-[#606950]">
-                    <RefreshCw className="w-5 h-5 mx-auto animate-spin mb-1 text-[#4f5b3a]" />
+                  <td colSpan={6} className="py-8 text-center text-ink-muted">
+                    <RefreshCw className="w-5 h-5 mx-auto animate-spin mb-1 text-brick-text" />
                     Loading dispatch logs...
                   </td>
                 </tr>
               ) : filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-[#606950]">
+                  <td colSpan={6} className="py-8 text-center text-ink-muted">
                     No email dispatch records found matching criteria.
                   </td>
                 </tr>
@@ -193,39 +192,32 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
                   return (
                     <tr
                       key={item.id}
-                      className={`hover:bg-[#f2f4ec] transition-colors cursor-pointer ${
-                        isExpanded ? "bg-[#edf1e4]" : ""
-                      }`}
+                      className={`cursor-pointer transition-colors ${isExpanded ? "is-hover" : ""}`}
                       onClick={() => setSelectedLogId(isExpanded ? null : item.id)}
                     >
-                      <td className="py-2.5 px-3 whitespace-nowrap">
+                      <td className="whitespace-nowrap">
                         {getStatusBadge(item.status)}
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px] text-[#4b543b]">
+                      <td className="whitespace-nowrap font-mono text-ink-muted">
                         {dateStr}
                       </td>
-                      <td className="py-2.5 px-3">
-                        <div className="font-medium text-[#2c3320] truncate" title={item.recipientEmail}>
+                      <td>
+                        <div className="font-medium text-ink break-all">
                           {item.recipientEmail}
                         </div>
                         {item.patientHrn && (
-                          <div className="text-[10px] text-[#606950] font-mono">
+                          <div className="type-data text-ink-muted">
                             {item.patientHrn} {item.patientName ? `(${item.patientName})` : ""}
                           </div>
                         )}
                       </td>
-                      <td className="py-2.5 px-3">
-                        <span
-                          className="inline-block max-w-full truncate align-bottom font-mono text-[11px] px-1.5 py-0.5 rounded bg-[#e2e7d5] text-[#3e472f] border border-[#c8ccb5]"
-                          title={item.templateName}
-                        >
+                      <td>
+                        <span className="inline-block max-w-full break-all align-bottom font-mono px-1.5 py-0.5 rounded bg-sage-tint text-ink-muted border border-hairline">
                           {item.templateName}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 text-[#3e472f] font-normal">
-                        <span className="line-clamp-2" title={item.subject}>{item.subject}</span>
-                      </td>
-                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                      <td className="text-ink-muted font-normal">{item.subject}</td>
+                      <td className="text-right whitespace-nowrap">
                         <div
                           className="flex items-center justify-end gap-1.5"
                           onClick={e => e.stopPropagation()}
@@ -234,7 +226,7 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
                             <button
                               type="button"
                               onClick={() => onSelectTemplate(item.templateName)}
-                              className="p-1 rounded text-[#4b543b] hover:text-[#2c3320] hover:bg-[#dce1ce]"
+                              className="p-1 rounded text-ink-muted hover:text-ink hover:bg-sunken"
                               title="Preview template"
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
@@ -244,7 +236,6 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
                             <ClayButton
                               variant="secondary"
                               size="sm"
-                              className="text-[11px] py-0.5 px-2 h-6"
                               onClick={() => {
                                 const validTemplates = [
                                   "AppointmentNotice",
@@ -262,7 +253,7 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
                               }}
                               disabled={retryMutation.isPending}
                             >
-                              <Send className="w-3 h-3 mr-1" />
+                              <Send className="mr-1 size-3.5" />
                               Retry
                             </ClayButton>
                           )}
@@ -278,47 +269,47 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
 
         {/* Selected Log Drawer */}
         {selectedLogId && (
-          <div className="p-4 bg-[#e8ebde] border-t border-[#c8ccb5] text-xs space-y-2">
+          <div className="mt-2 space-y-2 rounded-xl border border-hairline bg-surface-2 p-4 type-body-sm">
             {(() => {
               const item = filteredLogs.find(l => l.id === selectedLogId);
               if (!item) return null;
               return (
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-semibold text-[#2c3320]">
+                  <div className="flex items-center justify-between mb-2 gap-3">
+                    <span className="font-semibold text-ink">
                       Dispatch Record #{item.id} Details
                     </span>
                     <button
                       type="button"
                       onClick={() => setSelectedLogId(null)}
-                      className="text-xs text-[#606950] hover:underline"
+                      className="type-body-sm text-ink-muted hover:underline"
                     >
                       Close details
                     </button>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#fbfbf7] p-3 rounded border border-[#c8ccb5]">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-surface-1 p-3 rounded-lg border border-hairline">
                     <div>
-                      <p className="text-[11px] text-[#606950] uppercase font-semibold">Subject</p>
-                      <p className="text-xs text-[#2c3320] font-medium mt-0.5">{item.subject}</p>
+                      <p className="type-body-sm font-semibold uppercase text-ink-muted">Subject</p>
+                      <p className="type-body-sm text-ink font-medium mt-0.5 break-words">{item.subject}</p>
                     </div>
                     <div>
-                      <p className="text-[11px] text-[#606950] uppercase font-semibold">Recipient</p>
-                      <p className="text-xs text-[#2c3320] font-mono mt-0.5">{item.recipientEmail}</p>
+                      <p className="type-body-sm font-semibold uppercase text-ink-muted">Recipient</p>
+                      <p className="type-body-sm text-ink font-mono mt-0.5 break-all">{item.recipientEmail}</p>
                     </div>
                     <div>
-                      <p className="text-[11px] text-[#606950] uppercase font-semibold">Template ID</p>
-                      <p className="text-xs text-[#2c3320] font-mono mt-0.5">{item.templateName}</p>
+                      <p className="type-body-sm font-semibold uppercase text-ink-muted">Template ID</p>
+                      <p className="type-body-sm text-ink font-mono mt-0.5 break-all">{item.templateName}</p>
                     </div>
                     <div>
-                      <p className="text-[11px] text-[#606950] uppercase font-semibold">Status & Delivery</p>
-                      <p className="text-xs text-[#2c3320] mt-0.5 font-medium">
+                      <p className="type-body-sm font-semibold uppercase text-ink-muted">Status & Delivery</p>
+                      <p className="type-body-sm text-ink mt-0.5 font-medium">
                         {item.status.toUpperCase()}
                       </p>
                     </div>
                     {item.errorMessage && (
-                      <div className="sm:col-span-2 p-2 rounded bg-[#ae3c30]/10 border border-[#ae3c30]/30 text-[#82241b]">
-                        <p className="font-semibold text-[11px]">Dispatch Failure Error:</p>
-                        <p className="font-mono text-[11px] mt-0.5">{item.errorMessage}</p>
+                      <div className="sm:col-span-2 p-2 rounded bg-overdue-bg border border-overdue/30 text-overdue">
+                        <p className="type-body-sm font-semibold">Dispatch Failure Error:</p>
+                        <p className="type-body-sm font-mono mt-0.5 break-words">{item.errorMessage}</p>
                       </div>
                     )}
                   </div>
@@ -327,7 +318,7 @@ export function DispatchLogTable({ onSelectTemplate }: DispatchLogTableProps) {
             })()}
           </div>
         )}
-      </ClayCard>
+      </div>
     </div>
   );
 }

@@ -108,18 +108,20 @@ export function AdminShell({
       </aside>
 
       {/* Phone and tablet top bar */}
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-2 bg-ground px-2 md:h-16 md:px-4 lg:hidden">
+      <header className="clay-on-dark sticky top-0 z-30 flex h-14 items-center gap-2 bg-ink px-2 text-on-brick md:h-16 md:px-4 lg:hidden">
         <button
           type="button"
           aria-label="Open navigation"
           aria-expanded={drawerOpen}
           onClick={() => setDrawerOpen(true)}
-          className="clay-focus inline-flex size-11 cursor-pointer items-center justify-center rounded-md text-ink hover:bg-sunken/60"
+          className="clay-focus inline-flex size-11 cursor-pointer items-center justify-center rounded-md text-on-brick hover:bg-white/10"
         >
           <Menu aria-hidden className="size-6" strokeWidth={1.75} />
         </button>
-        <img src="/branding/ots-mark.png" alt="" width={32} height={32} className="size-8 rounded-[6px] mix-blend-multiply" />
-        <p className="type-title min-w-0 flex-1 truncate text-ink">{mobileTitle}</p>
+        <span className="inline-flex shrink-0 rounded-[6px] bg-ground">
+          <img src="/branding/ots-mark.png" alt="" width={32} height={32} className="size-8 rounded-[6px] mix-blend-multiply" />
+        </span>
+        <p className="type-title min-w-0 flex-1 truncate text-on-brick">{mobileTitle}</p>
         {mobileActions}
       </header>
 

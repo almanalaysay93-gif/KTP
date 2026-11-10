@@ -27,7 +27,7 @@ function TrackerLink({ patientId }: { patientId: number }) {
   return (
     <Link
       href={`/patients/${patientId}?tab=tracker`}
-      className="clay-focus mt-2 inline-flex min-h-11 items-center text-brick"
+      className="clay-focus mt-2 inline-flex min-h-11 items-center text-brick-text"
     >
       Open Tracker
     </Link>

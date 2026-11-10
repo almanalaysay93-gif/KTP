@@ -80,7 +80,7 @@ export function MessageList({
       {items.length === 0 ? (
         <div className="flex flex-col items-start gap-2">
           <p className="type-body-lg text-ink">No new messages.</p>
-          <a href={allHref} className="clay-focus type-button rounded-xs text-brick underline underline-offset-4">
+          <a href={allHref} className="clay-focus type-button rounded-xs text-brick-text underline underline-offset-4">
             See all messages
           </a>
         </div>

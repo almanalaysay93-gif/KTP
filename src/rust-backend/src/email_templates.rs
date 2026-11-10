@@ -61,15 +61,15 @@ fn base(title: &str, banner: &str, body: &str) -> String {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{0}</title>
   <style>
-    body {{ margin:0; padding:0; background-color:#e2e5d5; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#2a301e; }}
-    .wrapper {{ width:100%; max-width:600px; margin:24px auto; background-color:#fbfbf7; border-radius:12px; border:1px solid #cbd0bb; overflow:hidden; }}
-    .header {{ background-color:#f3f4ec; padding:20px 24px; border-bottom:1px solid #cbd0bb; }}
-    .title {{ font-size:18px; font-weight:700; margin:0; color:#2a301e; }}
-    .sub {{ font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:#545b45; margin-top:4px; }}
-    .banner {{ background-color:#d8dcc9; padding:12px 24px; font-size:12px; font-family:monospace; color:#2a301e; border-bottom:1px solid #cbd0bb; }}
-    .content {{ padding:24px; font-size:14px; line-height:1.5; color:#2a301e; }}
-    .footer {{ background-color:#f3f4ec; padding:16px 24px; font-size:11px; color:#545b45; border-top:1px solid #cbd0bb; }}
-    .btn {{ display:inline-block; background-color:#ae3c30; color:#fffaf6; text-decoration:none; padding:10px 18px; font-size:13px; font-weight:600; border-radius:6px; margin-top:16px; }}
+    body {{ margin:0; padding:0; background-color:#d8cbb3; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#1e1e1c; }}
+    .wrapper {{ width:100%; max-width:600px; margin:24px auto; background-color:#f6f1e7; border-radius:12px; border:1px solid #c2b49a; overflow:hidden; }}
+    .header {{ background-color:#ece4d4; padding:20px 24px; border-bottom:1px solid #c2b49a; }}
+    .title {{ font-size:18px; font-weight:700; margin:0; color:#1e1e1c; }}
+    .sub {{ font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:#4a463e; margin-top:4px; }}
+    .banner {{ background-color:#c9baa0; padding:12px 24px; font-size:12px; font-family:monospace; color:#1e1e1c; border-bottom:1px solid #c2b49a; }}
+    .content {{ padding:24px; font-size:14px; line-height:1.5; color:#1e1e1c; }}
+    .footer {{ background-color:#ece4d4; padding:16px 24px; font-size:11px; color:#4a463e; border-top:1px solid #c2b49a; }}
+    .btn {{ display:inline-block; background-color:#2c66f5; color:#ffffff; text-decoration:none; padding:10px 18px; font-size:13px; font-weight:600; border-radius:6px; margin-top:16px; }}
     .highlight {{ background-color:#dcefdc; color:#1d6433; padding:2px 6px; border-radius:4px; font-weight:600; }}
   </style>
 </head>
@@ -125,7 +125,7 @@ pub fn render(name: &str, data: &Value) -> Value {
                 r###"
       <p>Dear <strong>{0}</strong>,</p>
       <p>This is an automated reminder of your upcoming kidney transplant clinic appointment:</p>
-      <div style="background-color:#f3f4ec; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #cbd0bb;">
+      <div style="background-color:#ece4d4; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #c2b49a;">
         <p style="margin:0 0 8px 0;"><strong>Date and Time:</strong> <span class="highlight">{1} at {2}</span></p>
         <p style="margin:0 0 8px 0;"><strong>Attending Doctor:</strong> {3}</p>
         <p style="margin:0;"><strong>Location:</strong> SPMC Kidney Transplant Clinic, OPD Building</p>
@@ -166,9 +166,9 @@ Location: SPMC Kidney Transplant Clinic"###,
                 r###"
       <p>Dear <strong>{0}</strong>,</p>
       <p>Our records show a scheduled laboratory workup has reached its due date without recorded results:</p>
-      <div style="background-color:#fbe1e8; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #ae3c30;">
-        <p style="margin:0 0 8px 0; color:#ae3c30;"><strong>Laboratory Requirement:</strong> {1}</p>
-        <p style="margin:0; color:#2a301e;"><strong>Target Due Date:</strong> {2}</p>
+      <div style="background-color:#fbe1e8; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #a3143f;">
+        <p style="margin:0 0 8px 0; color:#a3143f;"><strong>Laboratory Requirement:</strong> {1}</p>
+        <p style="margin:0; color:#1e1e1c;"><strong>Target Due Date:</strong> {2}</p>
       </div>
       <p>Routine lab monitoring is critical to protect your graft function. Please complete your blood draw and upload your results or submit them to the transplant coordinator.</p>
       <a href="https://ktp-beryl.vercel.app/me/labs" class="btn">Upload Results to Portal</a>
@@ -199,7 +199,7 @@ Due Date: {3}"###,
                 r###"
       <p>Dear <strong>{0}</strong>,</p>
       <p>Here is the weekly active patient census and workup status summary:</p>
-      <div style="background-color:#f3f4ec; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #cbd0bb;">
+      <div style="background-color:#ece4d4; padding:16px; border-radius:8px; margin:16px 0; border:1px solid #c2b49a;">
         <p style="margin:0 0 8px 0;"><strong>Active Transplant Patients:</strong> <span class="highlight">{1}</span></p>
         <p style="margin:0 0 8px 0;"><strong>Pending Lab Workups:</strong> {2}</p>
         <p style="margin:0 0 8px 0;"><strong>Upcoming Clinic Visits (7 Days):</strong> {3}</p>

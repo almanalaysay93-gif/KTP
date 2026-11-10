@@ -19,7 +19,7 @@ Owner: U2. Consumers: U3 (tokens, clay components), U4 (motion), U5 (screens), U
 
 **The Actionable Cell Rule.** A cell exists only if tapping it navigates or filters. No decorative cells, no empty filler. One 3x3 tray per screen, maximum.
 
-**Key characteristics:** earthy clay (sage-putty ground, chalk cells, brick action), light from the top-left, hyperlegible type, clinical numbers in a monospace, status always word + icon + color, springy on admin, calm on patient.
+**Key characteristics:** earthy clay (sand ground, chalk cells, electric blue action) on charcoal chrome, light from the top-left, hyperlegible type, clinical numbers in a monospace, status always word + icon + color, springy on admin, calm on patient.
 
 ### Generic patterns this product must avoid
 
@@ -29,44 +29,47 @@ Owner: U2. Consumers: U3 (tokens, clay components), U4 (motion), U5 (screens), U
 - Neumorphism: same-color extrusions with no contrast, borderless invisible inputs.
 - The hero-metric template: identical cards of big number, tiny label, green arrow, sparkline. Tray cells differ by content and state.
 - Three equal feature cards with an icon in a colored circle; centered empty hero with two CTAs (the sign-in is a split with the tray).
-- Warm cream ground with a serif display and terracotta accent (the brick is here, so the ground is sage and the type is sans).
-- Purple or blue gradients, gradient text, neon or outer glows, colored left-border stripe cards, uppercase tracked eyebrow labels.
+- Warm cream ground with a serif display and terracotta accent (the action is electric blue and the ground is sand, so the type is sans).
+- Purple or blue gradients (flat electric blue is the action color and is allowed; gradients are not), gradient text, neon or outer glows, colored left-border stripe cards, uppercase tracked eyebrow labels.
 - Emoji anywhere, stock hospital photos, anatomy clipart beyond the logo, confetti on clinical events, spinners as page loaders, pie charts for stages, red and green as the only status signal.
 
 ## Colors
 
-Strategy: Restrained. Sage-olive neutrals own 85% of every screen; brick is the single action color; status hues are reserved and never decorative. All neutrals share one olive hue (about 115 to 125) so grays never drift warm or cool.
+Strategy: Restrained. Sand neutrals and charcoal ink own 85% of every screen; electric blue (the `--brick` token) is the single action color; status hues are reserved and never decorative. All neutrals share one warm sand hue (about 80 to 90; ink about 107) so grays never drift cool.
 
 ### Neutrals and surfaces
 
 | Token | Role | Hex | OKLCH |
 |---|---|---|---|
-| `--ground` | page background (sage putty) | `#e2e5d5` | `oklch(91.5% 0.022 115.4)` |
-| `--surface-1` | clay cards, tray cells (chalk) | `#f3f4ec` | `oklch(96.4% 0.011 112.4)` |
-| `--surface-2` | raised on raised: popovers, toasts, secondary buttons, tab pill | `#fbfbf7` | `oklch(98.7% 0.005 106.5)` |
-| `--sunken` | tray wells, input wells, skeletons, tracks, disabled fills | `#d8dcc9` | `oklch(88.6% 0.026 116.6)` |
-| `--row-hover` | flat table row hover | `#e9ecdf` | `oklch(93.7% 0.018 117.3)` |
-| `--hairline` | flat table dividers (decorative only) | `#cbd0bb` | `oklch(84.8% 0.029 117.9)` |
-| `--line-strong` | input borders, dashed planned chip, disabled text, upcoming stepper line | `#6b735c` | `oklch(54.2% 0.036 123.2)` |
-| `--ink` | forest ink: text, icons, focus ring | `#2a301e` | `oklch(29.8% 0.032 123.3)` |
-| `--ink-muted` | secondary text, placeholders, inactive nav | `#545b45` | `oklch(45.8% 0.035 122.1)` |
+| `--ground` | page background (sand) | `#d8cbb3` | `oklch(84.6% 0.036 82.9)` |
+| `--surface-1` | clay cards, tray cells (chalk) | `#ece4d4` | `oklch(92.1% 0.023 84.6)` |
+| `--surface-2` | raised on raised: popovers, toasts, secondary buttons, tab pill | `#f6f1e7` | `oklch(95.9% 0.014 84.6)` |
+| `--sunken` | tray wells, input wells, skeletons, tracks, disabled fills | `#c9baa0` | `oklch(79.5% 0.039 81.5)` |
+| `--row-hover` | flat table row hover | `#e2d7c2` | `oklch(88.2% 0.031 83.6)` |
+| `--hairline` | flat table dividers (decorative only) | `#c2b49a` | `oklch(77.5% 0.039 83.0)` |
+| `--line-strong` | input borders, dashed planned chip, disabled text, upcoming stepper line | `#5e5849` | `oklch(46.2% 0.025 88.8)` |
+| `--ink` | charcoal ink: text, icons, focus ring | `#1e1e1c` | `oklch(23.4% 0.004 106.7)` |
+| `--ink-muted` | secondary text, placeholders, inactive nav | `#4a463e` | `oklch(39.5% 0.014 84.6)` |
 
 ### Brand roles
 
 | Token | Role | Hex | OKLCH |
 |---|---|---|---|
-| `--brick` | **primary action** fill, active link text, selected-cell bar | `#ae3c30` | `oklch(51.7% 0.151 29.2)` |
-| `--brick-hover` | primary hover | `#9a3328` | `oklch(47.1% 0.140 29.4)` |
+| `--brick` | **primary action** fill (electric blue), selected-cell bar | `#2c66f5` | `oklch(56.2% 0.223 263.8)` |
+| `--brick-hover` | primary hover | `#2459d9` | `oklch(51.2% 0.204 263.6)` |
+| `--brick-text` | text-link color: active link text, inline action text, nav icons | `#1a44a8` | `oklch(42.5% 0.168 263.6)` |
 | `--maroon` | primary pressed, emergency band, recipient initials | `#6c120c` | `oklch(34.6% 0.124 29.1)` |
-| `--on-brick` | text on brick and maroon buttons | `#fffaf6` | `oklch(98.8% 0.008 61.5)` |
-| `--sage-deep` | **secondary**: people, center cell text, progress fill | `#56613f` | `oklch(47.4% 0.054 123.0)` |
-| `--sage` | people icons only (3.89:1, glyphs not text) | `#727e60` | `oklch(57.5% 0.047 125.6)` |
-| `--sage-tint` | center cell fill, donor avatar fill | `#e1e7d2` | `oklch(91.8% 0.029 119.9)` |
-| `--peach` | **accent**: clay highlight on brick, focus ring on dark | `#fcd8cc` | `oklch(90.9% 0.044 39.3)` |
-| `--peach-tint` | selected cell and row fill, recipient avatar fill | `#f8e2d8` | `oklch(92.8% 0.028 46.1)` |
-| `--coral`, `--mauve`, `--lilac` | decorative only (backdrop cells, illustrations) | `#de7e78`, `#9c6060`, `#ccb4ba` | `oklch(69.7% 0.120 24.4)`, `oklch(55.5% 0.079 19.9)`, `oklch(79.2% 0.029 0.9)` |
-| `--emergency-ink` | text on the emergency band | `#fff4ef` | `oklch(97.4% 0.014 46.2)` |
-| `--focus` | focus ring (ink); on maroon or brick contexts use `--peach` | `#2a301e` | as ink |
+| `--on-brick` | text on brick and maroon buttons | `#ffffff` | `oklch(100.0% 0.000 89.9)` |
+| `--sage-deep` | **secondary**: people, center cell text, progress fill | `#4a463e` | `oklch(39.5% 0.014 84.6)` |
+| `--sage` | people icons only (4.58:1, glyphs not text) | `#6b6559` | `oklch(50.9% 0.020 84.6)` |
+| `--sage-tint` | center cell fill, donor avatar fill | `#e6e0d3` | `oklch(90.8% 0.019 86.2)` |
+| `--peach` | **accent**: unread badge text on ink, clay highlight on brick | `#dfe8ff` | `oklch(93.1% 0.033 268.7)` |
+| `--peach-tint` | selected cell and row fill, recipient avatar fill | `#e8eeff` | `oklch(95.0% 0.024 270.3)` |
+| `--coral`, `--mauve`, `--lilac` | decorative only (backdrop cells, illustrations) | `#c43d2f`, `#7a5aa6`, `#cbbfa6` | `oklch(55.5% 0.174 29.6)`, `oklch(53.4% 0.120 301.9)`, `oklch(80.8% 0.037 85.4)` |
+| `--emergency-ink` | text on the emergency band | `#ffffff` | `oklch(100.0% 0.000 89.9)` |
+| `--focus` | focus ring (ink); on maroon or ink chrome use `#6f9bff` (the `.clay-on-dark` ring) | `#1e1e1c` | as ink |
+
+brick token names are kept; --action / --action-hover / --on-action are the semantic names for new code; --brick-text is the text-link color.
 
 ### Status roles (never brick; always icon + word)
 
@@ -74,63 +77,63 @@ Strategy: Restrained. Sage-olive neutrals own 85% of every screen; brick is the 
 |---|---|---|---|---|---|
 | Overdue | `#a3143f` | `#fbe1e8` | `oklch(46.5% 0.174 11.8)` | `TriangleAlert` | filled |
 | Due soon (7 days) | `#7a4800` | `#faebc6` | `oklch(45.0% 0.100 66.1)` | `Clock` | filled |
-| Planned / upcoming / Open | `#4a5238` | transparent, 1.5px dashed `--line-strong` | `oklch(42.4% 0.042 122.1)` | `CalendarClock` | hollow |
+| Planned / upcoming / Open | `#4a463e` | transparent, 1.5px dashed `--line-strong` | `oklch(39.5% 0.014 84.6)` | `CalendarClock` | hollow |
 | Done | `#1d6433` | `#dcefdc` | `oklch(44.7% 0.105 149.9)` | `CircleCheck` | filled |
 | Filed (claim) | `#0b5e57` | `#d3ede8` | `oklch(43.5% 0.073 185.8)` | `FileCheck2` | filled |
 | Superseded | `#5f6357` | `#e6e7e0` | `oklch(49.2% 0.019 122.1)` | `History` | filled, values struck through |
-| Lab Low | `#2a4a9a` | `#e0e7f7` | `oklch(43.2% 0.136 264.8)` | `ArrowDown` | filled |
+| Lab Low | `#5b3a8c` | `#ebe3f5` | `oklch(42.9% 0.132 299.4)` | `ArrowDown` | filled |
 | Lab High | `#8a1a5e` | `#f7ddec` | `oklch(43.2% 0.159 349.0)` | `ArrowUp` | filled |
 | Lab Normal | `#3f4733` | `#e2e5d8` | `oklch(38.4% 0.034 125.7)` | `Check` | filled, quiet |
-| Info | `#1d5470` | `#dcebf2` | `oklch(42.3% 0.073 234.6)` | `Info` | filled |
+| Info | `#3a4a5c` | `#e3e7ec` | `oklch(40.3% 0.037 251.7)` | `Info` | filled |
 
-Separation from brick (OKLab deltaE x100, normal / deutan / protan): Overdue 7.5 / 6.2 / 8.6, Due soon 11.4 / 7.1 / 3.9, High 13.6 / 13.7 / 13.9. Overdue and brick also never share a form: brick is a solid button, Overdue is a tinted chip with an icon. Done vs Filed and Low vs Info collapse under tritanopia (deltaE 0.9 and 2.2), which is why the icon and word are mandatory.
+Separation from brick (OKLab deltaE x100, normal / deutan / protan): Overdue 33.7 / 28.3 / 31.0, Due soon 33.9 / 32.8 / 34.6, Lab High 29.3 / 23.7 / 27.8, Lab Low 19.2 / 17.5 / 20.2, Info 24.6 / 24.3 / 26.1. Overdue and brick also never share a form: brick is a solid button, Overdue is a tinted chip with an icon. Done vs Filed collapses under tritanopia (deltaE 1.1), and Lab Low vs Info is 5.6 under tritanopia, so the icon and word are mandatory.
 
 ### Chart series (render on `--surface-1` or `--surface-2` only)
 
 | Series | Hex | OKLCH | vs surface-1 |
 |---|---|---|---|
-| 1 brick | `#ae3c30` | `oklch(51.7% 0.151 29.2)` | 5.44 |
-| 2 forest | `#2f3a1c` | `oklch(33.0% 0.051 125.6)` | 10.88 |
-| 3 ochre | `#a77410` | `oklch(59.6% 0.121 76.9)` | 3.68 |
-| 4 lilac plum | `#8a6c95` | `oklch(57.5% 0.071 316.8)` | 4.07 |
-| 5 coral deep | `#d0706a` | `oklch(65.3% 0.122 24.7)` | 3.05 |
+| 1 electric blue | `#2f6bff` | `oklch(58.1% 0.229 263.9)` | 3.56 |
+| 2 charcoal | `#1e1e1c` | `oklch(23.4% 0.004 106.7)` | 13.21 |
+| 3 ochre | `#8a5a00` | `oklch(50.8% 0.108 73.3)` | 4.69 |
+| 4 mauve | `#7a5aa6` | `oklch(53.4% 0.120 301.9)` | 4.33 |
+| 5 teal | `#0b7a6e` | `oklch(52.1% 0.091 182.8)` | 4.13 |
 
-Minimum pairwise deltaE across the five: 12.1 normal, 8.2 deutan, 9.0 protan, 8.0 tritan. Lab trend charts are single-series: line and normal points in series 2 (forest), reference range as a `--sage-tint` band, High points in Lab High with an up-triangle marker, Low points in Lab Low with a down-triangle. Stage counts are ordinal: draw them as a rail (sequential lightness of `--sage-deep`), never a pie. Direct-label every series; legends only as backup.
+Minimum pairwise deltaE across the five: 16.1 normal (series 1 and 4), 8.9 deutan (4 and 5), 11.9 protan (3 and 5), 9.0 tritan (1 and 5). Lab trend charts are single-series: line and normal points in series 2 (charcoal), reference range as a `--sage-tint` band, High points in Lab High with an up-triangle marker, Low points in Lab Low with a down-triangle. Stage counts are ordinal: draw them as a rail (sequential lightness of `--sage-deep`), never a pie. Direct-label every series; legends only as backup.
 
 ### shadcn variable mapping (U3 writes this in `index.css`)
 
-`--background` ground, `--foreground` ink, `--card` surface-1, `--card-foreground` ink, `--popover` surface-2, `--primary` brick, `--primary-foreground` on-brick, `--secondary` surface-2, `--secondary-foreground` ink, `--muted` sunken, `--muted-foreground` ink-muted, `--accent` peach-tint, `--accent-foreground` ink, `--destructive` `#a3143f`, `--border` hairline, `--input` line-strong, `--ring` ink, `--chart-1..5` series 1 to 5, `--sidebar` ground, `--sidebar-primary` brick, `--sidebar-accent` surface-1, `--sidebar-border` hairline, `--sidebar-ring` ink. Delete the `.dark` block (light only).
+`--background` ground, `--foreground` ink, `--card` surface-1, `--card-foreground` ink, `--popover` surface-2, `--primary` brick, `--primary-foreground` on-brick, `--secondary` surface-2, `--secondary-foreground` ink, `--muted` sunken, `--muted-foreground` ink-muted, `--accent` peach-tint, `--accent-foreground` ink, `--destructive` `#a3143f`, `--border` hairline, `--input` line-strong, `--ring` ink, `--chart-1..5` series 1 to 5, `--sidebar` ink (charcoal), `--sidebar-foreground` ground, `--sidebar-primary` brick, `--sidebar-primary-foreground` on-brick, `--sidebar-accent` `#2b2a27`, `--sidebar-accent-foreground` surface-1, `--sidebar-border` `#33312d`, `--sidebar-ring` `#6f9bff`. No dark theme. Light only; charcoal sidebar and header give the dark accent.
 
 ### Contrast table (WCAG 2.x, computed)
 
 | Pair | Ratio | Need | | Pair | Ratio | Need |
 |---|---|---|---|---|---|---|
-| ink on ground | 10.65 | 4.5 | | Overdue fg on its bg | 6.24 | 4.5 |
-| ink on surface-1 | 12.31 | 4.5 | | Overdue fg on surface-1 | 6.95 | 4.5 |
-| ink on surface-2 | 13.15 | 4.5 | | Overdue fg on row-hover | 6.42 | 4.5 |
-| ink on sunken | 9.74 | 4.5 | | Due soon fg on its bg | 6.45 | 4.5 |
-| ink on peach-tint | 10.95 | 4.5 | | Due soon fg on surface-1 | 6.88 | 4.5 |
-| ink on sage-tint | 10.76 | 4.5 | | Planned fg on surface-1 | 7.42 | 4.5 |
-| ink on row-hover | 11.38 | 4.5 | | Done fg on its bg | 5.96 | 4.5 |
-| ink-muted on ground | 5.54 | 4.5 | | Filed fg on its bg | 6.19 | 4.5 |
-| ink-muted on surface-1 | 6.41 | 4.5 | | Superseded fg on its bg | 4.95 | 4.5 |
-| ink-muted on surface-2 | 6.84 | 4.5 | | Superseded fg on row-hover | 5.14 | 4.5 |
-| ink-muted on sunken | 5.07 | 4.5 | | Lab Low fg on its bg | 6.66 | 4.5 |
-| ink-muted on peach-tint | 5.70 | 4.5 | | Lab High fg on its bg | 6.91 | 4.5 |
-| on-brick on brick | 5.81 | 4.5 | | Lab Normal fg on its bg | 7.61 | 4.5 |
-| on-brick on brick-hover | 7.04 | 4.5 | | Info fg on its bg | 6.74 | 4.5 |
-| on-brick on maroon | 11.71 | 4.5 | | sage-deep on surface-1 | 5.97 | 4.5 |
-| emergency-ink on maroon | 11.24 | 4.5 | | sage-deep on ground | 5.16 | 4.5 |
-| maroon on surface-2 (Call button) | 11.71 | 4.5 | | maroon on peach-tint (initials) | 9.75 | 4.5 |
-| brick text on surface-1 | 5.44 | 4.5 | | brick text on ground | 4.70 | 4.5 |
-| peach on ink (unread badge) | 10.28 | 4.5 | | on-brick on ink (tooltip) | 13.15 | 4.5 |
-| line-strong (input border) on surface-1 | 4.48 | 3.0 | | line-strong on sunken | 3.54 | 3.0 |
-| line-strong on ground | 3.88 | 3.0 | | disabled text (line-strong) on sunken | 3.54 | 3.0 |
-| focus ring (ink) on ground | 10.65 | 3.0 | | focus ring (ink) on surface-1 | 12.31 | 3.0 |
-| focus ring (peach) on maroon | 9.16 | 3.0 | | selected bar (brick) on peach-tint | 4.83 | 3.0 |
-| sage icon on surface-1 | 3.89 | 3.0 | | progress fill (sage-deep) on sunken track | 4.72 | 3.0 |
+| ink on ground | 10.43 | 4.5 | | Overdue fg on its bg | 6.24 | 4.5 |
+| ink on surface-1 | 13.21 | 4.5 | | Overdue fg on surface-1 | 6.09 | 4.5 |
+| ink on surface-2 | 14.83 | 4.5 | | Overdue fg on row-hover | 5.40 | 4.5 |
+| ink on sunken | 8.76 | 4.5 | | Due soon fg on its bg | 6.45 | 4.5 |
+| ink on peach-tint | 14.40 | 4.5 | | Due soon fg on surface-1 | 6.03 | 4.5 |
+| ink on sage-tint | 12.70 | 4.5 | | Planned fg on surface-1 | 7.43 | 4.5 |
+| ink on row-hover | 11.71 | 4.5 | | Done fg on its bg | 5.96 | 4.5 |
+| ink-muted on ground | 5.86 | 4.5 | | Filed fg on its bg | 6.19 | 4.5 |
+| ink-muted on surface-1 | 7.43 | 4.5 | | Superseded fg on its bg | 4.95 | 4.5 |
+| ink-muted on surface-2 | 8.34 | 4.5 | | **Superseded fg on row-hover** | **4.32 (fails)** | 4.5 |
+| ink-muted on sunken | 4.92 | 4.5 | | Lab Low fg on its bg | 6.93 | 4.5 |
+| ink-muted on peach-tint | 8.09 | 4.5 | | Lab High fg on its bg | 6.91 | 4.5 |
+| on-brick on brick | 4.85 | 4.5 | | Lab Normal fg on its bg | 7.61 | 4.5 |
+| on-brick on brick-hover | 5.99 | 4.5 | | Info fg on its bg | 7.31 | 4.5 |
+| on-brick on maroon | 12.14 | 4.5 | | sage-deep on surface-1 | 7.43 | 4.5 |
+| emergency-ink on maroon | 12.14 | 4.5 | | sage-deep on ground | 5.86 | 4.5 |
+| maroon on surface-2 (Call button) | 10.79 | 4.5 | | maroon on peach-tint (initials) | 10.47 | 4.5 |
+| brick text on surface-1 | 6.82 | 4.5 | | brick text on ground | 5.38 | 4.5 |
+| peach on ink (unread badge) | 13.62 | 4.5 | | on-brick on ink (tooltip) | 16.70 | 4.5 |
+| line-strong (input border) on surface-1 | 5.60 | 3.0 | | line-strong on sunken | 3.71 | 3.0 |
+| line-strong on ground | 4.42 | 3.0 | | disabled text (line-strong) on sunken | 3.71 | 3.0 |
+| focus ring (ink) on ground | 10.43 | 3.0 | | focus ring (ink) on surface-1 | 13.21 | 3.0 |
+| focus ring (`#6f9bff`) on maroon | 4.51 | 3.0 | | selected bar (brick) on peach-tint | 4.19 | 3.0 |
+| sage icon on surface-1 | 4.58 | 3.0 | | progress fill (sage-deep) on sunken track | 4.92 | 3.0 |
 
-**Adjusted during this pass:** (1) ground darkened from `#e6e8dc` to `#e2e5d5` and sunken from `#dcdfd0` to `#d8dcc9` for clearer clay steps; (2) input border raised from `#7c846a` (2.89:1 on sunken, fail) to `#6b735c` (3.54:1); (3) sage `#727e60` fails as text (3.89:1) so text uses `--sage-deep`; (4) coral `#de7e78` fails as a chart line (2.6:1) so series 5 is `#d0706a`; (5) the ink focus ring fails on maroon (1.12:1) so dark contexts switch the ring to peach (9.16:1); (6) disabled text `#80866f` read 2.70:1 on sunken, replaced by line-strong (3.54:1). `--hairline` (1.43:1) is decorative: rows are also separated by alignment and spacing.
+**Adjusted during this pass:** (1) palette set by the brief: sand ground, charcoal ink, electric blue action, charcoal series 2; values are the `clay.css` tokens, computed with the same WCAG 2.x and OKLab math; (2) ink focus ring fails on maroon (1.1:1 area), so maroon and ink chrome use `#6f9bff` (4.51:1 on maroon, 6.21:1 on ink); (3) series 1 electric blue is 3.56:1 on surface-1, which passes the 3:1 graphics rule; (4) **open:** Superseded text on row-hover is 4.32:1 and fails the 4.5:1 text minimum; it is not changed here because the palette is fixed. Fix the pair before shipping the superseded row hover. `--hairline` (1.61:1 on surface-1) is decorative: rows are also separated by alignment and spacing.
 
 ## Typography
 
@@ -525,7 +528,7 @@ Dropped: 3D tilt (no hover on touch, GPU cost), parallax backdrop (GPU and batte
 ## Do's and Don'ts
 
 ### Do:
-- **Do** keep brick for actions only: one primary button per region, never a status.
+- **Do** keep brick (electric blue) for actions only: one primary button per region, never a status.
 - **Do** pair every status and flag with an icon and a word.
 - **Do** set every number in Atkinson Hyperlegible Mono with its unit in ink-muted.
 - **Do** put the next due thing first on every patient screen and the most urgent count top-left on admin.

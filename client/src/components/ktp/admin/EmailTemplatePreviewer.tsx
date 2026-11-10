@@ -99,8 +99,8 @@ export function EmailTemplatePreviewer({
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       {/* Sidebar Template Selector & Controls */}
       <div className="lg:col-span-4 space-y-4">
-        <ClayCard className="p-4 bg-[#fbfbf7] border border-[#c8ccb5] shadow-sm">
-          <h3 className="text-xs font-semibold text-[#2c3320] tracking-wider uppercase mb-3">
+        <ClayCard className="p-4 bg-surface-2 border border-hairline shadow-sm">
+          <h3 className="text-xs font-semibold text-ink tracking-wider uppercase mb-3">
             Clinical Email Templates
           </h3>
           <div className="space-y-2">
@@ -111,17 +111,17 @@ export function EmailTemplatePreviewer({
                 onClick={() => setSelectedTemplate(tpl.key)}
                 className={`w-full text-left p-3 rounded-lg border transition-all ${
                   selectedTemplate === tpl.key
-                    ? "bg-[#edf1e4] border-[#4f5b3a] shadow-sm"
-                    : "bg-[#f3f5eb]/60 border-[#dce1ce] hover:bg-[#eef1e6]"
+                    ? "bg-surface-2 border-brick shadow-sm"
+                    : "bg-surface-2/60 border-ground hover:bg-row-hover"
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#2c3320]">{tpl.label}</span>
+                  <span className="text-xs font-semibold text-ink">{tpl.label}</span>
                   {selectedTemplate === tpl.key && (
-                    <span className="w-2 h-2 rounded-full bg-[#4f5b3a]" />
+                    <span className="w-2 h-2 rounded-full bg-brick" />
                   )}
                 </div>
-                <p className="text-[11px] text-[#606950] mt-1 line-clamp-2 leading-relaxed">
+                <p className="text-[11px] text-ink-muted mt-1 line-clamp-2 leading-relaxed">
                   {tpl.desc}
                 </p>
               </button>
@@ -130,55 +130,55 @@ export function EmailTemplatePreviewer({
         </ClayCard>
 
         {/* Live Merge Tags Customizer */}
-        <ClayCard className="p-4 bg-[#fbfbf7] border border-[#c8ccb5] shadow-sm space-y-3">
-          <h3 className="text-xs font-semibold text-[#2c3320] tracking-wider uppercase">
+        <ClayCard className="p-4 bg-surface-2 border border-hairline shadow-sm space-y-3">
+          <h3 className="text-xs font-semibold text-ink tracking-wider uppercase">
             Live Preview Parameters
           </h3>
           <div className="space-y-2.5 text-xs">
             <div>
-              <label className="text-[11px] font-medium text-[#4b543b] block mb-1">
+              <label className="text-[11px] font-medium text-ink-muted block mb-1">
                 Patient Name
               </label>
               <input
                 type="text"
                 value={patientName}
                 onChange={e => setPatientName(e.target.value)}
-                className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320]"
+                className="clay-sunken clay-focus h-8 w-full rounded-md border border-hairline bg-surface-2 px-2.5 text-xs text-ink"
               />
             </div>
             <div>
-              <label className="text-[11px] font-medium text-[#4b543b] block mb-1">
+              <label className="text-[11px] font-medium text-ink-muted block mb-1">
                 Hospital Record No. (HRN)
               </label>
               <input
                 type="text"
                 value={hrn}
                 onChange={e => setHrn(e.target.value)}
-                className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320] font-mono"
+                className="clay-sunken clay-focus h-8 w-full rounded-md border border-hairline bg-surface-2 px-2.5 text-xs text-ink font-mono"
               />
             </div>
             {selectedTemplate === "AppointmentNotice" && (
               <>
                 <div>
-                  <label className="text-[11px] font-medium text-[#4b543b] block mb-1">
+                  <label className="text-[11px] font-medium text-ink-muted block mb-1">
                     Appointment Date
                   </label>
                   <input
                     type="date"
                     value={appointmentDate}
                     onChange={e => setAppointmentDate(e.target.value)}
-                    className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320]"
+                    className="clay-sunken clay-focus h-8 w-full rounded-md border border-hairline bg-surface-2 px-2.5 text-xs text-ink"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-medium text-[#4b543b] block mb-1">
+                  <label className="text-[11px] font-medium text-ink-muted block mb-1">
                     Attending Doctor
                   </label>
                   <input
                     type="text"
                     value={doctorName}
                     onChange={e => setDoctorName(e.target.value)}
-                    className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320]"
+                    className="clay-sunken clay-focus h-8 w-full rounded-md border border-hairline bg-surface-2 px-2.5 text-xs text-ink"
                   />
                 </div>
               </>
@@ -186,25 +186,25 @@ export function EmailTemplatePreviewer({
             {selectedTemplate === "OverdueLabAlert" && (
               <>
                 <div>
-                  <label className="text-[11px] font-medium text-[#4b543b] block mb-1">
+                  <label className="text-[11px] font-medium text-ink-muted block mb-1">
                     Required Lab Panel
                   </label>
                   <input
                     type="text"
                     value={labTitle}
                     onChange={e => setLabTitle(e.target.value)}
-                    className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320]"
+                    className="clay-sunken clay-focus h-8 w-full rounded-md border border-hairline bg-surface-2 px-2.5 text-xs text-ink"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-medium text-[#4b543b] block mb-1">
+                  <label className="text-[11px] font-medium text-ink-muted block mb-1">
                     Due Date
                   </label>
                   <input
                     type="date"
                     value={dueDate}
                     onChange={e => setDueDate(e.target.value)}
-                    className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320]"
+                    className="clay-sunken clay-focus h-8 w-full rounded-md border border-hairline bg-surface-2 px-2.5 text-xs text-ink"
                   />
                 </div>
               </>
@@ -213,11 +213,11 @@ export function EmailTemplatePreviewer({
         </ClayCard>
 
         {/* Dispatch Test Box */}
-        <ClayCard className="p-4 bg-[#e8ebde]/70 border border-[#c8ccb5] shadow-sm space-y-2">
-          <h3 className="text-xs font-semibold text-[#2c3320] tracking-wider uppercase">
+        <ClayCard className="p-4 bg-surface-1/70 border border-hairline shadow-sm space-y-2">
+          <h3 className="text-xs font-semibold text-ink tracking-wider uppercase">
             Send Live Sample
           </h3>
-          <p className="text-[11px] text-[#606950]">
+          <p className="text-[11px] text-ink-muted">
             Dispatches rendered template directly to an inbox to verify formatting in live email
             clients.
           </p>
@@ -227,7 +227,7 @@ export function EmailTemplatePreviewer({
               value={testEmailAddress}
               onChange={e => setTestEmailAddress(e.target.value)}
               placeholder="name@hospital.org"
-              className="clay-sunken clay-focus h-8 flex-1 rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320]"
+              className="clay-sunken clay-focus h-8 flex-1 rounded-md border border-hairline bg-surface-2 px-2.5 text-xs text-ink"
             />
             <ClayButton
               variant="primary"
@@ -240,7 +240,7 @@ export function EmailTemplatePreviewer({
             </ClayButton>
           </div>
           {dispatchStatus && (
-            <p className="text-[11px] font-medium text-[#3e472f] mt-1">{dispatchStatus}</p>
+            <p className="text-[11px] font-medium text-ink-muted mt-1">{dispatchStatus}</p>
           )}
         </ClayCard>
       </div>
@@ -248,22 +248,22 @@ export function EmailTemplatePreviewer({
       {/* Main Preview Container */}
       <div className="lg:col-span-8 space-y-3">
         {/* Viewport & Info Header */}
-        <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#e8ebde]/70 border border-[#c8ccb5]">
+        <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface-1/70 border border-hairline">
           <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-[#4f5b3a]" />
-            <span className="text-xs font-semibold text-[#2c3320]">
+            <Eye className="w-4 h-4 text-brick-text" />
+            <span className="text-xs font-semibold text-ink">
               {previewQuery.data?.subject || "Rendering template subject..."}
             </span>
           </div>
 
-          <div className="flex items-center gap-1 bg-[#dce1ce] p-1 rounded-md border border-[#c8ccb5]">
+          <div className="flex items-center gap-1 bg-ground p-1 rounded-md border border-hairline">
             <button
               type="button"
               onClick={() => setViewport("desktop")}
               className={`p-1 rounded text-xs transition-colors ${
                 viewport === "desktop"
-                  ? "bg-[#4f5b3a] text-[#fbfbf7] shadow-sm"
-                  : "text-[#4b543b] hover:bg-[#cfd5be]"
+                  ? "bg-brick text-on-brick shadow-sm"
+                  : "text-ink-muted hover:bg-sunken"
               }`}
               title="Desktop viewport (600px)"
             >
@@ -274,8 +274,8 @@ export function EmailTemplatePreviewer({
               onClick={() => setViewport("mobile")}
               className={`p-1 rounded text-xs transition-colors ${
                 viewport === "mobile"
-                  ? "bg-[#4f5b3a] text-[#fbfbf7] shadow-sm"
-                  : "text-[#4b543b] hover:bg-[#cfd5be]"
+                  ? "bg-brick text-on-brick shadow-sm"
+                  : "text-ink-muted hover:bg-sunken"
               }`}
               title="Mobile viewport (360px)"
             >
@@ -285,15 +285,15 @@ export function EmailTemplatePreviewer({
         </div>
 
         {/* Sandboxed Email Preview Area */}
-        <div className="flex justify-center p-4 rounded-xl bg-[#d5dad0]/50 border border-[#c8ccb5] min-h-[580px] overflow-auto">
+        <div className="flex justify-center p-4 rounded-xl bg-ground/50 border border-hairline min-h-[580px] overflow-auto">
           {previewQuery.isLoading ? (
-            <div className="flex flex-col items-center justify-center py-24 text-[#606950]">
-              <RefreshCw className="w-6 h-6 animate-spin text-[#4f5b3a] mb-2" />
+            <div className="flex flex-col items-center justify-center py-24 text-ink-muted">
+              <RefreshCw className="w-6 h-6 animate-spin text-brick-text mb-2" />
               <p className="text-xs">Generating responsive HTML stationery...</p>
             </div>
           ) : previewQuery.data?.html ? (
             <div
-              className="transition-all duration-300 shadow-md rounded-lg overflow-hidden bg-white border border-[#c8ccb5]"
+              className="transition-all duration-300 shadow-md rounded-lg overflow-hidden bg-white border border-hairline"
               style={{
                 width: viewport === "desktop" ? "600px" : "360px",
                 maxWidth: "100%",
@@ -308,7 +308,7 @@ export function EmailTemplatePreviewer({
               />
             </div>
           ) : (
-            <div className="py-24 text-center text-xs text-[#606950]">
+            <div className="py-24 text-center text-xs text-ink-muted">
               No preview content rendered.
             </div>
           )}

@@ -34,7 +34,7 @@ export class PatientProfileBoundary extends Component<
         </ClayButton>
         <Link
           href="/patients"
-          className="clay-focus inline-flex min-h-11 items-center text-brick"
+          className="clay-focus inline-flex min-h-11 items-center text-brick-text"
         >
           Back to patients
         </Link>

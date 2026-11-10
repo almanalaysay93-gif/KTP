@@ -177,7 +177,7 @@ function SignInForm({
             aria-expanded={whyOpen}
             aria-controls={whyId}
             onClick={() => setWhyOpen((open) => !open)}
-            className="clay-focus type-button -mx-1 inline-flex h-11 cursor-pointer items-center gap-1 rounded-sm px-1 text-brick underline decoration-1 underline-offset-4 hover:decoration-2"
+            className="clay-focus type-button -mx-1 inline-flex h-11 cursor-pointer items-center gap-1 rounded-sm px-1 text-brick-text underline decoration-1 underline-offset-4 hover:decoration-2"
           >
             Why Google?
             <ChevronDown aria-hidden strokeWidth={1.75} className={cn("size-4", whyOpen && "rotate-180")} />
@@ -199,7 +199,7 @@ function SignInForm({
         <a
           href={privacyHref}
           onClick={onPrivacyClick}
-          className="clay-focus type-button inline-flex h-11 items-center self-start rounded-sm text-brick underline decoration-1 underline-offset-4 hover:decoration-2"
+          className="clay-focus type-button inline-flex h-11 items-center self-start rounded-sm text-brick-text underline decoration-1 underline-offset-4 hover:decoration-2"
         >
           Privacy notice
         </a>

@@ -32,10 +32,10 @@ export function ConsentGate({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <ClayCard className="w-full max-w-lg p-6 sm:p-8">
         <div className="flex items-center gap-3 border-b border-hairline pb-4">
-          <div className="flex size-10 items-center justify-center rounded-full bg-olive-tint text-olive">
+          <div className="flex size-10 items-center justify-center rounded-full bg-brick-tint text-brick-text">
             <ShieldCheck className="size-6" />
           </div>
           <div>
@@ -53,7 +53,7 @@ export function ConsentGate({ children }: { children: React.ReactNode }) {
             type="checkbox"
             checked={agreed}
             onChange={(e) => setAgreed(e.target.checked)}
-            className="mt-1 size-4 rounded border-hairline accent-olive"
+            className="mt-1 size-4 rounded border-hairline accent-brick"
           />
           <span className="type-body-sm text-ink">
             I have read and understood the privacy notice, and I agree to the collection and processing of my transplant health records.

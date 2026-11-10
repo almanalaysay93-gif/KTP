@@ -231,7 +231,6 @@ function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light" switchable={false}>
-        <div aria-hidden className="glass-bg" />
         <div className="relative z-[1] min-h-screen">
           <TooltipProvider>
             <Toaster position="top-right" richColors />

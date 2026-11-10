@@ -143,7 +143,7 @@ function ActionForm({ action, onDone }: { action: ServiceAction; onDone: () => v
                       return (
                         <tr key={test.id}>
                           <th scope="row" className="font-bold">{test.name}</th>
-                          <td className="py-2">
+                          <td>
                             <label className="sr-only" htmlFor={`${formId}-${test.id}`}>{`${test.name}, ${test.unit}`}</label>
                             <span className="flex items-center gap-2">
                               <input

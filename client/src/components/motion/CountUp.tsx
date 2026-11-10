@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type HTMLAttributes } from "react";
-import { animate, useInView } from "framer-motion";
+import { animate, cubicBezier } from "animejs";
+import { useInView } from "framer-motion";
 import { DURATION, EASE, useMotionMode } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -16,25 +17,27 @@ export interface CountUpProps extends Omit<HTMLAttributes<HTMLSpanElement>, "chi
 }
 
 /**
- * Count-up numeral, admin only: 0 to `value` over 700 ms ease-out the first time it is in view.
+ * Animated numeral, admin only, driven by anime.js. Each digit is a 0-9 reel that rolls up to its value when
+ * the numeral first scrolls into view (least significant digit lands last). Later changes roll from the shown
+ * digit to the new one.
  * Patient surfaces and reduced motion render the final value immediately.
  * The width is reserved by an invisible copy of the final value and digits are tabular, so the
  * layout never shifts. Screen readers get the final value only: the ticking node is aria-hidden.
- * Frames write textContent directly; React does not re-render per frame.
+ * anime.js writes the reel transforms directly; React does not re-render per frame.
  */
 export function CountUp({
   value,
   decimals = 0,
   format,
   duration = DURATION.countUp,
-  align = "start",
   className,
+  // align is kept for API compatibility: the reels already take the width of the final value.
+  align: _align,
   ...rest
 }: CountUpProps) {
   const mode = useMotionMode();
   const rootRef = useRef<HTMLSpanElement>(null);
-  const tickRef = useRef<HTMLSpanElement>(null);
-  const doneRef = useRef(false);
+  const reelRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const inView = useInView(rootRef, { once: true, amount: 0.5 });
   const shouldCount = mode === "full";
 
@@ -46,42 +49,72 @@ export function CountUp({
     [format, decimals],
   );
   const finalText = fmt(value);
+  const chars = Array.from(finalText);
 
-  // Paint the right starting text before the first frame (no flash of the final value).
+  const place = (reel: HTMLSpanElement, digit: number) => {
+    reel.style.transform = `translateY(-${digit * 10}%)`;
+    reel.dataset.d = String(digit);
+  };
+
+  // Park new reels on 0 (or on the final digit when motion is off) before the first frame.
   useLayoutEffect(() => {
-    const node = tickRef.current;
-    if (!node) return;
-    node.textContent = shouldCount && !doneRef.current ? fmt(0) : finalText;
-  }, [shouldCount, finalText, fmt]);
+    chars.forEach((c, i) => {
+      const reel = reelRefs.current[i];
+      if (!reel || !/\d/.test(c)) return;
+      if (!shouldCount) place(reel, Number(c));
+      else if (reel.dataset.d === undefined) place(reel, 0);
+    });
+  }, [shouldCount, finalText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const node = tickRef.current;
-    if (!node || !shouldCount || doneRef.current || !inView) return;
-    const controls = animate(0, value, {
-      duration,
-      ease: EASE.out,
-      onUpdate: (latest) => {
-        node.textContent = fmt(decimals > 0 || format ? latest : Math.round(latest));
-      },
-      onComplete: () => {
-        doneRef.current = true;
-        node.textContent = finalText;
-      },
+    if (!shouldCount || !inView) return;
+    const controls: { cancel: () => void }[] = [];
+    chars.forEach((c, i) => {
+      const reel = reelRefs.current[i];
+      if (!reel || !/\d/.test(c)) return;
+      const to = Number(c);
+      const from = Number(reel.dataset.d ?? 0);
+      if (from === to) return;
+      const fromsRight = chars.length - 1 - i;
+      controls.push(
+        animate(reel, {
+          translateY: [`-${from * 10}%`, `-${to * 10}%`],
+          duration: duration * 1000 + 250,
+          delay: fromsRight * 70,
+          ease: cubicBezier(...EASE.out),
+          onComplete: () => place(reel, to),
+        }),
+      );
+      reel.dataset.d = String(to);
     });
-    // Text on interruption is owned by the layout effect above.
-    return () => controls.stop();
-  }, [inView, shouldCount, value, duration, fmt, finalText, decimals, format]);
+    return () => controls.forEach(c => c.cancel());
+  }, [inView, shouldCount, finalText, duration]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <span ref={rootRef} className={cn("inline-grid tabular-nums", className)} {...rest}>
-      <span aria-hidden className="invisible col-start-1 row-start-1">
-        {finalText}
+    <span ref={rootRef} className={cn("inline-flex tabular-nums", className)} {...rest}>
+      <span aria-hidden className="inline-flex">
+        {chars.map((c, i) =>
+          /\d/.test(c) ? (
+            <span key={chars.length - i} className="relative inline-block overflow-hidden">
+              <span className="invisible">{c}</span>
+              <span
+                ref={el => {
+                  reelRefs.current[i] = el;
+                }}
+                className="absolute left-0 top-0 flex w-full flex-col text-center will-change-transform"
+              >
+                {"0123456789".split("").map(d => (
+                  <span key={d} className="block">
+                    {d}
+                  </span>
+                ))}
+              </span>
+            </span>
+          ) : (
+            <span key={chars.length - i}>{c}</span>
+          ),
+        )}
       </span>
-      <span
-        ref={tickRef}
-        aria-hidden
-        className={cn("col-start-1 row-start-1", align === "end" ? "justify-self-end" : "justify-self-start")}
-      />
       <span className="sr-only">{finalText}</span>
     </span>
   );

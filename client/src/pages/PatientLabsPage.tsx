@@ -98,7 +98,7 @@ export default function PatientLabsPage() {
           {/* Error State */}
           {clinicalQuery.isError && (
             <ClayCard className="p-8 text-center text-ink">
-              <p className="type-headline text-brick">Failed to load lab results</p>
+              <p className="type-headline text-brick-text">Failed to load lab results</p>
               <p className="mt-2 type-body-sm text-ink-muted">Please check your connection and try again.</p>
               <div className="mt-4 flex justify-center">
                 <ClayButton onClick={() => clinicalQuery.refetch()}>Retry</ClayButton>
@@ -109,7 +109,7 @@ export default function PatientLabsPage() {
           {/* Empty State */}
           {!clinicalQuery.isLoading && !clinicalQuery.isError && labResults.length === 0 && (
             <ClayCard className="p-8 text-center text-ink-muted">
-              <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-olive-tint text-olive">
+              <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brick-tint text-brick-text">
                 <FlaskConical className="size-6" />
               </div>
               <p className="mt-4 type-headline text-ink">No lab results on file yet</p>

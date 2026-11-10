@@ -19,7 +19,7 @@ export default function PrivacyPolicy() {
           Back to Application
         </Button>
 
-        <Card className="glass-card shadow-lg border">
+        <Card className="shadow-lg border">
           <CardHeader className="space-y-1">
             <div className="flex items-center gap-2 text-primary">
               <Shield className="h-6 w-6" />

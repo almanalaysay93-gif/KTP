@@ -112,7 +112,7 @@ export function AppointmentList({
                         aria-label={`Request new time for ${appt.title} on ${date}`}
                         aria-haspopup="dialog"
                         onClick={() => setRescheduleId(appt.id)}
-                        className="w-full text-brick sm:w-auto sm:first:-ml-6"
+                        className="w-full text-brick-text sm:w-auto sm:first:-ml-6"
                       >
                         Request new time
                       </MotionClayButton>

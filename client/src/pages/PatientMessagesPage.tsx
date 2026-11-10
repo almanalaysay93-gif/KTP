@@ -96,7 +96,7 @@ export default function PatientMessagesPage() {
           {/* Error State */}
           {messagesQuery.isError && (
             <ClayCard className="p-8 text-center text-ink">
-              <p className="type-headline text-brick">Failed to load messages</p>
+              <p className="type-headline text-brick-text">Failed to load messages</p>
               <p className="mt-2 type-body-sm text-ink-muted">Please check your connection and try again.</p>
               <div className="mt-4 flex justify-center">
                 <ClayButton onClick={() => messagesQuery.refetch()}>Retry</ClayButton>
@@ -139,7 +139,7 @@ export default function PatientMessagesPage() {
                   <ClayCard
                     key={msg.id}
                     className={`p-5 transition ${
-                      !isAcknowledged ? "border-l-4 border-l-olive bg-surface-1" : ""
+                      !isAcknowledged ? "border-l-4 border-l-brick bg-surface-1" : ""
                     }`}
                   >
                     <div className="flex flex-col gap-3">
@@ -151,7 +151,7 @@ export default function PatientMessagesPage() {
 
                         <div>
                           {isAcknowledged ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-olive-tint px-3 py-0.5 type-caption font-medium text-olive">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-done-bg px-3 py-0.5 type-caption font-medium text-done">
                               <CheckCircle2 className="size-3.5" /> Acknowledged
                             </span>
                           ) : (

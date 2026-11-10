@@ -1,6 +1,7 @@
 import { syncCatalog } from "./clinicalCatalog";
 import { TRPCError } from "@trpc/server";
 import { getBatchClient, getDb } from "./db";
+import { seedMockChecklistPg } from "./mockChecklist";
 import { getSqliteDb } from "./localDb";
 import type { Appointment, ChecklistCatalogItem, LabResult, LabTest, ServiceRecord } from "../drizzle/schema";
 import { LAB_PHASE_LABEL, isValidStageForPatientType, type LabPhase } from "../shared/ktp";
@@ -426,5 +427,6 @@ function ensureCatalog(): Promise<void> {
       const rows = await tx.unsafe(step.value.sql.replace(/\?/g, () => `$${++parameter}`), step.value.args as any[]);
       step = sync.next([...rows]);
     }
+    await seedMockChecklistPg(tx);
   }).then(() => undefined).catch(error => { catalogReady = undefined; throw error; });
 }

@@ -84,7 +84,7 @@ export default function PatientHome() {
               onClick={() => navigate("/me/labs")}
               className="flex cursor-pointer items-center gap-4 p-5 transition hover:shadow-md"
             >
-              <div className="flex size-12 items-center justify-center rounded-2xl bg-olive-tint text-olive">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-brick-tint text-brick-text">
                 <FlaskConical className="size-6" />
               </div>
               <div>
@@ -97,7 +97,7 @@ export default function PatientHome() {
               onClick={() => navigate("/me/checklist")}
               className="flex cursor-pointer items-center gap-4 p-5 transition hover:shadow-md"
             >
-              <div className="flex size-12 items-center justify-center rounded-2xl bg-brick-tint text-brick">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-brick-tint text-brick-text">
                 <FileText className="size-6" />
               </div>
               <div>

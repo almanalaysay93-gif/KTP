@@ -86,7 +86,7 @@ export default function PatientChecklistPage() {
                   </div>
                   <div className="mt-1 h-1.5 w-32 overflow-hidden rounded-full bg-surface-2 sm:w-40">
                     <div
-                      className="h-full rounded-full bg-olive transition-all duration-300"
+                      className="h-full rounded-full bg-done transition-all duration-300"
                       style={{ width: `${percentComplete}%` }}
                     />
                   </div>
@@ -140,7 +140,7 @@ export default function PatientChecklistPage() {
                     onClick={() => setActiveCategory(cat)}
                     className={`clay-focus rounded-full px-2 py-0.5 text-[11px] font-medium transition ${
                       activeCategory === cat
-                        ? "bg-olive-tint text-olive"
+                        ? "bg-brick-tint text-brick-text"
                         : "text-ink-muted hover:text-ink"
                     }`}
                   >
@@ -161,7 +161,7 @@ export default function PatientChecklistPage() {
           {/* Error State */}
           {clinicalQuery.isError && (
             <ClayCard className="p-6 text-center text-ink">
-              <p className="type-headline text-brick">Failed to load checklist</p>
+              <p className="type-headline text-brick-text">Failed to load checklist</p>
               <div className="mt-4 flex justify-center">
                 <ClayButton onClick={() => clinicalQuery.refetch()}>Retry</ClayButton>
               </div>
@@ -196,12 +196,12 @@ export default function PatientChecklistPage() {
                     level={1}
                     padding="none"
                     className={`flex items-center justify-between gap-2 rounded-lg border border-hairline px-3 py-2 transition hover:bg-surface-2 ${
-                      isDone ? "bg-olive-tint/20" : isNA ? "bg-surface-2/40 opacity-70" : "bg-surface-1"
+                      isDone ? "bg-done-bg/40" : isNA ? "bg-surface-2/40 opacity-70" : "bg-surface-1"
                     }`}
                   >
                     {/* Left: Icon + Tag + Name */}
                     <div className="flex min-w-0 items-center gap-2">
-                      {isDone && <CheckCircle2 className="size-4 shrink-0 text-olive" />}
+                      {isDone && <CheckCircle2 className="size-4 shrink-0 text-done" />}
                       {isNA && <MinusCircle className="size-4 shrink-0 text-ink-muted/50" />}
                       {!isDone && !isNA && <Circle className="size-4 shrink-0 text-ink-muted/50" />}
 
@@ -223,7 +223,7 @@ export default function PatientChecklistPage() {
                     <div className="shrink-0">
                       {isDone && (
                         <span
-                          className="rounded-full bg-olive-tint px-2 py-0.5 text-[10px] font-medium text-olive"
+                          className="rounded-full bg-done-bg px-2 py-0.5 text-[10px] font-medium text-done"
                           title={item.doneDate ? `Done on ${dateKey(item.doneDate)}` : "Done"}
                         >
                           Done

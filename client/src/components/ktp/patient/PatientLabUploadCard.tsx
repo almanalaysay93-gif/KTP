@@ -175,16 +175,16 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
   }
 
   return (
-    <ClayCard className="p-4 md:p-6 bg-[#fbfbf7] border border-[#c8ccb5] shadow-sm space-y-4">
+    <ClayCard className="p-4 md:p-6 bg-surface-2 border border-hairline shadow-sm space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[#dce1ce] pb-3">
+      <div className="flex items-center justify-between border-b border-ground pb-3">
         <div className="flex items-center gap-2">
-          <FlaskConical className="w-5 h-5 text-[#4f5b3a]" />
+          <FlaskConical className="w-5 h-5 text-brick-text" />
           <div>
-            <h2 className="text-sm md:text-base font-bold text-[#2c3320]">
+            <h2 className="text-sm md:text-base font-bold text-ink">
               Patient Document & Lab Upload
             </h2>
-            <p className="text-xs text-[#606950]">
+            <p className="text-xs text-ink-muted">
               Upload PDF laboratory reports, Excel sheets, or phone photos for automatic parsing.
             </p>
           </div>
@@ -195,7 +195,7 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
             handleReset();
             setIsOpen(false);
           }}
-          className="p-1 rounded-md text-[#606950] hover:bg-[#eef1e6] hover:text-[#2c3320]"
+          className="p-1 rounded-md text-ink-muted hover:bg-row-hover hover:text-ink"
           title="Close upload card"
         >
           <X className="w-5 h-5" />
@@ -204,8 +204,8 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
 
       {/* Submission Success Banner */}
       {submitSuccess && (
-        <div className="p-4 rounded-lg bg-[#4f5b3a]/15 border border-[#8b9474]/50 text-[#333e22] flex items-start gap-3">
-          <CheckCircle2 className="w-5 h-5 text-[#4f5b3a] shrink-0 mt-0.5" />
+        <div className="p-4 rounded-lg bg-done-bg border border-done/40 text-done flex items-start gap-3">
+          <CheckCircle2 className="w-5 h-5 text-done shrink-0 mt-0.5" />
           <div className="text-xs space-y-1">
             <p className="font-semibold text-sm">Lab Results Successfully Submitted</p>
             <p>
@@ -221,7 +221,7 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
-          className="border-2 border-dashed border-[#c8ccb5] hover:border-[#4f5b3a] rounded-xl p-6 text-center bg-[#f3f5eb]/60 transition-colors cursor-pointer space-y-3"
+          className="border-2 border-dashed border-hairline hover:border-brick rounded-xl p-6 text-center bg-surface-2/60 transition-colors cursor-pointer space-y-3"
           onClick={() => fileInputRef.current?.click()}
         >
           <input
@@ -236,28 +236,28 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
             }}
           />
 
-          <div className="mx-auto w-12 h-12 rounded-full bg-[#e2e7d5] flex items-center justify-center text-[#4f5b3a]">
+          <div className="mx-auto w-12 h-12 rounded-full bg-sage-tint flex items-center justify-center text-brick-text">
             <Upload className="w-6 h-6" />
           </div>
 
           <div>
-            <p className="text-xs md:text-sm font-semibold text-[#2c3320]">
+            <p className="text-xs md:text-sm font-semibold text-ink">
               Click to choose file or drag and drop here
             </p>
-            <p className="text-[11px] text-[#606950] mt-1">
+            <p className="text-[11px] text-ink-muted mt-1">
               Supports Hospital PDF reports, Excel files (.xlsx, .csv), and camera images (.png, .jpg)
             </p>
           </div>
 
-          <div className="flex items-center justify-center gap-4 text-[11px] text-[#606950] pt-2">
+          <div className="flex items-center justify-center gap-4 text-[11px] text-ink-muted pt-2">
             <span className="flex items-center gap-1">
-              <FileText className="w-3.5 h-3.5 text-[#4f5b3a]" /> PDF Documents
+              <FileText className="w-3.5 h-3.5 text-brick-text" /> PDF Documents
             </span>
             <span className="flex items-center gap-1">
-              <FileSpreadsheet className="w-3.5 h-3.5 text-[#3b5971]" /> Excel & CSV
+              <FileSpreadsheet className="w-3.5 h-3.5 text-info" /> Excel & CSV
             </span>
             <span className="flex items-center gap-1">
-              <ImageIcon className="w-3.5 h-3.5 text-[#b47d1e]" /> Camera Scans
+              <ImageIcon className="w-3.5 h-3.5 text-due-soon" /> Camera Scans
             </span>
           </div>
         </div>
@@ -265,7 +265,7 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
 
       {/* Progress & Processing Indicator */}
       {uploadPhase !== "idle" && !submitSuccess && extractedItems.length === 0 && (
-        <div className="p-4 rounded-lg bg-[#e8ebde]/70 border border-[#c8ccb5]">
+        <div className="p-4 rounded-lg bg-surface-1/70 border border-hairline">
           <UploadProgress
             progress={progressPercent}
             phase={uploadPhase}
@@ -278,20 +278,20 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
       {/* Extracted Values Review Form */}
       {extractedItems.length > 0 && !submitSuccess && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#e8ebde]/60 p-3 rounded-lg border border-[#c8ccb5] text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-surface-1 p-3 rounded-lg border border-hairline type-body-sm">
             <div>
-              <label className="block text-[11px] font-semibold text-[#4b543b] mb-1">
+              <label className="block type-body-sm font-semibold text-ink-muted mb-1">
                 Lab Test Collection Date
               </label>
               <input
                 type="date"
                 value={serviceDate}
                 onChange={(e) => setServiceDate(e.target.value)}
-                className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320]"
+                className="clay-sunken clay-focus h-9 w-full rounded-md border border-hairline bg-surface-2 px-2.5 type-body-sm text-ink"
               />
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-[#4b543b] mb-1">
+              <label className="block type-body-sm font-semibold text-ink-muted mb-1">
                 Clinical Note or Laboratory Facility (Optional)
               </label>
               <input
@@ -299,44 +299,44 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
                 placeholder="e.g. SPMC Central Clinical Laboratory"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs text-[#2c3320]"
+                className="clay-sunken clay-focus h-9 w-full rounded-md border border-hairline bg-surface-2 px-2.5 type-body-sm text-ink"
               />
             </div>
           </div>
 
-          {/* Four narrow columns so the table fits a 360 px phone: the unit sits under its value. */}
-          <div className="show-scrollbar-x overflow-x-auto border border-[#c8ccb5] rounded-lg bg-[#fbfbf7]">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[#e4e8d8] text-[#3e472f] border-b border-[#c8ccb5] uppercase text-[11px]">
+          {/* Four columns so the table fits a 360 px phone: the unit sits under its value; long test names wrap. */}
+          <div className="clay-table-wrap show-scrollbar-x">
+            <table className="clay-table">
+              <thead>
                 <tr>
-                  <th className="py-2.5 px-2">Test</th>
-                  <th className="py-2.5 px-2 w-24">Value</th>
-                  <th className="py-2.5 px-2">Usual range</th>
-                  <th className="py-2.5 px-2"><span className="sr-only">Remove</span></th>
+                  <th scope="col">Test</th>
+                  <th scope="col" className="w-24">Value</th>
+                  <th scope="col">Usual range</th>
+                  <th scope="col"><span className="sr-only">Remove</span></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#dce1ce]">
+              <tbody>
                 {extractedItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-[#f2f4ec] transition-colors">
-                    <td className="py-2.5 px-2 font-medium text-[#2c3320]">{item.testName}</td>
-                    <td className="py-2.5 px-2">
+                  <tr key={item.id}>
+                    <td className="font-medium text-ink">{item.testName}</td>
+                    <td>
                       <input
                         type="text"
                         aria-label={`${item.testName}${item.unit ? `, ${item.unit}` : ""}`}
                         value={item.value}
                         onChange={(e) => handleValueChange(item.id, e.target.value)}
-                        className="clay-sunken clay-focus h-8 w-full rounded-md border border-[#c8ccb5] bg-[#fbfbf7] px-2.5 text-xs font-mono font-bold text-[#2c3320]"
+                        className="clay-sunken clay-focus h-9 w-full rounded-md border border-hairline bg-surface-2 px-2.5 type-data font-bold text-ink"
                       />
                       {item.unit ? <span className="mt-1 block font-mono text-ink-muted">{item.unit}</span> : null}
                     </td>
-                    <td className="py-2.5 px-2 text-[11px] text-[#606950]">
+                    <td className="text-ink-muted">
                       {item.normalRange}
                     </td>
-                    <td className="py-2.5 px-2 text-right">
+                    <td className="text-right">
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(item.id)}
-                        className="p-1 rounded text-[#ae3c30] hover:bg-[#ae3c30]/10"
+                        className="p-1 rounded text-overdue hover:bg-overdue-bg"
                         title="Remove row"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -349,7 +349,7 @@ export function PatientLabUploadCard({ onSuccess }: PatientLabUploadCardProps) {
           </div>
 
           {errorMessage && (
-            <div className="p-3 rounded-lg bg-[#ae3c30]/15 border border-[#ae3c30]/30 text-[#82241b] text-xs flex items-center gap-2">
+            <div className="p-3 rounded-lg bg-overdue-bg border border-overdue/30 text-overdue type-body-sm flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>

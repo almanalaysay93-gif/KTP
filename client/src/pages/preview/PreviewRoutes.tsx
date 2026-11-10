@@ -87,7 +87,7 @@ function PreviewIndex() {
               <Link href={page.path} className="flex h-full flex-col gap-2">
                 <span className="flex items-center justify-between gap-3">
                   <span className="type-title text-ink">{page.title}</span>
-                  <ArrowRight aria-hidden className="size-5 text-brick" strokeWidth={1.75} />
+                  <ArrowRight aria-hidden className="size-5 text-brick-text" strokeWidth={1.75} />
                 </span>
                 <span className="type-body-sm text-ink-muted">{page.description}</span>
                 <span className="type-data text-ink-muted">/preview{page.path}</span>

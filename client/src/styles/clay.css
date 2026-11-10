@@ -1,6 +1,7 @@
 /*
  * KTP clay design system. Contract: docs/buildme/DESIGN.md.
- * Light theme only. Light comes from the top-left. Surfaces stay opaque.
+ * Light theme only. Charcoal #1e1e1c ink, sand #D8CBB3 ground, electric blue #2c66f5 action.
+ * Light comes from the top-left. Surfaces stay opaque.
  * Raw tokens live on :root; @theme inline exposes them as Tailwind utilities
  * (bg-surface-1, text-ink, text-overdue, font-display, rounded-lg ...).
  * Motion is not defined here: U4 owns springs. CSS only fades layers and colors.
@@ -9,31 +10,36 @@
 :root {
   color-scheme: light;
 
-  /* Neutrals and surfaces: one olive hue, so grays never drift */
-  --ground: #e2e5d5;
-  --surface-1: #f3f4ec;
-  --surface-2: #fbfbf7;
-  --sunken: #d8dcc9;
-  --row-hover: #e9ecdf;
-  --hairline: #cbd0bb;
-  --line-strong: #6b735c;
-  --ink: #2a301e;
-  --ink-muted: #545b45;
+  /* Neutrals and surfaces: one sand hue, so grays never drift */
+  --ground: #d8cbb3;
+  --surface-1: #ece4d4;
+  --surface-2: #f6f1e7;
+  --sunken: #c9baa0;
+  --row-hover: #e2d7c2;
+  --hairline: #c2b49a;
+  --line-strong: #5e5849;
+  --ink: #1e1e1c;
+  --ink-muted: #4a463e;
 
   /* Brand roles. Brick is the single action color. */
-  --brick: #ae3c30;
-  --brick-hover: #9a3328;
+  --brick: #2c66f5;
+  --brick-hover: #2459d9;
+  --brick-text: #1a44a8;
+  --brick-tint: #dfe8ff;
   --maroon: #6c120c;
-  --on-brick: #fffaf6;
-  --sage-deep: #56613f;
-  --sage: #727e60;
-  --sage-tint: #e1e7d2;
-  --peach: #fcd8cc;
-  --peach-tint: #f8e2d8;
-  --coral: #de7e78;
-  --mauve: #9c6060;
-  --lilac: #ccb4ba;
-  --emergency-ink: #fff4ef;
+  --on-brick: #ffffff;
+  --action: var(--brick);
+  --action-hover: var(--brick-hover);
+  --on-action: var(--on-brick);
+  --sage-deep: #4a463e;
+  --sage: #6b6559;
+  --sage-tint: #e6e0d3;
+  --peach: #dfe8ff;
+  --peach-tint: #e8eeff;
+  --coral: #c43d2f;
+  --mauve: #7a5aa6;
+  --lilac: #cbbfa6;
+  --emergency-ink: #ffffff;
   --focus: var(--ink);
   --focus-ring: var(--focus);
 
@@ -42,28 +48,28 @@
   --overdue-bg: #fbe1e8;
   --due-soon: #7a4800;
   --due-soon-bg: #faebc6;
-  --planned: #4a5238;
+  --planned: #4a463e;
   --done: #1d6433;
   --done-bg: #dcefdc;
   --filed: #0b5e57;
   --filed-bg: #d3ede8;
-  --superseded: #5f6357;
+  --superseded: #4f5247;
   --superseded-bg: #e6e7e0;
-  --lab-low: #2a4a9a;
-  --lab-low-bg: #e0e7f7;
+  --lab-low: #5b3a8c;
+  --lab-low-bg: #ebe3f5;
   --lab-high: #8a1a5e;
   --lab-high-bg: #f7ddec;
   --lab-normal: #3f4733;
   --lab-normal-bg: #e2e5d8;
-  --info: #1d5470;
-  --info-bg: #dcebf2;
+  --info: #3a4a5c;
+  --info-bg: #e3e7ec;
 
   /* Chart series: render on surface-1 or surface-2 only */
-  --series-1: #ae3c30;
-  --series-2: #2f3a1c;
-  --series-3: #a77410;
-  --series-4: #8a6c95;
-  --series-5: #d0706a;
+  --series-1: #2f6bff;
+  --series-2: #1e1e1c;
+  --series-3: #8a5a00;
+  --series-4: #7a5aa6;
+  --series-5: #0b7a6e;
 
   /* Shapes. Concentric rule: inner radius = outer radius minus padding. */
   --r-xs: 8px;
@@ -123,8 +129,8 @@
   --fs-caption: 0.875rem;
   --lh-caption: 1.25rem;
 
-  /* Clay elevation: forest-tinted drop + top-left highlight + bottom-right shade */
-  --tint: 42 48 30;
+  /* Clay elevation: charcoal-tinted drop + top-left highlight + bottom-right shade */
+  --tint: 30 30 28;
   --clay-1: 0 1px 2px rgb(var(--tint) / .10), 4px 6px 14px -4px rgb(var(--tint) / .18),
     inset 2px 2px 3px rgb(255 255 255 / .85), inset -2px -3px 5px rgb(var(--tint) / .08);
   --clay-2: 0 2px 4px rgb(var(--tint) / .08), 8px 12px 24px -8px rgb(var(--tint) / .22),
@@ -133,9 +139,9 @@
     inset 4px 4px 7px rgb(255 255 255 / .95), inset -6px -7px 12px rgb(var(--tint) / .10);
   --clay-pressed: inset 3px 4px 8px rgb(var(--tint) / .20), inset -2px -2px 5px rgb(255 255 255 / .70);
   --clay-sunken: inset 3px 4px 9px rgb(var(--tint) / .16), inset -3px -3px 6px rgb(255 255 255 / .75);
-  --clay-brick: 0 1px 2px rgb(108 18 12 / .20), 4px 6px 14px -4px rgb(108 18 12 / .35),
-    inset 2px 2px 3px rgb(252 216 204 / .55), inset -3px -4px 6px rgb(108 18 12 / .45);
-  --clay-brick-pressed: inset 3px 4px 8px rgb(108 18 12 / .55), inset -2px -2px 4px rgb(252 216 204 / .30);
+  --clay-brick: 0 1px 2px rgb(20 50 140 / .20), 4px 6px 14px -4px rgb(20 50 140 / .35),
+    inset 2px 2px 3px rgb(255 255 255 / .55), inset -3px -4px 6px rgb(20 50 140 / .45);
+  --clay-brick-pressed: inset 3px 4px 8px rgb(20 50 140 / .55), inset -2px -2px 4px rgb(255 255 255 / .30);
   --clay-disabled: inset 1px 1px 2px rgb(var(--tint) / .10);
 
   /* Timing for CSS-only changes (layers and colors). Springs live in U4. */
@@ -194,6 +200,11 @@
   --color-ink-muted: var(--ink-muted);
   --color-brick: var(--brick);
   --color-brick-hover: var(--brick-hover);
+  --color-brick-text: var(--brick-text);
+  --color-brick-tint: var(--brick-tint);
+  --color-action: var(--action);
+  --color-action-hover: var(--action-hover);
+  --color-on-action: var(--on-action);
   --color-maroon: var(--maroon);
   --color-on-brick: var(--on-brick);
   --color-sage-deep: var(--sage-deep);
@@ -274,7 +285,7 @@
   .clay-brick { box-shadow: var(--clay-brick); --clay-next: var(--clay-brick); --clay-down: var(--clay-brick-pressed); }
   .clay-pressed { box-shadow: var(--clay-pressed); }
   .clay-avatar { box-shadow: 0 0 0 2px var(--surface-2), var(--clay-1); }
-  .clay-on-dark { --focus-ring: var(--peach); }
+  .clay-on-dark { --focus-ring: #6f9bff; }
 
   /* Hover layer: the next level sits on ::after and fades in. Box-shadow never transitions. */
   .clay-hover { position: relative; isolation: isolate; }
@@ -364,32 +375,48 @@
     animation: clay-sheen 1.6s linear 0s 1 both;
   }
 
-  /* Flat data surface: tables stay flat inside clay cards */
+  /* Premium data table: an opaque clay card holds the table; rows stay flat inside it.
+     Type floor is table-scoped (body 15 px, labels and captions 14 px). Text wraps, never clips. */
   .clay-table-wrap {
     overflow-x: auto;
-    border-radius: var(--r-md);
+    border-radius: var(--r-lg);
     background-color: var(--surface-1);
+    box-shadow: var(--clay-2);
     padding: var(--space-2);
   }
-  .clay-table { width: 100%; border-collapse: separate; border-spacing: 0; color: var(--ink); }
+  .clay-table {
+    --fs-body-sm: 0.9375rem;
+    --lh-body-sm: 1.375rem;
+    --fs-data: 0.9375rem;
+    --lh-data: 1.375rem;
+    --fs-label: 0.875rem;
+    --lh-label: 1.125rem;
+    --fs-caption: 0.875rem;
+    --lh-caption: 1.125rem;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: var(--ink);
+  }
   .clay-table thead th {
     position: sticky;
     top: 0;
     z-index: 1;
-    height: 44px;
-    padding: 0 var(--space-3);
+    padding: var(--space-3) var(--space-4);
     background-color: var(--surface-1);
     border-bottom: 1.5px solid var(--line-strong);
     text-align: left;
-    white-space: nowrap;
+    vertical-align: bottom;
+    white-space: normal;
     font: 700 var(--fs-label) / var(--lh-label) var(--ff-body);
     color: var(--ink-muted);
   }
   .clay-table td, .clay-table tbody th {
-    height: 52px;
+    padding: var(--space-3) var(--space-4);
     text-align: left;
-    white-space: nowrap;
-    padding: 0 var(--space-3);
+    vertical-align: top;
+    white-space: normal;
+    overflow-wrap: anywhere;
     border-bottom: 1px solid var(--hairline);
     font: 400 var(--fs-body-sm) / var(--lh-body-sm) var(--ff-body);
   }
@@ -399,7 +426,7 @@
   .clay-table :is(th, td)[data-sticky="true"] { position: sticky; left: 0; background-color: inherit; }
   .clay-table thead th[data-sticky="true"] { z-index: 2; background-color: var(--surface-1); }
   .clay-table tr[data-superseded="true"] { color: var(--superseded); }
-  .clay-table [data-num="true"] { font-family: var(--ff-data); font-variant-numeric: tabular-nums; }
+  .clay-table [data-num="true"] { font-family: var(--ff-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
 }
 
 @layer utilities {

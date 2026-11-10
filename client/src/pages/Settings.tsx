@@ -191,7 +191,7 @@ export default function SettingsPage() {
                             </div>
                             <div className="flex shrink-0 items-center gap-2 rounded-lg bg-surface-2 px-3 py-1 font-mono type-body-sm text-ink">
                               <span>Version:</span>
-                              <span className="font-bold text-olive">{consentVersion}</span>
+                              <span className="font-bold text-brick-text">{consentVersion}</span>
                             </div>
                           </div>
 
@@ -272,7 +272,7 @@ export default function SettingsPage() {
                               </div>
                               <span
                                 className={`inline-flex shrink-0 rounded-full px-2 py-0.5 type-label ${
-                                  doc.active ? "bg-olive-tint text-olive" : "bg-ink-muted/10 text-ink-muted"
+                                  doc.active ? "bg-done-bg text-done" :"bg-ink-muted/10 text-ink-muted"
                                 }`}
                               >
                                 {doc.active ? "Active" : "Inactive"}
@@ -287,7 +287,7 @@ export default function SettingsPage() {
 
                 {/* Add Doctor Dialog */}
                 {showDoctorDialog && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
                     <ClayCard className="w-full max-w-md p-6">
                       <h3 className="type-headline text-ink">Add Care Team Member</h3>
                       <form onSubmit={handleAddDoctor} className="mt-4 flex flex-col gap-4">

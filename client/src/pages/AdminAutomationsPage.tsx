@@ -50,19 +50,19 @@ export default function AdminAutomationsPage() {
           skipLabel="Skip to email automations content"
         >
           <PageTransition routeKey="admin-automations" focusHeading={false}>
-            <main id="automations-main" className="relative z-10 px-4 py-6 md:px-8 max-w-7xl mx-auto space-y-6">
+            <main id="automations-main" className="relative z-10 mx-auto w-full max-w-[1800px] space-y-6 px-4 pb-16 pt-3 md:px-6 lg:pb-20 lg:pt-8">
               {/* Header Card */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#c8ccb5]">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-hairline">
             <div>
               <div className="flex items-center gap-2">
-                <span className="p-1.5 rounded-md bg-[#4f5b3a]/15 text-[#333e22] border border-[#8b9474]/50">
-                  <Mail className="w-5 h-5 text-[#4f5b3a]" />
+                <span className="p-1.5 rounded-md bg-brick/15 text-brick-text border border-brick/40">
+                  <Mail className="w-5 h-5 text-brick-text" />
                 </span>
-                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-[#2c3320]">
+                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-ink">
                   Clinical Email Automations
                 </h1>
               </div>
-              <p className="text-xs md:text-sm text-[#606950] mt-1">
+              <p className="text-xs md:text-sm text-ink-muted mt-1">
                 Scheduled notifications, clinic visit reminders, overdue lab alerts, and Resend delivery logs.
               </p>
             </div>
@@ -70,26 +70,26 @@ export default function AdminAutomationsPage() {
 
           {/* Navigation Tabs */}
           <ClayTabs value={activeTab} onValueChange={val => setActiveTab(val as TabId)} className="w-full">
-            <ClayTabsList className="bg-[#e2e5d5] p-1 border border-[#c8ccb5] rounded-lg">
+            <ClayTabsList className="bg-ground p-1 border border-hairline rounded-lg">
               <ClayTabsTrigger
                 value="automations"
                 className="flex items-center gap-2 text-xs md:text-sm font-medium px-4 py-2"
               >
-                <Sparkles className="w-4 h-4 text-[#4f5b3a]" />
+                <Sparkles className="w-4 h-4 text-brick-text" />
                 Automations & Schedule
               </ClayTabsTrigger>
               <ClayTabsTrigger
                 value="dispatch-logs"
                 className="flex items-center gap-2 text-xs md:text-sm font-medium px-4 py-2"
               >
-                <ListFilter className="w-4 h-4 text-[#4f5b3a]" />
+                <ListFilter className="w-4 h-4 text-brick-text" />
                 Dispatch Audit Ledger
               </ClayTabsTrigger>
               <ClayTabsTrigger
                 value="previewer"
                 className="flex items-center gap-2 text-xs md:text-sm font-medium px-4 py-2"
               >
-                <Eye className="w-4 h-4 text-[#4f5b3a]" />
+                <Eye className="w-4 h-4 text-brick-text" />
                 Template Previewer
               </ClayTabsTrigger>
             </ClayTabsList>
